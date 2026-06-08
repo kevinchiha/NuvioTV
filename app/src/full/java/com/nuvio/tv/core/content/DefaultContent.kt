@@ -17,21 +17,24 @@ package com.nuvio.tv.core.content
 object DefaultContent {
 
     /**
-     * The 5 family addons, in install order (Cinemeta first … Usenet Ultimate last).
-     * Kept here as documentation + for the seed hook to apply order explicitly.
+     * The 4 universal family addons, in install order (Cinemeta first … Netflix catalogs last).
+     * Identical for every member — no per-member credentials. Kept here as documentation + for the
+     * seed hook to apply order explicitly.
      *
      * 1. Cinemeta — metadata + catalogs
      * 2. OpenSubtitles v3 Pro (EN/FR, AI-translated, auto-adjust)
      * 3. OpenSubtitles v3
      * 4. Streaming-service catalogs (Netflix, etc.)
-     * 5. Usenet Ultimate — self-hosted Stremio addon (persovps) — provides the streams
+     *
+     * Stream sources (Torrentio + AIOStreams) are PER-MEMBER (each member's own debrid key/URL) and so
+     * are NOT baked here — they're added to each member's `member_addon` rows at onboarding
+     * (sort_order 4–5). See MEMBER-CONFIG-PLAN.md.
      */
     val DEFAULT_ADDON_URLS: List<String> = listOf(
         "https://v3-cinemeta.strem.io",
         "https://opensubtitlesv3-pro.dexter21767.com/eyJsYW5ncyI6WyJlbmdsaXNoIiwiZnJlbmNoIl0sInNvdXJjZSI6ImFsbCIsImFpVHJhbnNsYXRlZCI6dHJ1ZSwiYXV0b0FkanVzdG1lbnQiOnRydWV9/manifest.json",
         "https://opensubtitles-v3.strem.io",
-        "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwY3AsaGx1LHBtcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHNzdCx2aWwsbmx6LHplZSxjcGQsc3R6LGRwZSxtYmksc29ueWxpdixzZ28sdmlrLHNoZCxiYm8sYWN0LG1wOSxpdHYsaXFpLGNyYyxhbDQsc2hhLGJiYzo6OjE3ODA5MjA3NDkwOTc6MDowOkxC/manifest.json",
-        "https://stremio.kevbox.dev/stremio/aff1c9f5-75b6-49ab-bc7d-bdbe49a72e78/manifest.json"
+        "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwY3AsaGx1LHBtcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHNzdCx2aWwsbmx6LHplZSxjcGQsc3R6LGRwZSxtYmksc29ueWxpdixzZ28sdmlrLHNoZCxiYm8sYWN0LG1wOSxpdHYsaXFpLGNyYyxhbDQsc2hhLGJiYzo6OjE3ODA5MjA3NDkwOTc6MDowOkxC/manifest.json"
     )
 
     /** How a default plugin repo should be registered (the family can fill this in later). */
@@ -58,8 +61,8 @@ object DefaultContent {
     /**
      * Extra scraper plugin repos to seed on first launch.
      *
-     * INTENTIONALLY EMPTY for now: the Usenet Ultimate addon (addon #5) already provides
-     * streams, so no plugin repos are required. The seeding mechanism is fully wired
+     * INTENTIONALLY EMPTY for now: stream sources come from the per-member debrid addons (Torrentio +
+     * AIOStreams) added via `member_addon`, so no plugin repos are required. The seeding mechanism is fully wired
      * (see [com.nuvio.tv.core.plugin.PluginManager.seedDefaultPluginsIfFirstLaunch]) — the
      * family can add entries here later (e.g. `DefaultPluginRepo("cspr")` for a cutt.ly
      * short-code, or `DefaultPluginRepo("https://example.com/repo.json", EXTERNAL_DEX)`)

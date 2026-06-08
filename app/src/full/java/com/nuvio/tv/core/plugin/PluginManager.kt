@@ -467,8 +467,8 @@ class PluginManager @Inject constructor(
      *   - [DefaultContent.DefaultPluginRepoType.EXTERNAL_DEX] → [addRepositoryWithTypeHint]
      *     with an EXTERNAL_DEX hint (falls back to auto-detect if the hint is wrong).
      *
-     * NOTE: [DefaultContent.DEFAULT_PLUGIN_REPOS] is intentionally EMPTY right now (the Usenet
-     * Ultimate addon already provides streams). The mechanism is fully wired and compiles; it
+     * NOTE: [DefaultContent.DEFAULT_PLUGIN_REPOS] is intentionally EMPTY right now (stream sources come
+     * from the per-member debrid addons in member_addon, not plugins). The mechanism is fully wired and compiles; it
      * seeds nothing until the family adds repos to that list. The seeded flag is still set so
      * adding repos later only affects *fresh* installs — matching the addon-seed semantics.
      *

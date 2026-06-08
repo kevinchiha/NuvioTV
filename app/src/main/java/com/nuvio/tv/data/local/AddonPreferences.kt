@@ -240,7 +240,9 @@ class AddonPreferences @Inject constructor(
     }
 
     /**
-     * KevBox TV family default addons, in install order (Cinemeta first … Usenet Ultimate last).
+     * KevBox TV universal default addons, in install order (Cinemeta first … Netflix catalogs last).
+     * Per-member debrid (Torrentio + AIOStreams) is NOT baked here — it's added per member via
+     * member_addon rows (each member's own keys/URL). See MEMBER-DEBRID-ONBOARDING.md.
      *
      * Backed by a [LinkedHashSet] so iteration / `.toList()` preserves this order everywhere
      * the default set is consumed.
@@ -257,8 +259,6 @@ class AddonPreferences @Inject constructor(
         // 3. OpenSubtitles v3
         "https://opensubtitles-v3.strem.io",
         // 4. Streaming-service catalogs (Netflix, etc.)
-        "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwY3AsaGx1LHBtcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHNzdCx2aWwsbmx6LHplZSxjcGQsc3R6LGRwZSxtYmksc29ueWxpdixzZ28sdmlrLHNoZCxiYm8sYWN0LG1wOSxpdHYsaXFpLGNyYyxhbDQsc2hhLGJiYzo6OjE3ODA5MjA3NDkwOTc6MDowOkxC/manifest.json",
-        // 5. Usenet Ultimate — self-hosted Stremio addon (persovps) — provides the streams
-        "https://stremio.kevbox.dev/stremio/aff1c9f5-75b6-49ab-bc7d-bdbe49a72e78/manifest.json"
+        "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwY3AsaGx1LHBtcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHNzdCx2aWwsbmx6LHplZSxjcGQsc3R6LGRwZSxtYmksc29ueWxpdixzZ28sdmlrLHNoZCxiYm8sYWN0LG1wOSxpdHYsaXFpLGNyYyxhbDQsc2hhLGJiYzo6OjE3ODA5MjA3NDkwOTc6MDowOkxC/manifest.json"
     )
 }

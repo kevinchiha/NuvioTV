@@ -72,7 +72,7 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
         PluginRuntimeHooks.onApplicationCreate(this)
         androidTvChannelSyncService.start()
         // KevBox TV: persist the default addon install order on first launch so a fresh
-        // install is pre-configured (Cinemeta first … Usenet Ultimate last). No-ops after
+        // install is pre-configured (Cinemeta first … Netflix catalogs last). No-ops after
         // the first run. The parallel plugin-repo seed is triggered inside the full-flavor
         // PluginManager (it can't be called from this shared Application without breaking
         // the playstore stub) — see PluginManager.seedDefaultPluginsIfFirstLaunch().
