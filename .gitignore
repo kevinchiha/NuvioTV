@@ -39,6 +39,8 @@ benchmark
 db/
 backups/
 .supabase_db.env
+.env.local
+.env
 scripts/*
 !scripts/release_beta.py
 /supabase
