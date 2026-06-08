@@ -22,11 +22,25 @@ create policy "member reads own addons"
   on public.member_addon for select
   using (auth.uid() = user_id);
 
--- 3. Dashboard view: filter by email without a stale denormalized column.
-create or replace view public.member_addon_v as
+-- 2b. Least-privilege grants. Supabase grants ALL DML to anon/authenticated by default; RLS
+--     gates SELECT to own rows, but revoke the write/truncate grants so the table can't be
+--     mutated via the REST API regardless of any future policy mistake. Members are READ-ONLY;
+--     edits happen via the dashboard / service_role (which bypasses these grants).
+revoke insert, update, delete, truncate, references, trigger
+  on public.member_addon from anon, authenticated;
+
+-- 3. Dashboard view: filter by email without a stale denormalized column. DASHBOARD/service_role
+--    ONLY — the app reads member_addon directly, never this view. Views can't carry RLS, so without
+--    the two lines below this view would leak EVERY member's rows + emails to any signed-in member:
+--      * security_invoker=on → the view runs with the querying role's privileges (so it respects the
+--        base-table RLS and fails closed) instead of the view owner's, and
+--      * revoke from anon/authenticated → members can't read it via the REST API at all.
+create or replace view public.member_addon_v
+  with (security_invoker = on) as
   select m.*, u.email as auth_email
   from public.member_addon m
   join auth.users u on u.id = m.user_id;
+revoke all on public.member_addon_v from anon, authenticated;
 
 -- 4. Universal defaults — single source of truth (mirror of the Kotlin DEFAULT_ADDON_URLS).
 create or replace function public.default_member_addons()
