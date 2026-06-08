@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">KevBox TV hesabınızdan çıkış yapıldı. Lütfen tekrar giriş yapın.</string>
+    <string name="licenses_attributions_subtitle">KevBox TV tarafından kullanılan veri sağlayıcıları, hizmet kredileri ve Android oynatma lisansları.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV, film ve dizi meta verileri, görseller, fragmanlar, oyuncular, yapım detayları, koleksiyonlar ve öneriler için TMDB API\'sini kullanır. Bu ürün TMDB API\'sini kullanır ancak TMDB tarafından onaylanmamıştır veya sertifikalandırılmamıştır.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV, hesap doğrulama, izleme geçmişi, ilerleme senkronizasyonu, kütüphane verileri, puanlar, listeler ve yorumlar için Trakt\'a bağlanır. KevBox TV Trakt ile bağlantılı veya onaylanmış değildir.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV, puanlar ve harici skor sağlayıcı verileri için MDBList\'i kullanır. KevBox TV MDBList ile bağlantılı veya onaylanmış değildir.</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV, atlatma kontrolleri için topluluk tarafından sağlanan intro, özet, jenerik ve önizleme zaman damgaları için IntroDB API\'sini kullanır. KevBox TV IntroDB ile bağlantılı veya onaylanmış değildir.</string>
+    <string name="experience_mode_choose_title">KevBox TV deneyimini seç</string>
+    <string name="advanced_nuvio_focus_scroll">KevBox TV Odak Kaydırma</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Varsayılan Android TV odak davranışını KevBox TV\'nun özel kaydırma sistemi ile değiştirir</string>
+    <string name="playback_engine_exoplayer_desc">KevBox TV\'nun mevcut özellikleriyle en uyumlu seçenek.</string>
+    <string name="playback_engine_mvplayer_desc">KevBox TV ekran kontrolleriyle libmpv kullanır. Deneysel.</string>
+    <string name="debrid_device_auth_instructions">KevBox TV\'yu onaylamak için QR kodu taratın ve bu kodu girin.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Trakt scrobbling aktifken devam etme ve izlemeye devam etmenin Trakt mı yoksa KevBox TV Sync mi kullanacağını seçin.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">KevBox TV Kütüphanesi</string>
+    <string name="trakt_library_source_nuvio_selected">KevBox TV kütüphanesi seçildi</string>
+    <string name="trakt_watch_progress_nuvio_selected">İzleme ilerlemesi kaynağı KevBox TV Sync olarak ayarlandı</string>
+    <string name="trakt_disconnect_subtitle">Bu işlem Trakt hesabınızın KevBox TV ile bağlantısını kesecektir.</string>
+    <string name="profile_custom_avatar_web_panel_note">Özel avatar URL\'leri KevBox TV web panelinden yapılandırılabilir.</string>
+    <string name="profile_pin_overlay_forgot_hint">PIN mi unuttunuz? KevBox TV web sitesinden sıfırlayabilirsiniz.</string>
+    <string name="p2p_consent_body">Bu yayın eşler arası (P2P) teknolojisini kullanmaktadır. P2P\'yi etkinleştirerek şunları kabul etmiş olursunuz:\n\n\u2022 IP adresiniz ağdaki diğer kullanıcılara görünür hale gelecektir\n\u2022 Eriştiğiniz içerikten yalnızca siz sorumlusunuz\n\u2022 Bulunduğunuz yerde bu içeriği yasal olarak izleme hakkınız olduğunu onaylayıyorsunuz\n\u2022 KevBox TV hiçbir P2P içeriği barındırmaz, dağıtmaz veya kontrol etmez\n\u2022 KevBox TV, P2P yayını kullanımınızdan doğabilecek hukuki sonuçlardan sorumlu değildir\n\nBu özelliği tamamen kendi riskinizle kullanırsınız. P2P, istediğiniz zaman Ayarlar\'dan kapatılabilir.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">KevBox TV\'ya Hoş Geldiniz</string>
+    <string name="update_unknown_sources">KevBox TV\'nun indirdiği eklentileri yüklayabilmek adına `Bilinmeyen kaynaklar` veya `Dışarıdan yükleme` iznine ihtiyaç var.</string>
+    <string name="account_sign_in_description">Kütüphanenizi, izleme ilerlemenizi, eklenti ve uzantılarınızı cihazlar arasında eşleyin. Trakt bağlı değilken KevBox TV Sync kullanılır.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Satır/sekme adı olarak gösterilir. Boş bırakırsanız, KevBox TV kaynaktan otomatik olarak oluşturur.</string>
+    <string name="playback_player_internal_desc">KevBox TV\'nin dahili oynatıcısını kullan</string>
+</resources>

@@ -159,11 +159,15 @@ fun AccountScreen(
                         value = authState.email
                     )
                 }
-                item {
-                    LinkedDevicesSection(
-                        devices = uiState.linkedDevices,
-                        onUnlink = { viewModel.unlinkDevice(it) }
-                    )
+                // Linked devices are backed by a sync RPC that no longer exists; hide the
+                // section so it isn't a permanently-empty/broken panel.
+                if (SHOW_SYNC_CODE_FEATURES) {
+                    item {
+                        LinkedDevicesSection(
+                            devices = uiState.linkedDevices,
+                            onUnlink = { viewModel.unlinkDevice(it) }
+                        )
+                    }
                 }
                 if (SHOW_SYNC_CODE_FEATURES) {
                     item {

@@ -408,6 +408,20 @@ fun UpdatePromptDialog(
                                     )
                             )
                         }
+
+                        // Download speed + ETA (the only new UX). Mirrors kevbox UpdateDialog:
+                        // "x.x MB/s · Nm Ns left". Only shown once we have a known total + a
+                        // positive measured speed.
+                        val total = state.totalBytes
+                        if (state.bytesPerSec > 0 && total != null && total > 0) {
+                            val remaining = (total - state.downloadedBytes).coerceAtLeast(0)
+                            val etaSec = remaining / state.bytesPerSec
+                            Text(
+                                text = "${formatSpeed(state.bytesPerSec)} · ${formatEta(etaSec)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NuvioColors.TextSecondary.copy(alpha = 0.75f)
+                            )
+                        }
                     }
                 }
 
@@ -520,3 +534,11 @@ fun UpdatePromptDialog(
         }
     }
 }
+
+/** "%.1f MB/s" — mirrors kevbox UpdateDialog.formatSpeed (decimal megabytes). */
+private fun formatSpeed(bytesPerSec: Long): String =
+    "%.1f MB/s".format(bytesPerSec / 1_000_000.0)
+
+/** "Ns left" under a minute, else "Nm Ns left" — mirrors kevbox UpdateDialog.formatEta. */
+private fun formatEta(seconds: Long): String =
+    if (seconds < 60) "${seconds}s left" else "${seconds / 60}m ${seconds % 60}s left"

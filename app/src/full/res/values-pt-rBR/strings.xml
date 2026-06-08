@@ -1,0 +1,33 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Você foi desconectado do KevBox TV. Faça login novamente.</string>
+    <string name="licenses_attributions_subtitle">Provedores de dados, créditos de serviços e licenças de reprodução Android usadas pelo KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">O KevBox TV utiliza a API do TMDB para metadados de filmes e séries, artes, trailers, elenco, detalhes de produção, coleções e recomendações. Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB.</string>
+    <string name="licenses_attributions_trakt_body">O KevBox TV conecta-se ao Trakt para autenticação de contas, histórico de assistidos, sincronização de progresso, dados de biblioteca, avaliações, listas e comentários. O KevBox TV não é afiliado nem endossado pelo Trakt.</string>
+    <string name="licenses_attributions_mdblist_body">O KevBox TV utiliza o MDBList para avaliações e dados de provedores de pontuação externa. O KevBox TV não é afiliado nem endossado pelo MDBList.</string>
+    <string name="licenses_attributions_introdb_body">O KevBox TV utiliza a API do IntroDB para introduções, recaps, créditos e marcações de prévias fornecidas pela comunidade, usadas nos controles de pular. O KevBox TV não é afiliado nem endossado pelo IntroDB.</string>
+    <string name="experience_mode_choose_title">Escolha sua experiência KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll">Rolagem de foco KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Usa animação de foco personalizada do KevBox TV</string>
+    <string name="playback_engine_exoplayer_desc">Compatível com recursos atuais do KevBox TV</string>
+    <string name="playback_engine_mvplayer_desc">Usa libmpv com OSD do KevBox TV (Experimental)</string>
+    <string name="debrid_device_auth_instructions">Escaneie o QR Code e digite este código para aprovar o KevBox TV.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Escolha se o progresso deve usar o Trakt ou o KevBox TV Sync (o registro no Trakt continuará ativo).</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">KevBox TV</string>
+    <string name="trakt_library_source_nuvio_selected">Biblioteca KevBox TV selecionada</string>
+    <string name="trakt_watch_progress_nuvio_selected">Fonte de progresso definida para KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Isso removerá sua conta Trakt do KevBox TV.</string>
+    <string name="profile_custom_avatar_web_panel_note">URLs de avatar personalizados podem ser configurados pelo painel web do KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Esqueceu o PIN? Redefina-o pelo site do KevBox TV na sua conta.</string>
+    <string name="p2p_consent_body">Esta fonte usa tecnologia peer-to-peer (P2P). Ao habilitar o P2P, você reconhece e concorda que:\n\n\u2022 Seu endereço IP ficará visível para outros peers na rede\n\u2022 Você é o único responsável pelo conteúdo que acessa\n\u2022 Você confirma que possui o direito legal de transmitir este conteúdo em sua jurisdição\n\u2022 O KevBox TV não hospeda, distribui ou controla nenhum conteúdo P2P\n\u2022 O KevBox TV não se responsabiliza por quaisquer consequências legais decorrentes do uso de streaming P2P\n\nVocê usa este recurso inteiramente por sua conta e risco. O P2P pode ser desativado a qualquer momento nas Configurações.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Bem-vindo ao KevBox TV</string>
+    <string name="account_sign_in_description">Acesse sua conta para manter sua biblioteca, progresso e addons sempre sincronizados entre os dispositivos. O KevBox TV Sync gerencia sua biblioteca quando o Trakt não está conectado, e o progresso pode usar tanto o Trakt quanto o KevBox TV Sync.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Exibido como o nome da fileira/aba. Se estiver em branco, o KevBox TV criará um baseado na fonte.</string>
+    <string name="playback_player_internal_desc">Usar player interno do KevBox TV</string>
+</resources>

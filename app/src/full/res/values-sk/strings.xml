@@ -1,0 +1,33 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Boli ste odhlásení z KevBox TV. Prihláste sa znova.</string>
+    <string name="licenses_attributions_subtitle">Poskytovatelia dát, servisné kredity a Android licencie prehrávania používané KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV používa TMDB API pre metadáta filmov a TV, grafiku, trailery, obsadenie, produkčné detaily, kolekcie a odporúčania. Tento produkt používa TMDB API, ale nie je schválený ani certifikovaný TMDB.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV sa pripája k Trakt pre autentifikáciu účtu, históriu sledovania, synchronizáciu postupu, dáta knižnice, hodnotenia, zoznamy a komentáre. KevBox TV nie je pridružený k Trakt ani ním schválený.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV používa MDBList pre hodnotenia a dáta externých poskytovateľov skóre. KevBox TV nie je pridružený k MDBList ani ním schválený.</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV používa IntroDB API pre komunitou poskytované časové značky intra, rekapitulácie, kreditov a náhľadov používané ovládacími prvkami preskočenia. KevBox TV nie je pridružený k IntroDB ani ním schválený.</string>
+    <string name="experience_mode_choose_title">Vyberte svoju skúsenosť s KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll">KevBox TV rolovanie zamerania</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Použiť vlastnú globálnu animáciu rolovania zamerania a polohovanie KevBox TV.</string>
+    <string name="playback_engine_exoplayer_desc">Najlepšia kompatibilita s aktuálnymi funkciami KevBox TV.</string>
+    <string name="playback_engine_mvplayer_desc">Používa libmpv s ovládaním KevBox TV OSD. Experimentálne.</string>
+    <string name="debrid_device_auth_instructions">Naskenujte QR a zadajte tento kód na schválenie KevBox TV.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Vyberte, či má obnovenie a pokračovanie v sledovaní používať Trakt alebo KevBox TV Sync, kým Trakt scrobbling zostane aktívny.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">KevBox TV knižnica</string>
+    <string name="trakt_library_source_nuvio_selected">Vybraná KevBox TV knižnica</string>
+    <string name="trakt_watch_progress_nuvio_selected">Zdroj postupu sledovania nastavený na KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Týmto odpojíte svoj Trakt účet od KevBox TV.</string>
+    <string name="profile_custom_avatar_web_panel_note">Vlastné URL avatara je možné nakonfigurovať z webového panela KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Zabudli ste PIN? Resetujte ho zo svojho KevBox TV účtu na webovej stránke KevBox TV.</string>
+    <string name="p2p_consent_body">Tento stream používa peer-to-peer (P2P) technológiu. Povolením P2P beriete na vedomie a súhlasíte s tým, že:\n\n\u2022 Vaša IP adresa bude viditeľná pre ostatných účastníkov siete\n\u2022 Ste výhradne zodpovední za obsah, ku ktorému pristupujete\n\u2022 Potvrdzujete, že máte zákonné právo streamovať tento obsah vo vašej jurisdikcii\n\u2022 KevBox TV nehostuje, nedistribuuje ani nekontroluje žiadny P2P obsah\n\u2022 KevBox TV nenesie žiadnu zodpovednosť za právne dôsledky vyplývajúce z vášho používania P2P streamovania\n\nTúto funkciu používate výhradne na vlastné riziko. P2P je možné kedykoľvek zakázať v Nastaveniach.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Vitajte v KevBox TV</string>
+    <string name="account_sign_in_description">Prihláste sa, aby sa synchronizovala vaša knižnica, postup sledovania, doplnky a pluginy medzi zariadeniami. Synchronizácia knižnice používa KevBox TV Sync, keď Trakt nie je pripojený, a postup sledovania môže používať Trakt alebo KevBox TV Sync.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Zobrazí sa ako názov riadku/karty. Ak zostane prázdne, KevBox TV ho vytvorí zo zdroja.</string>
+    <string name="playback_player_internal_desc">Použiť vstavaný prehrávač KevBox TV</string>
+</resources>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override for Hungarian (main defines app_name here too). -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Kijelentkeztél a KevBox TV-ból. Kérlek, jelentkezz be újra.</string>
+    <string name="licenses_attributions_subtitle">A KevBox TV által használt adatszolgáltatók, szolgáltatási köszönetnyilvánítások és Android lejátszási licencek.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">A KevBox TV a TMDB API-t használja a filmek és tévéműsorok metaadataihoz, borítóképekhez, előzetesekhez, stáblistákhoz, gyártási adatokhoz, gyűjteményekhez és ajánlásokhoz. Ez a termék a TMDB API-t használja, de a TMDB nem támogatja és nem hagyta jóvá.</string>
+    <string name="licenses_attributions_trakt_body">A KevBox TV a Trakt-hoz csatlakozik a fiók hitelesítéséhez, a megtekintési előzményekhez, a folyamat szinkronizálásához, a könyvtári adatokhoz, az értékelésekhez, a listákhoz és a véleményekhez. A KevBox TV nem áll kapcsolatban a Trakt-tal, és az nem hagyta jóvá.</string>
+    <string name="licenses_attributions_mdblist_body">A KevBox TV az MDBList-et használja az értékelésekhez és a külső pontszám-szolgáltatói adatokhoz. A KevBox TV nem áll kapcsolatban az MDBList-tel, és az nem hagyta jóvá.</string>
+    <string name="licenses_attributions_introdb_body">A KevBox TV az IntroDB API-t használja a közösség által biztosított intro, összefoglaló, stáblista és előzetes időbélyegekhez, amelyeket az átugrási vezérlők használnak. A KevBox TV nem áll kapcsolatban az IntroDB-vel, és az nem hagyta jóvá.</string>
+    <string name="experience_mode_choose_title">Válaszd ki a KevBox TV élményt</string>
+    <string name="advanced_nuvio_focus_scroll">KevBox TV fókusz görgetés</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">A KevBox TV saját, globális fókusz görgetési animációjának és pozicionálásának használata.</string>
+    <string name="playback_engine_exoplayer_desc">Legjobb kompatibilitás a jelenlegi KevBox TV funkciókkal.</string>
+    <string name="playback_engine_mvplayer_desc">Libmpv-t használ a KevBox TV OSD vezérlőivel. Kísérleti funkció.</string>
+    <string name="debrid_device_auth_instructions">Olvasd be a QR-kódot, és írd be ezt a kódot a KevBox TV jóváhagyásához.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Válaszd ki, hogy a lejátszás folytatása a Traktot vagy a KevBox TV Sync-et használja-e, miközben a Trakt scrobbling aktív marad.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">KevBox TV Könyvtár</string>
+    <string name="trakt_library_source_nuvio_selected">KevBox TV könyvtár kiválasztva</string>
+    <string name="trakt_watch_progress_nuvio_selected">Megtekintési folyamat forrása: KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Ez megszünteti a kapcsolatot a Trakt fiókod és a KevBox TV között.</string>
+    <string name="profile_custom_avatar_web_panel_note">Az egyedi avatar URL-ek a KevBox TV webes felületén konfigurálhatók.</string>
+    <string name="profile_pin_overlay_forgot_hint">Elfelejtetted a PIN-t? Állítsd alaphelyzetbe a KevBox TV fiókodból a weboldalon.</string>
+    <string name="p2p_consent_body">Ez a stream peer-to-peer (P2P) technológiát használ. A P2P engedélyezésével tudomásul veszed és elfogadod, hogy:\n\n\u2022 Az IP címed látható lesz a hálózat más résztvevői számára\n\u2022 Kizárólag te vagy a felelős a megtekintett tartalomért\n\u2022 Megerősíted, hogy jogod van streamelni ezt a tartalmat a te joghatóságodban\n\u2022 A KevBox TV nem tárol, terjeszt és nem is felügyel semmilyen P2P tartalmat\n\u2022 A KevBox TV nem vállal felelősséget a P2P streamelésből eredő jogi következményekért\n\nEzt a funkciót kizárólag a saját felelősségedre használod. A P2P bármikor kikapcsolható a Beállításokban.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Üdvözöl a KevBox TV</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">A sor/fül neveként jelenik meg. Ha üres, a KevBox TV létrehoz egyet a forrásból.</string>
+    <string name="playback_player_internal_desc">A KevBox TV beépített lejátszójának használata</string>
+</resources>

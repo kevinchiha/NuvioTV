@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">நீங்கள் KevBox TV இல் இருந்து வெளியேற்றப்பட்டுள்ளீர்கள். மீண்டும் உள்நுழையவும்.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll">KevBox TV கவன உருட்டல்</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">KevBox TV இன் தனிப்பயன் கவன உருட்டல் அசைவூட்டலை பயன்படுத்து.</string>
+    <string name="playback_engine_exoplayer_desc">தற்போதைய KevBox TV அம்சங்களுடன் சிறந்த பொருத்தம்.</string>
+    <string name="playback_engine_mvplayer_desc">KevBox TV OSD கட்டுப்பாடுகளுடன் libmpv பயன்படுத்துகிறது. சோதனை நிலையில் உள்ளது.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV ஒத்திசைவு</string>
+    <string name="trakt_library_source_nuvio">KevBox TV நூலகம்</string>
+    <string name="trakt_library_source_nuvio_selected">KevBox TV நூலகம் தேர்ந்தெடுக்கப்பட்டது</string>
+    <string name="trakt_watch_progress_nuvio_selected">பார்வை முன்னேற்ற மூலம் KevBox TV ஒத்திசைவு ஆக அமைக்கப்பட்டது</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+</resources>

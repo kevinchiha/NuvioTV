@@ -37,28 +37,53 @@ below is structured to minimize merge conflicts (see "Upstream porting / fork ma
 | Flavor | `full` only. |
 | Fork upkeep | Stay **upstream-mergeable**: keep `namespace = com.nuvio.tv`, prefer flavor overrides + new files, and **disable** (don't delete) unused upstream code. See "Upstream porting / fork maintenance". |
 
+## ✅ Implementation status — 2026-06-08
+
+Implemented on branch `kevbox`. Compiles clean (`compileFullDebugKotlin` + `processFullDebugResources`
+green); the **arm64-v8a** debug APK builds and installs (the universal APK OOMs at the repo's
+`-Xmx4096m` and is intentionally not used — `release.sh` ships arm64-v8a). Verified by an adversarial
+multi-agent review pass; **6 real findings fixed** (large-download timeout, TV sign-in focus/IME,
+missing `values-hu`, 16-bit→8-bit art, unguarded addon-seed, stray QR route).
+
+| WS | Status | Notes |
+|---|---|---|
+| **WS1** Rebrand | ✅ done | `applicationId=tv.kevbox` (Kotlin `namespace=com.nuvio.tv` kept); brand strings via `full` flavor overrides + **full 31-locale sweep**; launcher/banner/splash/wordmark art (normalized to 8-bit); "Supporters & Contributors"/donation UI hidden. |
+| **WS2** Supabase repoint | ✅ done | Keys wired in `local.properties`; client unchanged; dead sync paths stay non-fatal. |
+| **WS3** Email/password login | ✅ done **+ one-tap** | Reusable `EmailPasswordForm` in all three surfaces (first-run gate, settings, account panel); `LastSignInDataStore` email prefill; **one-tap encrypted re-login** via Android-Keystore AES-GCM (`CredentialCrypto`); QR + sync UI hidden. |
+| **WS4** Bake addons/plugins | ✅ done | 5 addons seeded in order (`DefaultContent` + `NuvioApplication`, try/catch-guarded); plugin-seed mechanism wired with an empty list (Usenet Ultimate covers streams). Netflix catalog #4 kept per owner. |
+| **WS5** Self-hosted updater | ✅ done | Updater → `version.json` (versionCode compare) + SHA-256 verify + download speed/ETA + no-timeout large-download client; **`tv.kevbox.dev` live (TLS via certbot, `version.json`, `/download`)**; `release.sh` mirrors `kevbox-support` (arm64-v8a default, maintains the `/download` symlink). |
+| **WS6** Signing | ✅ done | `~/kevbox-keys/kevboxtv.jks`; release config reads `NUVIO_RELEASE_*`; same-key invariant documented. |
+| **WS7** Distribution | ⏳ infra ready | `/download` endpoint live (404 until first publish). Pending: run `./release.sh <ver>` to publish the first signed APK, then per-TV sideload via the Downloader app. |
+
+**Remaining (operational, owner-run):** first `./release.sh <ver> "<notes>"` to publish; per-TV one-time
+setup (enable "install unknown apps", sign in, connect Trakt). After that this doc is a historical
+design + fork-maintenance reference (see "Upstream porting / fork maintenance").
+
 ## What the user must provide / do (handoffs)
 
 - **New Supabase project** (you own it): `SUPABASE_URL` + key in `local.properties` ✅ added.
   ✅ **Publishable key verified server-side** (GoTrue `/auth/v1/settings` → 200; password-grant
-  reaches auth with `invalid_credentials`). Email/password provider **enabled** ✅. ⚠️ But
-  **email confirmation is currently ON** (`mailer_autoconfirm=false`) → either turn it **off**
-  (Auth → Providers → Email → "Confirm email") **or** create each member via **Auth → Users →
-  Add user** with auto-confirm, so they can sign in immediately (the app only ever signs **in**,
-  never sign-up). ⚠️ Free-tier projects **auto-pause after ~7 days idle** → whole family locked
+  reaches auth with `invalid_credentials`). Email/password provider **enabled** ✅.
+  ✅ **Email confirmation OFF** (`mailer_autoconfirm=true`) **and public signups disabled**
+  (`disable_signup=true`) — the ideal closed-app setup: create each member via **Auth → Users →
+  Add user** (auto-confirmed); the app only ever signs **in**. (No SMTP / email template setup
+  needed — confirmation emails are never sent.) ⚠️ Free-tier projects **auto-pause after ~7 days idle** → whole family locked
   out; use a keep-alive ping or paid tier; consider a longer refresh-token lifetime to cut
   logouts at the source. (Residual: confirm the first *in-app* sign-in works under supabase-kt
   `3.1.4` — server is fine; if it ever 401s client-side, swap to the legacy anon JWT.)
-- **API keys — REQUIRED, currently blank** (build defaults them empty → set in `local.properties`):
-  **`TRAKT_CLIENT_ID` + `TRAKT_CLIENT_SECRET`** (register an app at trakt.tv/oauth/applications —
-  **without these the entire watch-history pillar is dead**: `TraktAuthService.hasRequiredCredentials()`
-  returns false) and **`TMDB_API_KEY`** (posters/metadata/Discover). Decide whether any optional
-  keys (trailers, IMDb ratings, debrid client ids) matter for your setup.
-- ~~**Addon URLs** to bake in~~ — **provided** (5 addons, listed in Workstream 4).
-  Still needed: **Plugin repo URLs / `cutt.ly` codes** to bake in (full-flavor scrapers).
-- **Release keystore**: confirm whether you have a keystore you control, or we generate a
-  fresh `kevboxtv.jks`. The updater requires every APK (first install + all updates) to be
-  signed with the **same** key — losing it means you can't ship updates. Keep it backed up.
+- **API keys** (→ `local.properties`): **Trakt `CLIENT_ID`/`CLIENT_SECRET`** ✅ **done** (app
+  Approved + Scrobble; members authorize in-app via Device / `trakt.tv/activate`). **`TMDB_API_KEY`**
+  ✅ **done** (v3 key, live-verified). Optional: trailers, IMDb ratings, debrid client ids — only
+  if you use them.
+- ~~**Addon URLs** to bake in~~ — ✅ **provided** (5, in WS4), **including the stream source**:
+  **Usenet Ultimate** = addon #5 (your self-hosted `stremio.kevbox.dev`). So the baked-in addons
+  cover browsing **and** playback — the earlier "no stream source" gap is resolved. Nuvio
+  **plugin/scraper** repos are now *optional* extra sources (provide URLs/`cutt.ly` codes only if
+  you want them too).
+- ~~**Release keystore**~~ — ✅ **done**: `kevboxtv.jks` at `~/kevbox-keys/`, creds in
+  `~/kevbox-keys/release.env` + `local.properties`, SHA-256 `9A:E0:71:…:2D:BB:1D:6F`.
+  ⚠️ **Back up the `.jks` + password offline** — losing them = no more updates (see the
+  `kevbox-tv-signing` memory).
 - ~~**VPS DNS**: point `tv.kevbox.dev` at persovps~~ — ✅ **done**. (WS5 still runs
   `certbot --nginx -d tv.kevbox.dev` once the vhost exists.)
 
@@ -177,8 +202,9 @@ parallel seed for **plugins**.
   2. `https://opensubtitlesv3-pro.dexter21767.com/eyJsYW5ncyI6WyJlbmdsaXNoIiwiZnJlbmNoIl0sInNvdXJjZSI6ImFsbCIsImFpVHJhbnNsYXRlZCI6dHJ1ZSwiYXV0b0FkanVzdG1lbnQiOnRydWV9/manifest.json` — OpenSubtitles v3 Pro (EN/FR, AI-translated, auto-adjust)
   3. `https://opensubtitles-v3.strem.io` — OpenSubtitles v3
   4. `https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwbXAscGNwLGhsdSxjcnUsY3RzLG1nbCxjbHYsaGF5LGdvcCxqaHMsc3N0LHZpbCxubHosemVlLGNwZCxzdHosZHBlLG1iaSxzb255bGl2LHNnbyx2aWssYmJvLGl0dixtcDksYWN0LGNyYyxzaGQsYWw0LGJiYyxpcWksc2hhOjo6MTc4MDgxOTU2NTc1MDowOjA6TEI%3D/manifest.json` — streaming-service catalogs (Netflix, etc.)
-  5. `https://stremio.kevbox.dev/stremio/aff1c9f5-75b6-49ab-bc7d-bdbe49a72e78/manifest.json` — your own addon (hosted on persovps)
-- **Plugins** — `app/src/full/java/com/nuvio/tv/core/plugin/PluginManager.kt`. ⚠️ Plugins are
+  5. `https://stremio.kevbox.dev/stremio/aff1c9f5-75b6-49ab-bc7d-bdbe49a72e78/manifest.json` — **Usenet Ultimate**, your self-hosted Stremio addon (persovps) — **provides the streams** ⚠️ depends on your VPS staying up
+- **Plugins** *(optional now — Usenet Ultimate covers streams; add only for extra sources)* —
+  `app/src/full/java/com/nuvio/tv/core/plugin/PluginManager.kt`. ⚠️ Plugins are
   **not truly baked into the APK** — only the *repo URL* is. Seeding registers the repo and
   **downloads the scraper JS at runtime** (`downloadJsScrapers`), so a fresh install needs
   **network on first run** and ongoing repo-server availability (if a repo dies, new installs
@@ -253,11 +279,11 @@ The auto-updater **requires a stable signing key** you control (every APK signed
 same key; first install + updates).
 
 - `app/build.gradle.kts:157-164` already has a `release` signing config reading
-  `NUVIO_RELEASE_STORE_FILE`/`_KEY_ALIAS`/`_KEY_PASSWORD` (defaults `../nuviotv.jks`,
-  alias `nuviotv`, hardcoded fallback password `815787` — upstream's; override it).
-  **Action:** generate a **KevBox TV keystore** you own (e.g. `kevboxtv.jks`), set its path +
-  all four creds in `local.properties` (or a `~/kevbox-keys/release.env` like kevbox-support),
-  keep secure backups. Without these set, release builds try the missing `../nuviotv.jks` and **fail**.
+  `NUVIO_RELEASE_STORE_FILE`/`_KEY_ALIAS`/`_KEY_PASSWORD`. ✅ **Done:** `kevboxtv.jks` generated
+  (`~/kevbox-keys/kevboxtv.jks`, alias `kevboxtv`, valid to 2053); the four `NUVIO_RELEASE_*`
+  creds written to `local.properties` **and** `~/kevbox-keys/release.env`; SHA-256
+  `9A:E0:71:8C:CC:F9:F6:83:90:93:49:31:D3:FE:0E:52:F4:57:EF:B5:81:D5:AC:C1:14:16:F1:51:2D:BB:1D:6F`.
+  ⚠️ Back up the `.jks` + password offline (recorded in the `kevbox-tv-signing` memory).
 - ⚠️ **Same-key invariant:** every release the family installs must be signed with the *same*
   key — first install and all updates. A signature change (a build that fell back to debug
   signing via `CI_USE_DEBUG_SIGNING`, or a different machine's debug keystore) makes the update

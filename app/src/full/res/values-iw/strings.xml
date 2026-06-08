@@ -1,0 +1,11 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">יצאת מחשבון KevBox TV. אנא התחבר מחדש.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">בחר אם המשך וצפייה מתמשכת ישתמשו ב-Trakt או ב-KevBox TV Sync כאשר סקרובלינג Trakt פעיל.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">מקור התקדמות צפייה הוגדר ל-KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">פעולה זו תנתק את חשבון Trakt שלך מ-KevBox TV.</string>
+    <string name="account_sign_in_description">התחבר לסנכרון הספרייה, התקדמות הצפייה, התוספים והפלאגינים בין מכשירים. סנכרון הספרייה משתמש ב-KevBox TV Sync כאשר Trakt לא מחובר, והתקדמות הצפייה יכולה להשתמש ב-Trakt או ב-KevBox TV Sync.</string>
+    <string name="layout_selection_welcome">ברוך הבא ל-KevBox TV</string>
+</resources>

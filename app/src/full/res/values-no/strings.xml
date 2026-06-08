@@ -1,0 +1,12 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Du har blitt logget ut av KevBox TV. Logg inn igjen.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Velg om gjenopptagelse og fortsett å se skal bruke Trakt eller KevBox TV Sync mens Trakt-skrobletmeldinger forblir aktive.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Seeframgangskilden satt til KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Dette vil koble fra Trakt-kontoen din fra KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Glemt PIN? Tilbakestill det fra KevBox TV-kontoen din på KevBox TV-nettstedet.</string>
+    <string name="layout_selection_welcome">Velkommen til KevBox TV</string>
+    <string name="account_sign_in_description">Logg inn for å synkronisere biblioteket, seeframgang, tillegg og programtillegg på tvers av enheter. Biblioteksynk bruker KevBox TV Sync når Trakt ikke er tilkoblet, og seeframgang kan bruke enten Trakt eller KevBox TV Sync.</string>
+</resources>

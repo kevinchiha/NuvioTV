@@ -1,0 +1,6 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="trakt_disconnect_subtitle">Dit verbreekt de verbinding tussen je Trakt-account en KevBox TV.</string>
+    <string name="layout_selection_welcome">Welkom bij KevBox TV</string>
+</resources>

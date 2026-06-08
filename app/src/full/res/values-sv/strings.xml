@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Du har loggats ut från KevBox TV. Logga in igen.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Välj om återupptagning och fortsätt titta ska använda Trakt eller KevBox TV Sync medan Trakt-scrobbling förblir aktiv.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Tittarframstegskälla satt till KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Detta kopplar från ditt Trakt-konto från KevBox TV.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Välkommen till KevBox TV</string>
+    <string name="account_sign_in_description">Logga in för att synkronisera ditt bibliotek, tittarframsteg, tillägg och plugins mellan enheter. Bibliotekssynk använder KevBox TV Sync när Trakt inte är anslutet, och tittarframsteg kan använda antingen Trakt eller KevBox TV Sync.</string>
+    <string name="profile_pin_overlay_forgot_hint">Glömt PIN? Återställ den från ditt KevBox TV-konto på KevBox TVs webbplats.</string>
+    <string name="playback_engine_exoplayer_desc">Bästa kompatibilitet med nuvarande KevBox TV-funktioner.</string>
+    <string name="playback_engine_mvplayer_desc">Använder libmpv med KevBox TVs OSD-kontroller. Experimentellt.</string>
+    <string name="trakt_library_source_nuvio">KevBox TV-bibliotek</string>
+    <string name="trakt_library_source_nuvio_selected">KevBox TV-bibliotek valt</string>
+    <string name="p2p_consent_body">Denna ström använder peer-to-peer (P2P)-teknik. Genom att aktivera P2P bekräftar och godkänner du att:\n\n• Din IP-adress kommer att vara synlig för andra peers i nätverket\n• Du är ensam ansvarig för det innehåll du ser\n• Du bekräftar att du har laglig rätt att se detta innehåll i din jurisdiktion\n• KevBox TV är inte värd för, distribuerar eller kontrollerar något P2P-innehåll\n• KevBox TV bär inget ansvar för rättsliga konsekvenser som uppstår vid din användning av P2P-streaming\n\nDu använder denna funktion helt på egen risk. P2P kan inaktiveras när som helst i Inställningar.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+</resources>

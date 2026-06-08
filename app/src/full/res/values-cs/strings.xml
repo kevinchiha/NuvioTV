@@ -1,0 +1,30 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Byli jste odhlášeni z KevBox TV. Přihlaste se prosím znovu.</string>
+    <string name="licenses_attributions_subtitle">Poskytovatelé dat, servisní kredity a licence pro přehrávání Android používané KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV používá API TMDB pro metadata filmů a seriálů, artwork, trailery, obsazení, produkční detaily, kolekce a doporučení. Tento produkt používá API TMDB, ale není schválen ani certifikován TMDB.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV se připojuje k Trakt pro autentizaci účtu, historii sledování, synchronizaci postupu, data knihovny, hodnocení, seznamy a komentáře. KevBox TV není spojen ani schválen Trakt.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV používá MDBList pro hodnocení a data externích poskytovatelů skóre. KevBox TV není spojen ani schválen MDBList.</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV používá API IntroDB pro komunitně poskytované časové značky intra, rekapitulace, titulků a náhledů používané ovládacími prvky přeskočení. KevBox TV není spojen ani schválen IntroDB.</string>
+    <string name="advanced_nuvio_focus_scroll">KevBox TV Focus Scrolling</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Použít vlastní globální animaci a umístění posunu fokusu KevBox TV.</string>
+    <string name="playback_engine_exoplayer_desc">Nejlepší kompatibilita s aktuálními funkcemi KevBox TV.</string>
+    <string name="playback_engine_mvplayer_desc">Používá libmpv s OSD ovládacími prvky KevBox TV. Experimentální.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Vyberte, zda má pokračování a pokračovat ve sledování používat Trakt nebo KevBox TV Sync, zatímco scrobblování Trakt zůstává aktivní.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">KevBox TV knihovna</string>
+    <string name="trakt_library_source_nuvio_selected">Vybrána knihovna KevBox TV</string>
+    <string name="trakt_watch_progress_nuvio_selected">Zdroj postupu sledování nastaven na KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Toto odpojí váš účet Trakt od KevBox TV.</string>
+    <string name="profile_custom_avatar_web_panel_note">Vlastní URL avatarů lze konfigurovat z webového panelu KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Zapomněli jste PIN? Resetujte jej ze svého účtu KevBox TV na webu KevBox TV.</string>
+    <string name="p2p_consent_body">Tento stream používá technologii peer-to-peer (P2P). Povolením P2P berete na vědomí a souhlasíte, že:\n\n\u2022 Vaše IP adresa bude viditelná pro ostatní peer v síti\n\u2022 Jste výhradně odpovědní za obsah, ke kterému přistupujete\n\u2022 Potvrzujete, že máte zákonné právo streamovat tento obsah ve vaší jurisdikci\n\u2022 KevBox TV nehostuje, nedistribuuje ani nekontroluje žádný P2P obsah\n\u2022 KevBox TV nenese žádnou odpovědnost za jakékoli právní důsledky vyplývající z vašeho použití P2P streamování\n\nTuto funkci používáte výhradně na vlastní riziko. P2P lze kdykoli zakázat v Nastavení.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Vítejte v KevBox TV</string>
+    <string name="account_sign_in_description">Přihlaste se k synchronizaci knihovny, postupu sledování, doplňků a pluginů napříč zařízeními. Synchronizace knihovny používá KevBox TV Sync, když Trakt není připojen, a postup sledování může používat buď Trakt, nebo KevBox TV Sync.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Zobrazuje se jako název řádku/karty. Pokud je prázdné, KevBox TV jej vytvoří ze zdroje.</string>
+</resources>

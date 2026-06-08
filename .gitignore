@@ -1,5 +1,8 @@
 *.iml
 .gradle
+# KevBox: generated graphify graph + large brand source art (derived app assets are committed)
+/graphify-out/
+/public/
 /local.properties
 /local.dev.properties
 /.idea/caches

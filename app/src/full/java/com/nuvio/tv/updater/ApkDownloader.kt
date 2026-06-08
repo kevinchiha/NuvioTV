@@ -4,6 +4,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,7 +26,17 @@ class ApkDownloader @Inject constructor(
                 .url(url)
                 .build()
 
-            okHttpClient.newCall(request).execute().use { response ->
+            // KevBox: APKs are 80–150 MB. The shared client has a 30s read timeout (fine for API
+            // calls); relax read/write/call timeouts to unlimited for the large streamed download
+            // so a slow family TV link doesn't abort it. connectTimeout stays inherited (fail fast
+            // on a dead host).
+            val downloadClient = okHttpClient.newBuilder()
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .writeTimeout(0, TimeUnit.MILLISECONDS)
+                .callTimeout(0, TimeUnit.MILLISECONDS)
+                .build()
+
+            downloadClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     error("Download failed: HTTP ${response.code}")
                 }

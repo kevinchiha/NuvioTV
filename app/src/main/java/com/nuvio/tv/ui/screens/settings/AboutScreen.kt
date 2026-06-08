@@ -155,12 +155,14 @@ fun AboutSettingsContent(
                     }
                 )
 
-                SettingsActionRow(
-                    title = stringResource(R.string.about_supporters_contributors),
-                    subtitle = stringResource(R.string.about_supporters_contributors_subtitle),
-                    trailingIcon = Icons.Default.ChevronRight,
-                    onClick = onNavigateToSupportersContributors
-                )
+                // KevBox: upstream "Supporters & Contributors" (donations / Ko-fi / sponsors)
+                // hidden for the private family build. Screen + route left intact (hide, don't delete).
+                // SettingsActionRow(
+                //     title = stringResource(R.string.about_supporters_contributors),
+                //     subtitle = stringResource(R.string.about_supporters_contributors_subtitle),
+                //     trailingIcon = Icons.Default.ChevronRight,
+                //     onClick = onNavigateToSupportersContributors
+                // )
 
                 SettingsActionRow(
                     title = stringResource(R.string.about_licenses_attributions),

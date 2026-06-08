@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+
+    <!-- Auth notice -->
+    <string name="auth_notice_nuvio_logged_out">Odjavljeni ste iz KevBox TV. Molimo prijavite se ponovo.</string>
+
+    <!-- Onboarding / experience -->
+    <string name="layout_selection_welcome">Dobrodošli u KevBox TV</string>
+
+    <!-- Source / library label shown in UI -->
+    <string name="library_source_nuvio">KEVBOX</string>
+
+    <!-- Content descriptions (accessibility) -->
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+
+    <!-- Player descriptions -->
+    <string name="playback_engine_exoplayer_desc">Najbolja kompatibilnost sa trenutnim KevBox TV funkcijama.</string>
+    <string name="playback_engine_mvplayer_desc">Koristi libmpv sa KevBox TV OSD kontrolama. Eksperimentalno.</string>
+
+    <!-- P2P consent (app self-reference) -->
+    <string name="p2p_consent_body">Ovaj stream koristi peer-to-peer (P2P) tehnologiju. Omogućavanjem P2P-a, slažete se sa sljedećim:\n\n• Vaša IP adresa će biti vidljiva drugim učesnicima u mreži\n• Vi ste isključivo odgovorni za sadržaj kojem pristupate\n• Potvrđujete da imate zakonsko pravo streamati ovaj sadržaj u vašoj državi\n• KevBox TV ne hosta, ne distribuira i ne kontroliše bilo kakav P2P sadržaj\n• KevBox TV ne snosi odgovornost za bilo kakve pravne posljedice koje proizilaze iz vašeg korištenja P2P streaminga\n\nOvu funkciju koristite u potpunosti na vlastiti rizik. P2P možete isključiti bilo kada u Postavkama.</string>
+
+    <!-- Sync / library / account copy (brand name only) -->
+    <string name="trakt_watch_progress_dialog_subtitle">Odaberi da li nastavi i nastavi gledati treba da koriste Trakt ili KevBox TV Sync, dok Trakt scrobble ostaje aktivan.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Izvor napretka gledanja postavljen na KevBox TV Sync</string>
+    <string name="profile_pin_overlay_forgot_hint">Zaboravljen PIN? Resetuj ga sa svog KevBox TV računa na KevBox TV web stranici.</string>
+    <string name="account_sign_in_description">Prijavi se za sinhronizaciju biblioteke, napretka gledanja, addona i plugina na svim uređajima. Sinhronizacija biblioteke koristi KevBox TV Sync kada Trakt nije povezan, a napredak gledanja može koristiti i Trakt i KevBox TV Sync.</string>
+</resources>

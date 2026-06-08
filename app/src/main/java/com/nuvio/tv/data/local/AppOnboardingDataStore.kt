@@ -20,6 +20,7 @@ class AppOnboardingDataStore @Inject constructor(
 ) {
     private val dataStore = context.appOnboardingDataStore
     private val hasSeenAuthQrOnFirstLaunchKey = booleanPreferencesKey("has_seen_auth_qr_on_first_launch")
+    private val hasSeededDefaultPluginsKey = booleanPreferencesKey("has_seeded_default_plugins")
 
     val hasSeenAuthQrOnFirstLaunch: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[hasSeenAuthQrOnFirstLaunchKey] ?: false
@@ -28,6 +29,17 @@ class AppOnboardingDataStore @Inject constructor(
     suspend fun setHasSeenAuthQrOnFirstLaunch(value: Boolean) {
         dataStore.edit { prefs ->
             prefs[hasSeenAuthQrOnFirstLaunchKey] = value
+        }
+    }
+
+    /** True once the KevBox TV default plugin repos have been seeded (one-time, first launch). */
+    val hasSeededDefaultPlugins: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[hasSeededDefaultPluginsKey] ?: false
+    }
+
+    suspend fun setHasSeededDefaultPlugins(value: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[hasSeededDefaultPluginsKey] = value
         }
     }
 }

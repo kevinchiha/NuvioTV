@@ -1015,7 +1015,8 @@ fun NuvioNavHost(
                 showBuiltInHeader = !hideBuiltInHeaders,
                 onNavigateToTrakt = { navController.navigate(Screen.Trakt.route) },
                 onNavigateToAddons = { navController.navigate(Screen.AddonManager.route) },
-                onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
+                // KevBox: QR sign-in retired — route the (now dormant) account entry to email/password sign-in.
+                onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthSignIn.route) },
                 onNavigateToManageProfiles = { navController.navigate(Screen.ManageProfiles.route) },
                 onNavigateToSupportersContributors = {
                     navController.navigate(Screen.SupportersContributors.route)
@@ -1144,8 +1145,10 @@ fun NuvioNavHost(
         }
 
         composable(Screen.Account.route) {
-            AuthQrSignInScreen(
-                onBackPress = { navController.popBackStack() }
+            // KevBox: QR retired — the account route shows email/password sign-in.
+            AuthSignInScreen(
+                onBackPress = { navController.popBackStack() },
+                onSuccess = { navController.popBackStack() }
             )
         }
 

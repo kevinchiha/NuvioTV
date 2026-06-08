@@ -1,0 +1,6 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="trakt_disconnect_subtitle">यह आपके Trakt अकाउंट को KevBox TV से डिस्कनेक्ट कर देगा।</string>
+    <string name="layout_selection_welcome">KevBox TV में आपका स्वागत है</string>
+</resources>

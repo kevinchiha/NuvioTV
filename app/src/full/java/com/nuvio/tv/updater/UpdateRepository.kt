@@ -1,46 +1,68 @@
 package com.nuvio.tv.updater
 
 import com.nuvio.tv.BuildConfig
-import com.nuvio.tv.data.remote.api.GitHubReleaseApi
 import com.nuvio.tv.updater.model.AppUpdate
+import com.nuvio.tv.updater.model.UpdateManifest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Fetches the self-hosted update manifest from `${UPDATE_BASE_URL}/version.json` (persovps,
+ * kevbox-support model) and maps it into the dialog-facing [AppUpdate]. No GitHub Releases.
+ */
 @Singleton
 class UpdateRepository @Inject constructor(
-    private val gitHubReleaseApi: GitHubReleaseApi
+    private val okHttpClient: OkHttpClient
 ) {
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
 
     suspend fun getLatestUpdate(): Result<AppUpdate> {
         return runCatching {
-            val owner = BuildConfig.GITHUB_OWNER
-            val repo = BuildConfig.GITHUB_REPO
+            val url = BuildConfig.UPDATE_BASE_URL.trimEnd('/') + "/version.json"
 
-            val response = gitHubReleaseApi.getLatestRelease(owner = owner, repo = repo)
-            if (!response.isSuccessful) {
-                error("GitHub API error: ${response.code()}")
+            val request = Request.Builder()
+                .url(url)
+                .header("Cache-Control", "no-cache")
+                .build()
+
+            val raw = withContext(Dispatchers.IO) {
+                okHttpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        error("Update manifest error: HTTP ${response.code}")
+                    }
+                    response.body?.string() ?: error("Empty update manifest response")
+                }
             }
 
-            val dto = response.body() ?: error("Empty GitHub release response")
-            if (dto.draft || dto.prerelease) {
-                error("Latest release is draft/prerelease")
-            }
+            val manifest = json.decodeFromString(UpdateManifest.serializer(), raw)
 
-            val tag = dto.tagName?.takeIf { it.isNotBlank() }
-                ?: dto.name?.takeIf { it.isNotBlank() }
-                ?: error("Release has no tag/name")
+            if (manifest.url.isBlank()) error("Update manifest has no APK url")
+            if (manifest.sha256.isBlank()) error("Update manifest has no sha256")
 
-            val asset = AbiSelector.chooseBestApkAsset(dto.assets)
-                ?: error("No APK asset found in release")
+            val assetName = manifest.url.substringAfterLast('/').takeIf { it.isNotBlank() }
+                ?: "kevbox-tv-${manifest.versionName}.apk"
 
+            // Map manifest -> AppUpdate: versionName drives the dialog's version tag/title and
+            // notes drives the dialog's markdown release-notes section (kept non-blank).
             AppUpdate(
-                tag = tag,
-                title = dto.name?.takeIf { it.isNotBlank() } ?: tag,
-                notes = dto.body.orEmpty(),
-                releaseUrl = dto.htmlUrl,
-                assetName = asset.name,
-                assetUrl = asset.browserDownloadUrl,
-                assetSizeBytes = asset.size
+                versionCode = manifest.versionCode,
+                tag = manifest.versionName,
+                title = manifest.versionName,
+                notes = manifest.notes,
+                sha256 = manifest.sha256,
+                releaseUrl = null,
+                assetName = assetName,
+                assetUrl = manifest.url,
+                assetSizeBytes = null
             )
         }
     }

@@ -1,0 +1,6 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="trakt_disconnect_subtitle">Aceasta va deconecta contul tău Trakt de KevBox TV.</string>
+    <string name="layout_selection_welcome">Bine ai venit la KevBox TV</string>
+</resources>

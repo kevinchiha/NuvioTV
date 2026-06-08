@@ -1,0 +1,12 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Pasirinkite, ar tęsimui ir „Tęsti žiūrėjimą“ naudoti „Trakt“, ar „KevBox TV Sync“. „Trakt“ peržiūrų registravimas (scrobbling) vis tiek išliks aktyvus.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Žiūrėjimo pažangos šaltinis nustatytas į „KevBox TV Sync“</string>
+    <string name="trakt_disconnect_subtitle">Tai atsies jūsų „Trakt“ paskyrą nuo „KevBox TV“.</string>
+    <string name="account_sync_description">Jūsų paskyra sinchronizuojama per „KevBox TV Sync“.</string>
+    <string name="account_signin_qr_subtitle">„KevBox TV“ naudoja „Supabase“ sinchronizavimui</string>
+    <string name="layout_selection_welcome">Sveiki atvykę į KevBox TV</string>
+    <string name="account_sign_in_description">Prisijunkite, kad sinchronizuotumėte biblioteką, pažangą ir priedus tarp įrenginių. Biblioteka sinchronizuojama per „KevBox TV Sync“, kai „Trakt“ neprijungta.</string>
+</resources>

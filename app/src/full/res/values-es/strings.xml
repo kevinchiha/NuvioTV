@@ -1,0 +1,8 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Has sido desconectado de KevBox TV. Por favor, inicia sesión de nuevo.</string>
+    <string name="trakt_disconnect_subtitle">Esto desconectará tu cuenta de Trakt de KevBox TV.</string>
+    <string name="layout_selection_welcome">Bienvenido a KevBox TV</string>
+    <string name="profile_pin_overlay_forgot_hint">¿Olvidaste el PIN? Restablécelo desde tu cuenta de KevBox TV en sitio web de KevBox TV.</string>
+</resources>

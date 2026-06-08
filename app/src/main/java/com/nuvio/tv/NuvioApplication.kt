@@ -20,7 +20,12 @@ import okio.Path.Companion.toOkioPath
 import com.nuvio.tv.core.runtime.PluginRuntimeHooks
 import com.nuvio.tv.core.sync.StartupSyncService
 import com.nuvio.tv.core.sync.androidtv.AndroidTvChannelSyncService
+import com.nuvio.tv.data.local.AddonPreferences
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -33,6 +38,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     @Inject lateinit var startupSyncService: StartupSyncService
     @Inject lateinit var androidTvChannelSyncService: AndroidTvChannelSyncService
+    @Inject lateinit var addonPreferences: AddonPreferences
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
         /**
@@ -63,6 +71,18 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         PluginRuntimeHooks.onApplicationCreate(this)
         androidTvChannelSyncService.start()
+        // KevBox TV: persist the default addon install order on first launch so a fresh
+        // install is pre-configured (Cinemeta first … Usenet Ultimate last). No-ops after
+        // the first run. The parallel plugin-repo seed is triggered inside the full-flavor
+        // PluginManager (it can't be called from this shared Application without breaking
+        // the playstore stub) — see PluginManager.seedDefaultPluginsIfFirstLaunch().
+        appScope.launch {
+            try {
+                addonPreferences.seedDefaultAddonsOrderIfFirstLaunch()
+            } catch (t: Throwable) {
+                android.util.Log.w("NuvioApplication", "Default addon seed failed", t)
+            }
+        }
         // Load locale synchronously so it's available before Activity.attachBaseContext.
         // SharedPreferences reads are fast (cached in memory after first access).
         val tag = getSharedPreferences("app_locale", Context.MODE_PRIVATE)

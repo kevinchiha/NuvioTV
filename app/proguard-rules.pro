@@ -88,6 +88,19 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+# ── Self-hosted updater (full flavor) ─────────────────────────────────────────
+# The update manifest (UpdateManifest) is @Serializable and parsed at runtime from
+# version.json. In a minified RELEASE build R8 would otherwise strip/rename the
+# model's fields, $Companion, and generated $$serializer — blanking the dialog's
+# version/notes. Keep the whole updater.model package + its serializer so RELEASE
+# still parses version.json (debug is unminified, so this only matters for release).
+-keep class com.nuvio.tv.updater.model.** { *; }
+-keepclassmembers class com.nuvio.tv.updater.model.** {
+    *** Companion;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,allowobfuscation,allowshrinking class com.nuvio.tv.updater.model.**$$serializer { *; }
+
 # ── External extension compatibility stubs (loaded via DexClassLoader) ────────
 -keep class com.lagradost.cloudstream3.** { *; }
 -keepclassmembers class com.lagradost.cloudstream3.** { *; }

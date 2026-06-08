@@ -4,8 +4,8 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -21,20 +21,22 @@ class UpdatePreferences @Inject constructor(
 ) {
     private val dataStore = context.updateDataStore
 
-    private val ignoredTagKey = stringPreferencesKey("ignored_release_tag")
+    // Now keyed off the manifest versionCode (was a string release tag) to match the
+    // versionCode-based "is newer?" comparison.
+    private val ignoredVersionCodeKey = intPreferencesKey("ignored_version_code")
     private val lastCheckAtKey = longPreferencesKey("last_check_at_ms")
 
-    val ignoredTag: Flow<String?> = dataStore.data.map { prefs ->
-        prefs[ignoredTagKey]
+    val ignoredVersionCode: Flow<Int?> = dataStore.data.map { prefs ->
+        prefs[ignoredVersionCodeKey]
     }
 
     val lastCheckAtMs: Flow<Long> = dataStore.data.map { prefs ->
         prefs[lastCheckAtKey] ?: 0L
     }
 
-    suspend fun setIgnoredTag(tag: String?) {
+    suspend fun setIgnoredVersionCode(versionCode: Int?) {
         dataStore.edit { prefs ->
-            if (tag == null) prefs.remove(ignoredTagKey) else prefs[ignoredTagKey] = tag
+            if (versionCode == null) prefs.remove(ignoredVersionCodeKey) else prefs[ignoredVersionCodeKey] = versionCode
         }
     }
 

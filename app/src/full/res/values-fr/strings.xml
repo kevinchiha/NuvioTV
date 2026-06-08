@@ -1,0 +1,29 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Tu as été déconnecté de KevBox TV. Reconnecte-toi.</string>
+    <string name="advanced_nuvio_focus_scroll">Défilement de la sélection KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Utiliser l’animation et le positionnement globaux personnalisés du défilement de sélection de KevBox TV.</string>
+    <string name="playback_engine_exoplayer_desc">Meilleure compatibilité avec les fonctionnalités actuelles de KevBox TV.</string>
+    <string name="playback_engine_mvplayer_desc">Utilise libmpv avec les contrôles OSD de KevBox TV. Expérimental.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Choisir si la reprise et Continuer à regarder utilisent Trakt ou KevBox TV Sync, tout en maintenant le scrobbling Trakt actif.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">Bibliothèque KevBox TV</string>
+    <string name="trakt_library_source_nuvio_selected">Bibliothèque KevBox TV sélectionnée</string>
+    <string name="trakt_watch_progress_nuvio_selected">Source de progression définie sur KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Cela déconnectera ton compte Trakt de KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Code PIN oublié ? Réinitialise-le depuis ton compte KevBox TV sur le site web.</string>
+    <string name="p2p_consent_body">Ce flux utilise la technologie pair-à-pair (P2P). En activant le P2P, tu reconnais et acceptes que :\n\n\u2022 Ton adresse IP sera visible par les autres pairs du réseau\n\u2022 Tu es seul responsable du contenu auquel tu accèdes\n\u2022 Tu confirmes avoir le droit légal de visionner ce contenu dans ta juridiction\n\u2022 KevBox TV n’héberge, ne distribue ni ne contrôle aucun contenu P2P\n\u2022 KevBox TV ne peut être tenu responsable des conséquences légales liées à ton utilisation du streaming P2P\n\nTu utilises cette fonctionnalité entièrement à tes propres risques. Le P2P peut être désactivé à tout moment dans les paramètres.</string>
+    <string name="library_source_nuvio">KevBox TV</string>
+    <string name="layout_selection_welcome">Bienvenue sur KevBox TV</string>
+    <string name="account_sign_in_description">Connecte-toi pour synchroniser ta bibliothèque, ta progression, tes addons et plugins entre tes appareils. La synchronisation de la bibliothèque utilise KevBox TV Sync quand Trakt n’est pas connecté, et la progression peut utiliser Trakt ou KevBox TV Sync.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Affiché comme nom de rangée/onglet. Si vide, KevBox TV en génère un à partir de la source.</string>
+    <string name="experience_mode_choose_title">Choisis ton expérience KevBox TV</string>
+    <string name="profile_custom_avatar_web_panel_note">Les URL d’avatar personnalisé peuvent être configurées depuis le panneau web KevBox TV.</string>
+    <string name="playback_player_internal_desc">Utiliser le lecteur intégré de KevBox TV</string>
+    <string name="licenses_attributions_subtitle">Fournisseurs de données, crédits de services et licences de lecture Android utilisés par KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="debrid_device_auth_instructions">Scanne le code QR et saisis ce code pour autoriser KevBox TV.</string>
+</resources>

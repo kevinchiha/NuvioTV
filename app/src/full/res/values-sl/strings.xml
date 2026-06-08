@@ -1,0 +1,31 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Odjavljeni ste bili iz storitve KevBox TV. Prosimo, prijavite se znova.</string>
+    <string name="licenses_attributions_subtitle">Ponudniki podatkov, zasluge za storitve in licence za predvajanje v sistemu Android, ki jih uporablja KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV uporablja API TMDB za metapodatke o filmih in TV serijah, naslovnice, napovednike, igralsko zasedbo, podrobnosti o produkciji, zbirke in priporočila. Ta izdelek uporablja API TMDB, vendar ni odobren ali certificiran s strani TMDB.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV se poveže s Traktom za preverjanje pristnosti računa, zgodovino ogledov, sinhronizacijo napredka, podatke knjižnice, ocene, sezname in komentarje. KevBox TV ni povezan s Traktom ali odobren z njegove strani.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV uporablja MDBList za ocene in podatke zunanjih ponudnikov ocen. KevBox TV ni povezan z MDBList ali odobren z njegove strani.</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV uporablja API IntroDB za časovne žige uvodov, povzetkov, odjavnih špic in predogledov, ki jih prispeva skupnost, uporabljajo pa se za gumbe za preskakovanje. KevBox TV ni povezan z IntroDB ali odobren z njegove strani.</string>
+    <string name="experience_mode_choose_title">Izberite svojo izkušnjo KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll">Drsenje s poudarkom KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Uporabi globalno animacijo drsenja in pozicioniranje KevBox TV.</string>
+    <string name="playback_engine_exoplayer_desc">Najboljša združljivost s trenutnimi funkcijami KevBox TV.</string>
+    <string name="playback_engine_mvplayer_desc">Uporablja libmpv s kontrolniki KevBox TV OSD. Eksperimentalno.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Izberite, ali naj nadaljevanje predvajanja in nadaljnje gledanje uporablja Trakt ali KevBox TV Sync, medtem ko beleženje na Trakt (scrobbling) ostane aktivno.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">Knjižnica KevBox TV</string>
+    <string name="trakt_library_source_nuvio_selected">Izbrana je knjižnica KevBox TV</string>
+    <string name="trakt_watch_progress_nuvio_selected">Vir napredka gledanja je nastavljen na KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">To bo prekinilo povezavo vašega Trakt računa z KevBox TV.</string>
+    <string name="profile_custom_avatar_web_panel_note">Naslove URL za avatarje po meri lahko konfigurirate v spletni nadzorni plošči KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Ste pozabili kodo PIN? Ponastavite jo v svojem računu KevBox TV na spletni strani KevBox TV.</string>
+    <string name="p2p_consent_body">To pretakanje uporablja tehnologijo peer-to-peer (P2P). Z omogočanjem P2P potrjujete in se strinjate z naslednjim:\n\n\u2022 Vaš IP naslov bo viden drugim uporabnikom v omrežju\n\u2022 Sami ste izključno odgovorni za vsebino, do katere dostopate\n\u2022 Potrjujete, da imate zakonsko pravico do pretakanja te vsebine v vaši državi/jurisdikciji\n\u2022 KevBox TV ne gosti, distribuira ali nadzoruje nobene P2P vsebine\n\u2022 KevBox TV ne prevzema nobene odgovornosti za morebitne pravne posledice, ki bi izhajale iz vaše uporabe P2P pretakanja\n\nTo funkcijo uporabljate izključno na lastno odgovornost. P2P lahko kadar koli onemogočite v nastavitvah.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Dobrodošli v KevBox TV</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Prikazano kot ime vrstice/zavihka. Če je prazno, ga KevBox TV ustvari iz vira.</string>
+    <string name="playback_player_internal_desc">Uporabi vgrajeni predvajalnik KevBox TV</string>
+</resources>

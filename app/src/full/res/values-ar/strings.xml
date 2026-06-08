@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+
+    <!-- Auth notice -->
+    <string name="auth_notice_nuvio_logged_out">تم تسجيل خروجك من KevBox TV. يرجى تسجيل الدخول مرة أخرى.</string>
+
+    <!-- Onboarding / experience -->
+    <string name="experience_mode_choose_title">إختر مستوى إعدادات KevBox TV</string>
+    <string name="layout_selection_welcome">مرحباً بك في KevBox TV</string>
+
+    <!-- Source / library label shown in UI -->
+    <string name="library_source_nuvio">KEVBOX</string>
+
+    <!-- Content descriptions (accessibility) -->
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+
+    <!-- Player descriptions -->
+    <string name="playback_player_internal_desc">استخدام مشغل KevBox TV المدمج</string>
+    <string name="playback_engine_exoplayer_desc">أفضل توافق مع ميزات KevBox TV الحالية.</string>
+    <string name="playback_engine_mvplayer_desc">يستخدم libmpv مع عناصر تحكم KevBox TV (OSD). تجريبي.</string>
+
+    <!-- Advanced settings -->
+    <string name="advanced_nuvio_focus_scroll">تصفح التركيز الخاص بـ KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">استخدام نظام KevBox TV المخصص للرسوم المتحركة وتموضع التركيز في كافة واجهات التطبيق.</string>
+
+    <!-- Licenses & attributions (app self-reference) -->
+    <string name="licenses_attributions_subtitle">Data providers, service credits, and Android playback licenses used by KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV uses the TMDB API for movie and TV metadata, artwork, trailers, cast, production details, collections, and recommendations. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV connects to Trakt for account authentication, watched history, progress sync, library data, ratings, lists, and comments. KevBox TV is not affiliated with or endorsed by Trakt.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV uses MDBList for ratings and external score provider data. KevBox TV is not affiliated with or endorsed by MDBList.</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV uses the IntroDB API for community-provided intro, recap, credits, and preview timestamps used by skip controls. KevBox TV is not affiliated with or endorsed by IntroDB.</string>
+
+    <!-- P2P consent (app self-reference) -->
+    <string name="p2p_consent_body">يستخدم هذا البث تقنية الند للند (P2P). بتفعيل P2P، أنت تقر وتوافق على الآتي:\n\n\u2022 سيكون عنوان IP الخاص بك مرئياً للأقران الآخرين في الشبكة\n\u2022 أنت وحدك المسؤول عن المحتوى الذي تصل إليه\n\u2022 أنت تؤكد أن لديك الحق القانوني لبث هذا المحتوى في ولايتك القضائية\n\u2022 لا تستضيف KevBox TV أو توزع أو تتحكم في أي محتوى P2P\n\u2022 لا تتحمل KevBox TV أي مسؤولية عن أي عواقب قانونية تنشأ عن استخدامك لبث P2P\n\nأنت تستخدم هذه الميزة على مسؤوليتك الخاصة بالكامل. يمكن تعطيل P2P في أي وقت من الإعدادات.</string>
+
+    <!-- Sync / library / account copy (brand name only) -->
+    <string name="trakt_watch_progress_dialog_subtitle">إختر ما إذا كان الاستئناف ومتابعة المشاهدة سيستخدم Trakt أم مزامنة KevBox TV، بينما تظل سجلات Trakt مفعلة.</string>
+    <string name="trakt_watch_progress_source_nuvio">مزامنة KevBox TV</string>
+    <string name="trakt_library_source_nuvio">مكتبة KevBox TV</string>
+    <string name="trakt_library_source_nuvio_selected">تم اختيار مكتبة KevBox TV</string>
+    <string name="trakt_watch_progress_nuvio_selected">تم تعيين مصدر مستوى المشاهدة إلى مزامنة KevBox TV</string>
+    <string name="trakt_disconnect_subtitle">سيؤدي هذا لقطع اتصال حساب Trakt عن KevBox TV.</string>
+    <string name="profile_custom_avatar_web_panel_note">يمكنك ضبط وتغيير روابط الصور الرمزية المخصصة عبر لوحة ويب KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">نسيت رمز PIN؟ أعد تعيينه من حساب KevBox TV الخاص بك على موقع KevBox TV.</string>
+    <string name="account_sign_in_description">سجل دخولك لمزامنة مكتبتك، وتقدم المشاهدة، والإضافات، والملحقات عبر أجهزتك. تستخدم مزامنة المكتبة KevBox TV Sync عندما يكون Trakt غير متصل، ويمكن لمستوى المشاهدة استخدام Trakt أو مزامنة KevBox TV.</string>
+</resources>

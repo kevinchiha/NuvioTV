@@ -221,8 +221,44 @@ class AddonPreferences @Inject constructor(
         }
     }
 
-    private fun getDefaultAddons(): Set<String> = setOf(
+    /**
+     * Persist the default addon install order on first launch.
+     *
+     * [getDefaultAddons] already returns an order-preserving [LinkedHashSet], so the lazy
+     * read paths (`installedAddonUrls`, `getCurrentList`) surface addons in the right order.
+     * This method makes that order *durable* by writing it through [setAddonOrder] the first
+     * time the app runs (when no ordered/legacy list exists yet), so the first-launch install
+     * order matches [getDefaultAddons] exactly. Safe to call repeatedly: it no-ops once an
+     * ordered list is stored.
+     */
+    suspend fun seedDefaultAddonsOrderIfFirstLaunch() {
+        val ds = store()
+        val prefs = ds.data.first()
+        if (prefs[orderedUrlsKey] == null && prefs[legacyUrlsKey] == null) {
+            setAddonOrder(getDefaultAddons().toList())
+        }
+    }
+
+    /**
+     * KevBox TV family default addons, in install order (Cinemeta first … Usenet Ultimate last).
+     *
+     * Backed by a [LinkedHashSet] so iteration / `.toList()` preserves this order everywhere
+     * the default set is consumed.
+     *
+     * ⚠️ Mirrored in `DefaultContent.DEFAULT_ADDON_URLS` (full flavor). That file is the
+     * family-facing source of truth, but it lives in `app/src/full` and cannot be referenced
+     * from here (`app/src/main`), so the list is duplicated. Keep BOTH in sync.
+     */
+    private fun getDefaultAddons(): Set<String> = linkedSetOf(
+        // 1. Cinemeta — metadata + catalogs
         "https://v3-cinemeta.strem.io",
-        "https://opensubtitles-v3.strem.io"
+        // 2. OpenSubtitles v3 Pro (EN/FR, AI-translated, auto-adjust)
+        "https://opensubtitlesv3-pro.dexter21767.com/eyJsYW5ncyI6WyJlbmdsaXNoIiwiZnJlbmNoIl0sInNvdXJjZSI6ImFsbCIsImFpVHJhbnNsYXRlZCI6dHJ1ZSwiYXV0b0FkanVzdG1lbnQiOnRydWV9/manifest.json",
+        // 3. OpenSubtitles v3
+        "https://opensubtitles-v3.strem.io",
+        // 4. Streaming-service catalogs (Netflix, etc.)
+        "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwY3AsaGx1LHBtcCxuZmssY3RzLG1nbCxjcnUsaGF5LGNsdixnb3AsamhzLHNzdCx2aWwsbmx6LHplZSxjcGQsc3R6LGRwZSxtYmksc29ueWxpdixzZ28sdmlrLHNoZCxiYm8sYWN0LG1wOSxpdHYsaXFpLGNyYyxhbDQsc2hhLGJiYzo6OjE3ODA5MjA3NDkwOTc6MDowOkxC/manifest.json",
+        // 5. Usenet Ultimate — self-hosted Stremio addon (persovps) — provides the streams
+        "https://stremio.kevbox.dev/stremio/aff1c9f5-75b6-49ab-bc7d-bdbe49a72e78/manifest.json"
     )
 }

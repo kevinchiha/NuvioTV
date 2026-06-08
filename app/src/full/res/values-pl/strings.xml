@@ -1,0 +1,32 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="trakt_disconnect_subtitle">Spowoduje to odłączenie konta Trakt od KevBox TV.</string>
+    <string name="layout_selection_welcome">Witaj w KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Zostałeś wylogowany z KevBox TV. Zaloguj się ponownie.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Wybierz, czy wznawianie i kontynuowanie oglądania ma używać Trakt czy KevBox TV Sync, gdy scrobbling Trakt jest aktywny.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Źródło postępu oglądania ustawione na KevBox TV Sync</string>
+    <string name="profile_pin_overlay_forgot_hint">Zapomniałeś PIN? Zresetuj go ze swojego konta KevBox TV na stronie KevBox TV.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="p2p_consent_body">Ten stream korzysta z technologii peer-to-peer (P2P). Włączając P2P, potwierdzasz i zgadzasz się, że:\n\n\u2022 Twój adres IP będzie widoczny dla innych uczestników sieci\n\u2022 Ponosisz wyłączną odpowiedzialność za treści, do których uzyskujesz dostęp\n\u2022 Potwierdzasz, że masz prawo do streamowania tych treści w swojej jurysdykcji\n\u2022 KevBox TV nie hostuje, nie dystrybuuje ani nie kontroluje żadnych treści P2P\n\u2022 KevBox TV nie ponosi odpowiedzialności za jakiekolwiek konsekwencje prawne wynikające z korzystania ze streamingu P2P\n\nKorzystasz z tej funkcji wyłącznie na własne ryzyko. P2P można wyłączyć w dowolnym momencie w Ustawieniach.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="playback_engine_exoplayer_desc">Najlepsza kompatybilność z funkcjami KevBox TV.</string>
+    <string name="playback_engine_mvplayer_desc">Używa libmpv z kontrolkami KevBox TV OSD. Eksperymentalny.</string>
+    <string name="advanced_nuvio_focus_scroll">Przewijanie fokusa KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Używaj niestandardowej globalnej animacji przewijania i pozycjonowania fokusa KevBox TV.</string>
+    <string name="trakt_library_source_nuvio">Biblioteka KevBox TV</string>
+    <string name="trakt_library_source_nuvio_selected">Wybrano bibliotekę KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Wyświetlane jako nazwa wiersza/zakładki. Jeśli puste, KevBox TV utworzy nazwę ze źródła.</string>
+    <string name="profile_custom_avatar_web_panel_note">Niestandardowe adresy URL awatarów można skonfigurować z panelu webowego KevBox TV.</string>
+    <string name="experience_mode_choose_title">Wybierz swoje doświadczenie KevBox TV</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV korzysta z API IntroDB do znaczników czasu intro, podsumowań, napisów końcowych i podglądów dostarczanych przez społeczność. KevBox TV nie jest powiązane z IntroDB.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV korzysta z MDBList do ocen i danych zewnętrznych dostawców wyników. KevBox TV nie jest powiązane z MDBList.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_subtitle">Dostawcy danych, podziękowania i licencje odtwarzania Android używane przez KevBox TV.</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV korzysta z API TMDB do metadanych filmów i seriali, grafik, zwiastunów, obsady, szczegółów produkcji, kolekcji i rekomendacji. Ten produkt korzysta z API TMDB, ale nie jest zatwierdzony ani certyfikowany przez TMDB.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV łączy się z Trakt w celu uwierzytelniania konta, historii obejrzanych, synchronizacji postępu, danych biblioteki, ocen, list i komentarzy. KevBox TV nie jest powiązane z Trakt.</string>
+    <string name="playback_player_internal_desc">Użyj wbudowanego odtwarzacza KevBox TV</string>
+    <string name="debrid_device_auth_instructions">Zeskanuj kod QR i wprowadź ten kod, aby autoryzować KevBox TV.</string>
+</resources>

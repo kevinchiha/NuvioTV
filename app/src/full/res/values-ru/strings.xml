@@ -1,0 +1,33 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Вы вышли из системы KevBox TV. Пожалуйста, войдите снова.</string>
+    <string name="playback_engine_exoplayer_desc">Лучшая совместимость с текущими функциями KevBox TV.</string>
+    <string name="playback_engine_mvplayer_desc">Использует libmpv с интерфейсом управления KevBox TV. Экспериментально.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Выберите, должен ли раздел \"Продолжить просмотр\" использовать Trakt или KevBox TV Sync (скробблинг в Trakt останется активным).</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">Источник прогресса просмотра установлен на KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Это отключит ваш аккаунт Trakt от KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Забыли PIN? Сбросьте его в вашем аккаунте KevBox TV на веб-сайте KevBox TV.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Добро пожаловать в KevBox TV</string>
+    <string name="account_sign_in_description">Войдите, чтобы синхронизировать вашу библиотеку, прогресс, аддоны и плагины между устройствами. Синхронизация библиотеки использует KevBox TV Sync, когда Trakt не подключен, а для прогресса просмотра можно использовать Trakt или KevBox TV Sync.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="licenses_attributions_subtitle">Поставщики данных, кредиты сервисов и лицензии воспроизведения Android, используемые KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV использует API TMDB для метаданных фильмов и ТВ, иллюстраций, трейлеров, актёров, производственных деталей, коллекций и рекомендаций. Этот продукт использует API TMDB, но не одобрен и не сертифицирован TMDB.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV подключается к Trakt для авторизации, истории просмотров, синхронизации прогресса, данных библиотеки, рейтингов, списков и комментариев. KevBox TV не аффилирован с Trakt и не одобрен им.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV использует MDBList для рейтингов и данных внешних провайдеров оценок. KevBox TV не аффилирован с MDBList и не одобрен им.</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV использует API IntroDB для предоставленных сообществом таймкодов вступлений, рекапов, титров и превью. KevBox TV не аффилирован с IntroDB и не одобрен им.</string>
+    <string name="experience_mode_choose_title">Выберите свой режим KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll">Прокрутка фокуса KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Использовать собственную глобальную анимацию прокрутки и позиционирования фокуса KevBox TV.</string>
+    <string name="debrid_device_auth_instructions">Отсканируйте QR и введите этот код для подтверждения KevBox TV.</string>
+    <string name="trakt_library_source_nuvio">Библиотека KevBox TV</string>
+    <string name="trakt_library_source_nuvio_selected">Выбрана библиотека KevBox TV</string>
+    <string name="profile_custom_avatar_web_panel_note">Пользовательские URL аватаров можно настроить в веб-панели KevBox TV.</string>
+    <string name="p2p_consent_body">Этот поток использует технологию P2P. Включая P2P, вы признаёте и соглашаетесь с тем, что:\n\n\u2022 Ваш IP-адрес будет виден другим участникам сети\n\u2022 Вы несёте полную ответственность за контент, к которому обращаетесь\n\u2022 Вы подтверждаете законность стриминга в вашей юрисдикции\n\u2022 KevBox TV не размещает, не распространяет и не контролирует P2P-контент\n\u2022 KevBox TV не несёт ответственности за юридические последствия\n\nВы используете эту функцию на свой риск. P2P можно отключить в Настройках.</string>
+    <string name="collections_editor_tmdb_title_helper">Отображается как название ряда/вкладки. Если пусто, KevBox TV создаст название из источника.</string>
+    <string name="playback_player_internal_desc">Использовать встроенный плеер KevBox TV</string>
+</resources>

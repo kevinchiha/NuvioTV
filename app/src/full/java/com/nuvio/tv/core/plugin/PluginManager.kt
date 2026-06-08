@@ -6,6 +6,8 @@ import com.nuvio.tv.core.plugin.cloudstream.tvTypeFromString
 import com.nuvio.tv.core.plugin.cloudstream.ExternalExtensionLoader
 import com.nuvio.tv.core.plugin.cloudstream.ExternalExtensionRunner
 import com.nuvio.tv.core.plugin.cloudstream.ExternalRepoParser
+import com.nuvio.tv.core.content.DefaultContent
+import com.nuvio.tv.data.local.AppOnboardingDataStore
 import com.nuvio.tv.data.local.PluginDataStore
 import com.nuvio.tv.domain.model.ExternalPluginEntry
 import com.nuvio.tv.domain.model.LocalScraperResult
@@ -67,7 +69,8 @@ class PluginManager @Inject constructor(
     private val authManager: com.nuvio.tv.core.auth.AuthManager,
     private val externalRepoParser: ExternalRepoParser,
     private val externalExtensionLoader: ExternalExtensionLoader,
-    private val externalExtensionRunner: ExternalExtensionRunner
+    private val externalExtensionRunner: ExternalExtensionRunner,
+    private val appOnboardingDataStore: AppOnboardingDataStore
 ) {
     private val moshi = Moshi.Builder()
         .addLast(KotlinJsonAdapterFactory())
@@ -234,6 +237,22 @@ class PluginManager @Inject constructor(
     private val syncScope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
     )
+
+    init {
+        // KevBox TV: one-time first-launch seed of baked-in default plugin repos.
+        // PluginManager is a @Singleton instantiated at app startup (StartupSyncService
+        // injects it from NuvioApplication), so this runs once on a fresh install in the
+        // full flavor. NuvioApplication also explicitly invokes the public seed for the
+        // addon side; this init keeps the plugin seed off the shared (main) Application,
+        // which can't reference the full-only seed method without breaking the playstore stub.
+        syncScope.launch {
+            try {
+                seedDefaultPluginsIfFirstLaunch()
+            } catch (e: Exception) {
+                Log.e(TAG, "seedDefaultPluginsIfFirstLaunch failed: ${e.message}", e)
+            }
+        }
+    }
 
     var isSyncingFromRemote = false
 
@@ -436,6 +455,53 @@ class PluginManager @Inject constructor(
         return Result.success(repo)
     }
     
+    /**
+     * KevBox TV — one-time first-launch seed of the baked-in default plugin repos.
+     *
+     * Guarded by [AppOnboardingDataStore.hasSeededDefaultPlugins] so it runs at most once
+     * per install. Branches by repo type from [DefaultContent.DEFAULT_PLUGIN_REPOS]:
+     *   - [DefaultContent.DefaultPluginRepoType.AUTO]         → [addRepository] (auto-detects
+     *     NuvioTV-JS vs external, and resolves `cutt.ly` short-codes first).
+     *   - [DefaultContent.DefaultPluginRepoType.NUVIO_JS]     → [addRepositoryWithTypeHint]
+     *     with a NUVIO_JS hint (falls back to auto-detect if the hint is wrong).
+     *   - [DefaultContent.DefaultPluginRepoType.EXTERNAL_DEX] → [addRepositoryWithTypeHint]
+     *     with an EXTERNAL_DEX hint (falls back to auto-detect if the hint is wrong).
+     *
+     * NOTE: [DefaultContent.DEFAULT_PLUGIN_REPOS] is intentionally EMPTY right now (the Usenet
+     * Ultimate addon already provides streams). The mechanism is fully wired and compiles; it
+     * seeds nothing until the family adds repos to that list. The seeded flag is still set so
+     * adding repos later only affects *fresh* installs — matching the addon-seed semantics.
+     *
+     * ⚠️ Seeding only registers the repo URL and downloads the scraper JS/DEX at runtime
+     * ([downloadJsScrapers] / [downloadDexExtensions]), so a fresh install needs network on
+     * first run for any non-empty list.
+     */
+    suspend fun seedDefaultPluginsIfFirstLaunch() {
+        if (appOnboardingDataStore.hasSeededDefaultPlugins.first()) return
+
+        DefaultContent.DEFAULT_PLUGIN_REPOS.forEach { repo ->
+            try {
+                val result = when (repo.type) {
+                    DefaultContent.DefaultPluginRepoType.AUTO ->
+                        addRepository(repo.url)
+                    DefaultContent.DefaultPluginRepoType.NUVIO_JS ->
+                        addRepositoryWithTypeHint(repo.url, RepositoryType.NUVIO_JS)
+                    DefaultContent.DefaultPluginRepoType.EXTERNAL_DEX ->
+                        addRepositoryWithTypeHint(repo.url, RepositoryType.EXTERNAL_DEX)
+                }
+                if (result.isFailure) {
+                    Log.e(TAG, "seedDefaultPlugins: failed to add '${repo.url}': ${result.exceptionOrNull()?.message}")
+                } else {
+                    Log.d(TAG, "seedDefaultPlugins: added '${repo.url}'")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "seedDefaultPlugins: error adding '${repo.url}': ${e.message}", e)
+            }
+        }
+
+        appOnboardingDataStore.setHasSeededDefaultPlugins(true)
+    }
+
     /**
      * Remove a repository and its scrapers
      */

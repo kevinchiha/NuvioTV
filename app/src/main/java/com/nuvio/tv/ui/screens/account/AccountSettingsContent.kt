@@ -24,9 +24,11 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,9 +36,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nuvio.tv.data.local.LastSignInDataStore
 import androidx.tv.material3.Border
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
@@ -48,13 +52,48 @@ import com.nuvio.tv.domain.model.AuthState
 import com.nuvio.tv.ui.theme.NuvioColors
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
+import kotlinx.coroutines.launch
+
+// Cross-device sync overview is backed by the get_sync_overview RPC, which no longer exists on
+// the self-owned auth-only backend. Keep the UI code in place but gate it off so the family
+// never sees a permanently-empty/broken sync panel.
+private const val SHOW_SYNC_OVERVIEW = false
+
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+private interface AccountSettingsLastSignInEntryPoint {
+    fun lastSignInDataStore(): LastSignInDataStore
+}
 
 @Composable
 fun AccountSettingsContent(
     uiState: AccountUiState,
     viewModel: AccountViewModel,
-    onNavigateToAuthQrSignIn: () -> Unit = {}
+    @Suppress("UNUSED_PARAMETER") onNavigateToAuthQrSignIn: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val lastSignInDataStore = remember {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            AccountSettingsLastSignInEntryPoint::class.java
+        ).lastSignInDataStore()
+    }
+    val lastEmail by lastSignInDataStore.lastEmail.collectAsState(initial = null)
+    val hasSavedCredential by lastSignInDataStore.hasSavedCredential.collectAsState(initial = false)
+    val scope = rememberCoroutineScope()
+    var pendingPassword by remember { mutableStateOf("") }
+
+    val signedInEmail = (uiState.authState as? AuthState.FullAccount)?.email
+    androidx.compose.runtime.LaunchedEffect(signedInEmail) {
+        if (!signedInEmail.isNullOrBlank()) {
+            if (pendingPassword.isNotBlank()) {
+                lastSignInDataStore.saveCredential(signedInEmail, pendingPassword)
+            } else {
+                lastSignInDataStore.setLastEmail(signedInEmail)
+            }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 8.dp),
@@ -82,12 +121,32 @@ fun AccountSettingsContent(
                 item(key = "account_sync_note_signed_out") {
                     AccountInlineNote(text = stringResource(R.string.account_sync_restart_note))
                 }
-                item(key = "account_sign_in_qr") {
-                    SettingsActionButton(
-                        icon = Icons.Default.VpnKey,
-                        title = stringResource(R.string.account_signin_qr_title),
-                        subtitle = stringResource(R.string.account_signin_qr_subtitle),
-                        onClick = onNavigateToAuthQrSignIn
+                // Email/password sign-in. The old QR entry is dead (RPCs removed) and is no
+                // longer surfaced; account creation happens in the Supabase dashboard.
+                item(key = "account_sign_in_email") {
+                    EmailPasswordForm(
+                        onSubmit = { email, password ->
+                            pendingPassword = password
+                            viewModel.clearError()
+                            viewModel.signIn(email, password)
+                        },
+                        isLoading = uiState.isLoading,
+                        error = uiState.error,
+                        prefillEmail = lastEmail,
+                        oneTapEmail = if (hasSavedCredential) lastEmail else null,
+                        onOneTap = {
+                            val em = lastEmail
+                            if (!em.isNullOrBlank()) {
+                                scope.launch {
+                                    val pw = lastSignInDataStore.decryptedPassword()
+                                    if (!pw.isNullOrBlank()) {
+                                        pendingPassword = pw
+                                        viewModel.clearError()
+                                        viewModel.signIn(em, pw)
+                                    }
+                                }
+                            }
+                        }
                     )
                 }
             }
@@ -100,11 +159,13 @@ fun AccountSettingsContent(
                     AccountInlineNote(text = stringResource(R.string.account_sync_restart_note))
                 }
 
-                val overview = uiState.syncOverview
-                if (overview != null) {
-                    item(key = "account_sync_overview") { SyncOverviewCard(overview) }
-                } else if (uiState.isSyncOverviewLoading) {
-                    item(key = "account_sync_overview_loading") { SyncOverviewLoadingCard() }
+                if (SHOW_SYNC_OVERVIEW) {
+                    val overview = uiState.syncOverview
+                    if (overview != null) {
+                        item(key = "account_sync_overview") { SyncOverviewCard(overview) }
+                    } else if (uiState.isSyncOverviewLoading) {
+                        item(key = "account_sync_overview_loading") { SyncOverviewLoadingCard() }
+                    }
                 }
 
                 item(key = "account_sign_out") { SignOutSettingsButton(onClick = { viewModel.signOut() }) }

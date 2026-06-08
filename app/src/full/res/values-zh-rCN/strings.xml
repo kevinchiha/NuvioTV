@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">您已退出 KevBox TV 账号。请重新登录。</string>
+    <string name="licenses_attributions_subtitle">KevBox TV 使用的数据提供商、服务致谢和 Android 播放许可。</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV 使用 TMDB API 获取电影和电视剧元数据、海报、预告片、演员、制作详情、合集和推荐。本产品使用 TMDB API，但未获得 TMDB 的认可或认证。</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV 连接 Trakt 以进行账号认证、观看历史、进度同步、收藏数据、评分、列表和评论。KevBox TV 与 Trakt 无隶属关系，也未获得其认可。</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV 使用 MDBList 获取评分和外部评分数据。KevBox TV 与 MDBList 无隶属关系，也未获得其认可。</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV 使用 IntroDB API 获取社区提供的片头、回顾、片尾和预览时间戳，用于跳过控制。KevBox TV 与 IntroDB 无隶属关系，也未获得其认可。</string>
+    <string name="experience_mode_choose_title">选择您的 KevBox TV 体验</string>
+    <string name="advanced_nuvio_focus_scroll">KevBox TV 焦点滚动</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">使用 KevBox TV 自定义全局焦点滚动动画和定位。</string>
+    <string name="playback_engine_exoplayer_desc">与当前 KevBox TV 功能兼容性最佳。</string>
+    <string name="playback_engine_mvplayer_desc">使用 libmpv 并带有 KevBox TV OSD 控制。实验性。</string>
+    <string name="trakt_watch_progress_dialog_subtitle">选择继续观看和恢复播放应使用 Trakt 还是 KevBox TV Sync（Trakt 打点仍保持开启）。</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">KevBox TV 收藏</string>
+    <string name="trakt_library_source_nuvio_selected">已选择 KevBox TV 收藏</string>
+    <string name="trakt_watch_progress_nuvio_selected">观看进度源设置为 KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">这将断开您的 Trakt 账号与 KevBox TV 的连接。</string>
+    <string name="profile_custom_avatar_web_panel_note">自定义头像 URL 可在 KevBox TV 网页面板中配置。</string>
+    <string name="profile_pin_overlay_forgot_hint">忘记 PIN？可在 KevBox TV 网站通过账号重置。</string>
+    <string name="p2p_consent_body">此源使用点对点 (P2P) 技术。启用 P2P 即表示您同意：\n\n• 您的 IP 地址对网络中的其他节点可见\n• 您对访问的内容承担全部责任\n• 您确认在您的司法管辖区有权串流此内容\n• KevBox TV 不托管、分发或控制任何 P2P 内容\n• KevBox TV 对您使用 P2P 串流产生的任何法律后果不承担责任\n\n您使用此功能完全自担风险。可随时在设置中禁用 P2P。</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">欢迎使用 KevBox TV</string>
+    <string name="account_sign_in_description">登录以在设备间同步您的收藏、观看进度、插件和插件。未连接 Trakt 时，收藏同步使用 KevBox TV Sync，观看进度可使用 Trakt 或 KevBox TV Sync。</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">作为行/标签名称显示。若留空，KevBox TV 将根据来源自动生成。</string>
+    <string name="playback_player_internal_desc">使用 KevBox TV 内置播放器</string>
+</resources>

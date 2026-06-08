@@ -1,0 +1,13 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">KevBox TVからサインアウトされました。再度サインインしてください</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Traktのスクロブルが有効な間、再開と視聴を続けるにTraktとKevBox TV Syncのどちらを使用するか選択してください</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">視聴進行状況ソースをKevBox TV Syncに設定しました</string>
+    <string name="trakt_disconnect_subtitle">KevBox TVからTraktアカウントが切断されます</string>
+    <string name="profile_pin_overlay_forgot_hint">PINを忘れた場合はKevBox TVウェブサイトのアカウントページからリセットできます</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">KevBox TVへようこそ</string>
+    <string name="account_sign_in_description">サインインしてデバイス間でライブラリ、視聴進行状況、アドオン、プラグインを同期。ライブラリ同期はTraktが接続されていない場合はKevBox TV Syncを使用し、視聴進行状況はTraktまたはKevBox TV Syncのどちらかを使用できます</string>
+</resources>

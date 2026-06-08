@@ -25,6 +25,9 @@ data class UpdateUiState(
     val isUpdateAvailable: Boolean = false,
     val isDownloading: Boolean = false,
     val downloadProgress: Float? = null,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long? = null,
+    val bytesPerSec: Long = 0L,
     val downloadedApkPath: String? = null,
     val showDialog: Boolean = false,
     val showNoUpdateToastHint: Boolean = false,
@@ -52,15 +55,15 @@ class UpdateViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isChecking = true, errorMessage = null, showNoUpdateToastHint = false) }
 
-            val ignoredTag = updatePreferences.ignoredTag.first()
+            val ignoredVersionCode = updatePreferences.ignoredVersionCode.first()
 
             val result = updateRepository.getLatestUpdate()
             updatePreferences.setLastCheckAtMs(System.currentTimeMillis())
 
             result
                 .onSuccess { update ->
-                    val remoteNewer = VersionUtils.isRemoteNewer(update.tag, BuildConfig.VERSION_NAME)
-                    val shouldShow = remoteNewer && (ignoredTag == null || ignoredTag != update.tag)
+                    val remoteNewer = update.versionCode > BuildConfig.VERSION_CODE
+                    val shouldShow = remoteNewer && (ignoredVersionCode == null || ignoredVersionCode != update.versionCode)
 
                     _uiState.update {
                         it.copy(
@@ -93,8 +96,8 @@ class UpdateViewModel @Inject constructor(
 
     fun ignoreThisVersion() {
         viewModelScope.launch {
-            val tag = _uiState.value.update?.tag
-            updatePreferences.setIgnoredTag(tag)
+            val versionCode = _uiState.value.update?.versionCode
+            updatePreferences.setIgnoredVersionCode(versionCode)
             _uiState.update { it.copy(showDialog = false) }
         }
     }
@@ -103,10 +106,21 @@ class UpdateViewModel @Inject constructor(
         val update = _uiState.value.update ?: return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isDownloading = true, downloadProgress = 0f, errorMessage = null) }
+            _uiState.update {
+                it.copy(
+                    isDownloading = true,
+                    downloadProgress = 0f,
+                    downloadedBytes = 0L,
+                    totalBytes = null,
+                    bytesPerSec = 0L,
+                    errorMessage = null
+                )
+            }
 
             val safeName = update.assetName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
             val dest = File(File(context.cacheDir, "updates"), safeName)
+
+            val startMs = System.currentTimeMillis()
 
             val result = withContext(Dispatchers.IO) {
                 apkDownloader.download(update.assetUrl, dest) { downloaded, total ->
@@ -115,21 +129,55 @@ class UpdateViewModel @Inject constructor(
                     } else {
                         null
                     }
-                    _uiState.update { it.copy(downloadProgress = progress) }
+                    // bytes/sec = downloaded * 1000 / elapsedMs (kevbox MainViewModel model)
+                    val elapsed = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
+                    val bps = downloaded * 1000L / elapsed
+                    _uiState.update {
+                        it.copy(
+                            downloadProgress = progress,
+                            downloadedBytes = downloaded,
+                            totalBytes = total,
+                            bytesPerSec = bps
+                        )
+                    }
                 }
             }
 
             result
                 .onSuccess { file ->
+                    // Verify SHA-256 before exposing the install action — reject on mismatch.
+                    val expected = update.sha256
+                    val verified = withContext(Dispatchers.IO) {
+                        runCatching { Checksum.verify(file, expected) }.getOrDefault(false)
+                    }
+                    if (!verified) {
+                        // SHA-256 mismatch: the downloaded APK is untrustworthy — reject install.
+                        // Reuses the existing download-failed string (a dedicated
+                        // `update_error_checksum_failed` resource is a follow-up for the
+                        // resource owner, since string files are owned by another workstream).
+                        runCatching { file.delete() }
+                        _uiState.update {
+                            it.copy(
+                                isDownloading = false,
+                                downloadProgress = null,
+                                bytesPerSec = 0L,
+                                downloadedApkPath = null,
+                                errorMessage = context.getString(R.string.update_error_download_failed)
+                            )
+                        }
+                        return@launch
+                    }
+
                     _uiState.update {
                         it.copy(
                             isDownloading = false,
                             downloadProgress = 1f,
+                            bytesPerSec = 0L,
                             downloadedApkPath = file.absolutePath,
                             errorMessage = null
                         )
                     }
-                    // Auto-start installation flow immediately after successful download.
+                    // Auto-start installation flow immediately after successful download + verify.
                     // If unknown sources permission is missing, this will surface the settings prompt.
                     installUpdateOrRequestPermission()
                 }
@@ -138,6 +186,7 @@ class UpdateViewModel @Inject constructor(
                         it.copy(
                             isDownloading = false,
                             downloadProgress = null,
+                            bytesPerSec = 0L,
                             downloadedApkPath = null,
                             errorMessage = e.message ?: context.getString(R.string.update_error_download_failed)
                         )

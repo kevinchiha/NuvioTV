@@ -85,7 +85,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.nuvio.tv"
+        applicationId = "tv.kevbox"
         minSdk = 24
         targetSdk = 36
         versionCode = 1021
@@ -173,6 +173,7 @@ android {
 
             // Dev environment (from local.dev.properties)
             buildConfigField("String", "SUPABASE_URL", "\"${devProperties.getProperty("SUPABASE_URL", "")}\"")
+            buildConfigField("String", "UPDATE_BASE_URL", "\"${devProperties.getProperty("UPDATE_BASE_URL", localProperties.getProperty("UPDATE_BASE_URL", "https://tv.kevbox.dev"))}\"")
             buildConfigField("String", "SUPABASE_ANON_KEY", "\"${devProperties.getProperty("SUPABASE_ANON_KEY", "")}\"")
             buildConfigField("String", "TV_LOGIN_WEB_BASE_URL", "\"${devProperties.getProperty("TV_LOGIN_WEB_BASE_URL", "https://app.nuvio.tv/tv-login")}\"")
             buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${devProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
@@ -203,6 +204,7 @@ android {
 
             // Production environment (from local.properties)
             buildConfigField("String", "SUPABASE_URL", "\"${localProperties.getProperty("SUPABASE_URL", "")}\"")
+            buildConfigField("String", "UPDATE_BASE_URL", "\"${localProperties.getProperty("UPDATE_BASE_URL", "https://tv.kevbox.dev")}\"")
             buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProperties.getProperty("SUPABASE_ANON_KEY", "")}\"")
             buildConfigField("String", "TV_LOGIN_WEB_BASE_URL", "\"${localProperties.getProperty("TV_LOGIN_WEB_BASE_URL", "https://app.nuvio.tv/tv-login")}\"")
             buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
@@ -284,7 +286,7 @@ android {
 androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         val isPlaystore = variant.productFlavors.any { it.second == "playstore" }
-        variant.applicationId.set(if (isPlaystore) "com.nuvio.appdebug" else "com.nuviodebug.com")
+        variant.applicationId.set(if (isPlaystore) "com.nuvio.appdebug" else "tv.kevbox.debug")
     }
 }
 

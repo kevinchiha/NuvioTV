@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="trakt_disconnect_subtitle">Thao tác này sẽ ngắt kết nối tài khoản Trakt khỏi KevBox TV.</string>
+    <string name="layout_selection_welcome">Chào mừng đến KevBox TV</string>
+</resources>

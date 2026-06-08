@@ -1,0 +1,33 @@
+<resources>
+    <!-- KevBox TV brand override (full flavor). Brand name is identical across locales. -->
+    <string name="app_name">KevBox TV</string>
+    <string name="auth_notice_nuvio_logged_out">Anda telah keluar dari KevBox TV. Silakan masuk kembali.</string>
+    <string name="licenses_attributions_subtitle">Penyedia data, kredit layanan, dan lisensi pemutaran Android yang digunakan oleh KevBox TV.</string>
+    <string name="licenses_attributions_nuvio_title">KevBox TV</string>
+    <string name="licenses_attributions_tmdb_body">KevBox TV menggunakan API TMDB untuk metadata film dan TV, poster dan latar belakang, trailer, pemeran, detail produksi, koleksi, dan rekomendasi. Produk ini menggunakan API TMDB namun tidak didukung atau disertifikasi oleh TMDB.</string>
+    <string name="licenses_attributions_trakt_body">KevBox TV terhubung ke Trakt untuk autentikasi akun, riwayat tonton, sinkronisasi progres, data pustaka, rating, daftar, dan komentar. KevBox TV tidak berafiliasi dengan atau didukung oleh Trakt.</string>
+    <string name="licenses_attributions_mdblist_body">KevBox TV menggunakan MDBList untuk rating dan data penyedia skor eksternal. KevBox TV tidak berafiliasi dengan atau didukung oleh MDBList.</string>
+    <string name="licenses_attributions_introdb_body">KevBox TV menggunakan API IntroDB untuk cap waktu intro, rekap, kredit, dan pratinjau dari komunitas yang digunakan oleh kontrol lewati. KevBox TV tidak berafiliasi dengan atau didukung oleh IntroDB.</string>
+    <string name="experience_mode_choose_title">Pilih pengalaman KevBox TV Anda</string>
+    <string name="advanced_nuvio_focus_scroll">Gulir Fokus KevBox TV</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">Gunakan animasi dan posisi gulir fokus global kustom KevBox TV.</string>
+    <string name="playback_engine_exoplayer_desc">Kompatibilitas terbaik dengan fitur KevBox TV saat ini.</string>
+    <string name="playback_engine_mvplayer_desc">Menggunakan libmpv dengan kontrol OSD KevBox TV. Eksperimental.</string>
+    <string name="debrid_device_auth_instructions">Scan QR dan masukkan kode ini untuk mengizinkan KevBox TV.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">Pilih apakah lanjutkan dan continue watching harus menggunakan Trakt atau KevBox TV Sync sementara scrobbling Trakt tetap aktif.</string>
+    <string name="trakt_watch_progress_source_nuvio">KevBox TV Sync</string>
+    <string name="trakt_library_source_nuvio">Pustaka KevBox TV</string>
+    <string name="trakt_library_source_nuvio_selected">Pustaka KevBox TV dipilih</string>
+    <string name="trakt_watch_progress_nuvio_selected">Sumber progres tonton diatur ke KevBox TV Sync</string>
+    <string name="trakt_disconnect_subtitle">Ini akan memutuskan akun Trakt Anda dari KevBox TV.</string>
+    <string name="profile_custom_avatar_web_panel_note">URL avatar kustom dapat dikonfigurasi dari panel web KevBox TV.</string>
+    <string name="profile_pin_overlay_forgot_hint">Lupa PIN? Setel ulang dari akun KevBox TV Anda di situs web KevBox TV.</string>
+    <string name="p2p_consent_body">Stream ini menggunakan teknologi peer-to-peer (P2P). Dengan mengaktifkan P2P, Anda mengakui dan menyetujui bahwa:\n\n\u2022 Alamat IP Anda akan terlihat oleh peer lain di jaringan\n\u2022 Anda sepenuhnya bertanggung jawab atas konten yang Anda akses\n\u2022 Anda mengonfirmasi bahwa Anda memiliki hak hukum untuk streaming konten ini di yurisdiksi Anda\n\u2022 KevBox TV tidak menyelenggarakan, mendistribusikan, atau mengontrol konten P2P apa pun\n\u2022 KevBox TV tidak bertanggung jawab atas konsekuensi hukum apa pun yang timbul dari penggunaan streaming P2P Anda\n\nAnda menggunakan fitur ini sepenuhnya atas risiko Anda sendiri. P2P dapat dinonaktifkan kapan saja di Pengaturan.</string>
+    <string name="library_source_nuvio">KEVBOX</string>
+    <string name="layout_selection_welcome">Selamat datang di KevBox TV</string>
+    <string name="account_sign_in_description">Masuk untuk menyinkronkan pustaka, progres tonton, addon, dan plugin di semua perangkat. Sinkronisasi pustaka menggunakan KevBox TV Sync saat Trakt tidak terhubung, dan progres tonton dapat menggunakan Trakt atau KevBox TV Sync.</string>
+    <string name="cd_nuvio_logo">KevBox TV</string>
+    <string name="cd_nuvio">KevBox TV</string>
+    <string name="collections_editor_tmdb_title_helper">Ditampilkan sebagai nama baris/tab. Jika kosong, KevBox TV akan membuatnya dari sumber.</string>
+    <string name="playback_player_internal_desc">Gunakan pemutar bawaan KevBox TV</string>
+</resources>
