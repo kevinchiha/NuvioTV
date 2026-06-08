@@ -239,7 +239,9 @@ android {
             isEnable = !buildingAppBundle
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
+            // KevBox: family TVs are arm64 and release.sh ships the per-ABI split; the universal
+            // APK (all ABIs' native libs in one) is unused and OOMs packaging at -Xmx4096m. Off.
+            isUniversalApk = false
         }
     }
 
