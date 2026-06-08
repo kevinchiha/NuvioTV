@@ -2,6 +2,7 @@ package com.nuvio.tv.core.sync
 
 import android.os.SystemClock
 import android.util.Log
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.plugin.PluginManager
 import com.nuvio.tv.core.profile.ProfileManager
@@ -132,6 +133,13 @@ class StartupSyncService @Inject constructor(
         scope.launch {
             val profileId = profileManager.activeProfileId.value
             Log.d(TAG, "Manual addon sync requested for profile $profileId")
+
+            if (BuildConfig.FEATURE_MEMBER_ADDON_CONFIG) {
+                // Member addon config owns addon reconciliation in the 'full' flavor.
+                // Skip the legacy manual reconcile so it can't clobber per-member state.
+                Log.d(TAG, "Skipping legacy manual addon reconcile for profile $profileId (FEATURE_MEMBER_ADDON_CONFIG enabled)")
+                return@launch
+            }
 
             addonRepository.isSyncingFromRemote = true
             try {
@@ -412,6 +420,13 @@ class StartupSyncService @Inject constructor(
             }
 
             val addonJob = async {
+                if (BuildConfig.FEATURE_MEMBER_ADDON_CONFIG) {
+                    // Member addon config owns addon reconciliation in the 'full' flavor.
+                    // Skip the legacy NuvioTV 'addons' table pull so it can't clobber
+                    // the per-member enabled states / order.
+                    Log.d(TAG, "Skipping legacy addon reconcile for profile $profileId (FEATURE_MEMBER_ADDON_CONFIG enabled)")
+                    return@async
+                }
                 addonRepository.isSyncingFromRemote = true
                 try {
                     val remoteAddonUrls = addonSyncService.getRemoteAddonUrls().getOrElse { throw it }

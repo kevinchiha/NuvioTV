@@ -101,6 +101,18 @@
 }
 -keep,allowobfuscation,allowshrinking class com.nuvio.tv.updater.model.**$$serializer { *; }
 
+# ── Remote member-addon config (full flavor) ──────────────────────────────────
+# MemberAddonRow is @Serializable and decoded at runtime from the Supabase `member_addon`
+# table. As with the updater model, a minified RELEASE build would otherwise rename/strip the
+# model's fields, $Companion, and generated $$serializer — breaking deserialization of the
+# per-member addon rows (debug is unminified, so this only bites release builds).
+-keep class com.nuvio.tv.core.memberconfig.model.** { *; }
+-keepclassmembers class com.nuvio.tv.core.memberconfig.model.** {
+    *** Companion;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,allowobfuscation,allowshrinking class com.nuvio.tv.core.memberconfig.model.**$$serializer { *; }
+
 # ── External extension compatibility stubs (loaded via DexClassLoader) ────────
 -keep class com.lagradost.cloudstream3.** { *; }
 -keepclassmembers class com.lagradost.cloudstream3.** { *; }

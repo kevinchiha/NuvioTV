@@ -6,7 +6,9 @@ import com.nuvio.tv.core.plugin.cloudstream.tvTypeFromString
 import com.nuvio.tv.core.plugin.cloudstream.ExternalExtensionLoader
 import com.nuvio.tv.core.plugin.cloudstream.ExternalExtensionRunner
 import com.nuvio.tv.core.plugin.cloudstream.ExternalRepoParser
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.content.DefaultContent
+import com.nuvio.tv.core.memberconfig.MemberConfigService
 import com.nuvio.tv.data.local.AppOnboardingDataStore
 import com.nuvio.tv.data.local.PluginDataStore
 import com.nuvio.tv.domain.model.ExternalPluginEntry
@@ -70,7 +72,8 @@ class PluginManager @Inject constructor(
     private val externalRepoParser: ExternalRepoParser,
     private val externalExtensionLoader: ExternalExtensionLoader,
     private val externalExtensionRunner: ExternalExtensionRunner,
-    private val appOnboardingDataStore: AppOnboardingDataStore
+    private val appOnboardingDataStore: AppOnboardingDataStore,
+    private val memberConfigService: MemberConfigService
 ) {
     private val moshi = Moshi.Builder()
         .addLast(KotlinJsonAdapterFactory())
@@ -250,6 +253,16 @@ class PluginManager @Inject constructor(
                 seedDefaultPluginsIfFirstLaunch()
             } catch (e: Exception) {
                 Log.e(TAG, "seedDefaultPluginsIfFirstLaunch failed: ${e.message}", e)
+            }
+        }
+        // KevBox TV: start remote per-member Stremio-addon config sync. Full flavor only, and
+        // gated by the build-time kill switch — set FEATURE_MEMBER_ADDON_CONFIG=false and rebuild
+        // to disable member config (the legacy addon sync un-gates as the fallback; see §0).
+        if (BuildConfig.FEATURE_MEMBER_ADDON_CONFIG) {
+            try {
+                memberConfigService.start()
+            } catch (e: Exception) {
+                Log.e(TAG, "memberConfigService.start() failed: ${e.message}", e)
             }
         }
     }

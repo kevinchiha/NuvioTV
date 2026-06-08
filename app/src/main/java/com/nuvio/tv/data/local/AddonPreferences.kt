@@ -25,6 +25,12 @@ class AddonPreferences @Inject constructor(
 ) {
     companion object {
         private const val FEATURE = "addon_preferences"
+
+        /**
+         * The addon store id that inheriting profiles resolve to via [effectiveProfileId].
+         * Member config writers target this store directly to bypass the profile write-guard.
+         */
+        const val PRIMARY_ADDON_PROFILE_ID = 1
     }
 
     private fun effectiveProfileId(): Int {
@@ -161,6 +167,44 @@ class AddonPreferences @Inject constructor(
             )
         }
     }
+
+    /**
+     * Member-config writers/reader that ALWAYS target the primary addon store
+     * (id [PRIMARY_ADDON_PROFILE_ID]), intentionally NOT profile-gated. Member config is
+     * per-account and authoritative over the primary set, so these bypass the write-guard
+     * that blocks [setAddonOrder] / [setAddonEnabledStates] on inheriting sub-profiles.
+     */
+    suspend fun getPrimaryInstalledAddonUrls(): List<String> =
+        getCurrentList(store(PRIMARY_ADDON_PROFILE_ID).data.first())
+
+    suspend fun setPrimaryAddonOrder(urls: List<String>) {
+        store(PRIMARY_ADDON_PROFILE_ID).edit { preferences ->
+            val orderedUrls = urls.map(::canonicalizeUrl)
+            preferences[orderedUrlsKey] = gson.toJson(orderedUrls)
+            val currentStates = getCurrentEnabledStates(preferences)
+            preferences[addonEnabledStatesKey] = gson.toJson(
+                orderedUrls.associateWith { url -> currentStates[url] ?: true }
+            )
+        }
+    }
+
+    suspend fun setPrimaryAddonEnabledStates(states: Map<String, Boolean>) {
+        store(PRIMARY_ADDON_PROFILE_ID).edit { preferences ->
+            preferences[addonEnabledStatesKey] = gson.toJson(
+                states.mapKeys { (url, _) -> canonicalizeUrl(url) }
+            )
+        }
+    }
+
+    /**
+     * Reset the primary addon store (id [PRIMARY_ADDON_PROFILE_ID]) to the baked-in universal
+     * defaults, all enabled. Used on a shared TV when the signed-in member changes and the new
+     * member has zero member_addon rows, so we don't leave the previous member's set behind.
+     * Routes through [setPrimaryAddonOrder] (guard-free, re-enables every default) and uses the
+     * private [getDefaultAddons] so the baked default set stays the single source of truth.
+     */
+    suspend fun resetPrimaryAddonsToDefaults() =
+        setPrimaryAddonOrder(getDefaultAddons().toList())
 
     private fun getCurrentList(preferences: Preferences): List<String> {
         val json = preferences[orderedUrlsKey]

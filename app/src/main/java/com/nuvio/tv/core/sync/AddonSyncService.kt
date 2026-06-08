@@ -1,6 +1,7 @@
 package com.nuvio.tv.core.sync
 
 import android.util.Log
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.data.local.AddonPreferences
@@ -39,6 +40,13 @@ class AddonSyncService @Inject constructor(
      * Uses a SECURITY DEFINER function to handle RLS for linked devices.
      */
     suspend fun pushToRemote(): Result<Unit> = withContext(Dispatchers.IO) {
+        // KevBox 'full' flavor: member addon config is managed remotely via member_addon,
+        // and the legacy sync_push_addons RPC does not exist in that backend (it fails
+        // harmlessly). Short-circuit to avoid wasted network. No-op in upstream/playstore.
+        if (BuildConfig.FEATURE_MEMBER_ADDON_CONFIG) {
+            Log.d(TAG, "pushToRemote: skipped (FEATURE_MEMBER_ADDON_CONFIG enabled, RPC managed remotely)")
+            return@withContext Result.success(Unit)
+        }
         try {
             val activeProfile = profileManager.activeProfile
             val profileId = profileManager.activeProfileId.value

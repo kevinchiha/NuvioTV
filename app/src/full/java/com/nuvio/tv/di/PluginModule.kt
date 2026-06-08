@@ -1,6 +1,7 @@
 package com.nuvio.tv.di
 
 import com.nuvio.tv.core.auth.AuthManager
+import com.nuvio.tv.core.memberconfig.MemberConfigService
 import com.nuvio.tv.core.plugin.PluginManager
 import com.nuvio.tv.core.plugin.PluginRuntime
 import com.nuvio.tv.core.plugin.cloudstream.ExternalExtensionLoader
@@ -35,12 +36,13 @@ object PluginModule {
         externalRepoParser: ExternalRepoParser,
         externalExtensionLoader: ExternalExtensionLoader,
         externalExtensionRunner: ExternalExtensionRunner,
-        appOnboardingDataStore: AppOnboardingDataStore
+        appOnboardingDataStore: AppOnboardingDataStore,
+        memberConfigService: MemberConfigService
     ): PluginManager {
         return PluginManager(
             dataStore, runtime, pluginSyncService, authManager,
             externalRepoParser, externalExtensionLoader, externalExtensionRunner,
-            appOnboardingDataStore
+            appOnboardingDataStore, memberConfigService
         )
     }
 }

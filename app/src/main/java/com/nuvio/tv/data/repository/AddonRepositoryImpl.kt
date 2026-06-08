@@ -306,6 +306,53 @@ class AddonRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * Apply a remote member-config addon set to the PRIMARY addon store. Mirrors
+     * [reconcileWithRemoteAddonUrls]'s normalize/dedup/mirror-exactly logic, but reads/writes the
+     * PRIMARY store via the guard-free primary writers ([AddonPreferences.getPrimaryInstalledAddonUrls],
+     * [AddonPreferences.setPrimaryAddonOrder], [AddonPreferences.setPrimaryAddonEnabledStates]) and
+     * keeps the empty-list safety guard. KevBox 'full' flavor feature (member config); on
+     * 'playstore'/upstream nothing calls this.
+     */
+    override suspend fun applyRemoteAddonConfig(
+        orderedUrls: List<String>,          // ALL member rows in sort order (incl. disabled)
+        enabledByUrl: Map<String, Boolean>  // url -> enabled, full set
+    ) {
+        isSyncingFromRemote = true
+        try {
+            val normalizedRemote = orderedUrls
+                .map { canonicalizeUrl(it) }
+                .filter { it.isNotBlank() }
+                .distinctBy { normalizeUrl(it) }
+            val local = preferences.getPrimaryInstalledAddonUrls()
+            // Empty-list safety guard: never mirror-wipe the primary set to nothing.
+            if (normalizedRemote.isEmpty()) {
+                Log.w(TAG, "applyRemoteAddonConfig: empty remote list, preserving primary addons")
+                return
+            }
+            val localByNorm = linkedMapOf<String, String>()
+            local.forEach { localByNorm.putIfAbsent(normalizeUrl(it), canonicalizeUrl(it)) }
+            val finalList = normalizedRemote.map { localByNorm[normalizeUrl(it)] ?: it }   // mirror exactly
+            // ORDER MATTERS: setPrimaryAddonOrder rewrites the enabled map (defaulting to true), so it MUST
+            // run before setPrimaryAddonEnabledStates or the member's on/off flags get clobbered.
+            preferences.setPrimaryAddonOrder(finalList)
+            preferences.setPrimaryAddonEnabledStates(enabledByUrl)
+        } finally {
+            isSyncingFromRemote = false
+        }
+    }
+
+    /**
+     * Shared-TV account switch (Gap K): reset the PRIMARY store to the baked default addons
+     * (all enabled), so a new member with zero remote rows does not inherit the previous member's
+     * list. Mirrors how defaults are seeded ([AddonPreferences.seedDefaultAddonsOrderIfFirstLaunch]
+     * writes `getDefaultAddons().toList()` via the order writer); the defaults are the single source
+     * of truth inside [AddonPreferences], so we delegate the reset to it.
+     */
+    override suspend fun resetPrimaryAddonsToDefaults() {
+        preferences.resetPrimaryAddonsToDefaults()
+    }
+
     private fun placeholderAddon(
         url: String,
         userSetNames: Map<String, String>,
