@@ -46,10 +46,10 @@ SSH_PORT="${KEVBOX_SSH_PORT:-1788}"
 WEB_ROOT="${KEVBOX_TV_WEB_ROOT:-/var/www/kevbox-tv}"
 BASE_URL="${KEVBOX_TV_BASE_URL:-https://tv.kevbox.dev}"
 
-# Which APK to publish. Default = arm64-v8a: every consumer Android TV is arm64, the APK is
-# smaller, and it sidesteps the large-universal-APK packaging OOM at the repo's -Xmx4096m. Set to
-# "universal" for an any-ABI APK (needs more Gradle heap) or another split (x86_64/armeabi-v7a/x86).
-APK_ABI="${KEVBOX_TV_APK_ABI:-arm64-v8a}"
+# Which APK to publish. Default = armeabi-v7a — the family's TV hardware is 32-bit ARM, so the
+# /download URL must always serve armeabi-v7a. Override with KEVBOX_TV_APK_ABI for another split
+# (arm64-v8a/x86_64/x86). The universal APK is disabled in build.gradle.kts (it OOMs and is unused).
+APK_ABI="${KEVBOX_TV_APK_ABI:-armeabi-v7a}"
 
 # --- 1. Read current versionCode and bump it ------------------------------------
 CURRENT_CODE=$(grep -E '^\s*versionCode\s*=' "$GRADLE" | grep -oE '[0-9]+' | head -1)
