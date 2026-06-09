@@ -1,6 +1,6 @@
-import type { MemberSummary, MemberDetail, AddonRow } from "@kevbox-admin/core";
+import type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow } from "@kevbox-admin/core";
 
-export type { MemberSummary, MemberDetail, AddonRow };
+export type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow };
 
 /** A function that returns the current bearer token (or null if signed out). */
 export type TokenProvider = () => Promise<string | null>;
@@ -71,6 +71,21 @@ export class Api {
   }
   bulkSwap(body: { fromUrl: string; toUrl: string; confirm: boolean }): Promise<{ ok: true; snapshot: unknown[] }> {
     return this.request("POST", "/bulk/swap", body);
+  }
+  getAccess(userId: string): Promise<{ access: AccessState }> {
+    return this.request("GET", `/members/${encodeURIComponent(userId)}/access`);
+  }
+  setActive(userId: string, active: boolean): Promise<{ access: AccessState }> {
+    return this.request("PUT", `/members/${encodeURIComponent(userId)}/access/active`, { active });
+  }
+  setMaxDevices(userId: string, maxDevices: number): Promise<{ access: AccessState }> {
+    return this.request("PUT", `/members/${encodeURIComponent(userId)}/access/max-devices`, { maxDevices });
+  }
+  removeDevice(userId: string, deviceId: string): Promise<{ ok: true }> {
+    return this.request("DELETE", `/members/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`);
+  }
+  removeAllDevices(userId: string): Promise<{ ok: true }> {
+    return this.request("DELETE", `/members/${encodeURIComponent(userId)}/devices`);
   }
 }
 

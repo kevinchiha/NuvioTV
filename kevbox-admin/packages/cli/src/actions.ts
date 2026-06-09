@@ -14,8 +14,13 @@ import {
   bulkAddAddon,
   bulkSwapUrl,
   snapshotAllAddons,
+  getAccess,
+  setActive,
+  setMaxDevices,
+  removeDevice,
+  removeAllDevices,
 } from "@kevbox-admin/core";
-import { formatMembers, formatMember, formatAddon } from "./format.js";
+import { formatMembers, formatMember, formatAddon, formatAccess } from "./format.js";
 import type { Ask } from "./prompt.js";
 import { confirm } from "./prompt.js";
 
@@ -232,4 +237,84 @@ export async function actionBulkSwap(
   await writeBulkSnapshot(db, "bulk-swap", sink);
   await bulkSwapUrl(db, { fromUrl, toUrl }, true);
   sink.log(`Swapped "${fromUrl}" -> "${toUrl}" across all members.`);
+}
+
+/**
+ * kevbox-admin access <ref> — show a member's kill-switch state, device cap, and bound devices.
+ * Resolves `ref` via requireMember FIRST so a typo never hits getAccess's fail-open default
+ * (no row => active=true) and masquerades as a real member.
+ */
+export async function actionAccess(db: Db, ref: string, sink: Sink = consoleSink): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const state = await getAccess(db, member.userId);
+  sink.log(formatAccess(state));
+}
+
+/** kevbox-admin access-disable <ref> — flip the kill-switch off (locks the member out). */
+export async function actionAccessDisable(db: Db, ref: string, sink: Sink = consoleSink): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const updated = await setActive(db, member.userId, false);
+  sink.log(`Access disabled for ${member.email ?? member.userId}.`);
+  sink.log(formatAccess(updated));
+}
+
+/** kevbox-admin access-enable <ref> — flip the kill-switch back on. */
+export async function actionAccessEnable(db: Db, ref: string, sink: Sink = consoleSink): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const updated = await setActive(db, member.userId, true);
+  sink.log(`Access enabled for ${member.email ?? member.userId}.`);
+  sink.log(formatAccess(updated));
+}
+
+/**
+ * kevbox-admin access-max-devices <ref> <n> — set the per-member device cap. Core validates n>=1
+ * and throws a validationError on bad input; let it propagate so index withPool prints it.
+ */
+export async function actionAccessMaxDevices(
+  db: Db,
+  ref: string,
+  n: number,
+  sink: Sink = consoleSink,
+): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const updated = await setMaxDevices(db, member.userId, n);
+  sink.log(`Device cap set to ${updated.maxDevices} for ${member.email ?? member.userId}.`);
+  sink.log(formatAccess(updated));
+}
+
+/**
+ * kevbox-admin device-remove <ref> <deviceId> — deauthorize a single device. Catches the core
+ * notFound (statusCode 404) and reports a clean "Device not found" message instead of crashing.
+ */
+export async function actionDeviceRemove(
+  db: Db,
+  ref: string,
+  deviceId: string,
+  sink: Sink = consoleSink,
+): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  try {
+    await removeDevice(db, member.userId, deviceId);
+    sink.log(`Removed device ${deviceId} from ${member.email ?? member.userId}.`);
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      sink.err(`Device not found: ${deviceId}`);
+      return;
+    }
+    throw err;
+  }
+}
+
+/** kevbox-admin device-remove-all <ref> — deauthorize all of a member's devices. */
+export async function actionDeviceRemoveAll(db: Db, ref: string, sink: Sink = consoleSink): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const before = await getAccess(db, member.userId);
+  await removeAllDevices(db, member.userId);
+  sink.log(`Removed ${before.devices.length} device(s) from ${member.email ?? member.userId}.`);
 }

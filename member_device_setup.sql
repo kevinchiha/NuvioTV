@@ -38,6 +38,13 @@ create policy "read own policy"
 revoke insert, update, delete, truncate, references, trigger
   on public.member_device_policy from anon, authenticated;
 
+-- 2c. Admin role grant. The kevbox-admin app connects as role kevbox_admin (BYPASSRLS), which skips
+--     RLS POLICIES but NOT table-level GRANTs — so the explicit grants below are required for the
+--     admin to manage devices + the cap (mirrors member_addon_setup.sql). Idempotent; safe to re-run.
+--     No sequence grant needed: both tables use natural keys (composite PK / uuid PK, no serial/identity).
+grant select, insert, update, delete on public.member_device to kevbox_admin;
+grant select, insert, update, delete on public.member_device_policy to kevbox_admin;
+
 -- 3. Atomic claim-or-deny RPC -----------------------------------------------------
 --    SECURITY DEFINER + pinned search_path; uid taken from the JWT (tamper-proof). The advisory lock
 --    serializes concurrent claims for the same member so two devices can't both pass the count check

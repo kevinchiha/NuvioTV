@@ -39,3 +39,30 @@ create function public.default_member_addons() returns table (url text, sort_ord
     ('https://opensubtitles-v3.strem.io', 2),
     ('https://netflix-catalog.example/cfg/manifest.json', 3)
 $$;
+
+-- Access kill-switch + one-device-per-member limit tables. Copied EXACTLY (table DDL only) from the
+-- prod member_access_setup.sql / member_device_setup.sql. The load-bearing PKs/defaults/FKs the core
+-- upserts depend on are carried (user_id PK / composite (user_id, device_id) PK for on conflict;
+-- not null default true / default 1; references auth.users(id) on delete cascade). Deliberately NO
+-- RLS, policies, grants, seed trigger, or back-fill: their absence leaves test members UNSEEDED, which
+-- is exactly what makes the no-row defaults (active=true, max=1) testable (plan §5.1).
+create table public.member_access (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  active     boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+create table public.member_device (
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  device_id   text not null,
+  device_name text,
+  first_seen  timestamptz not null default now(),
+  last_seen   timestamptz not null default now(),
+  primary key (user_id, device_id)
+);
+
+create table public.member_device_policy (
+  user_id     uuid primary key references auth.users(id) on delete cascade,
+  max_devices int not null default 1,
+  updated_at  timestamptz not null default now()
+);

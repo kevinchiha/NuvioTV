@@ -1,13 +1,20 @@
 import { useState } from "react";
-import type { MemberDetail as MemberDetailType, AddonRow as AddonRowType } from "../lib/api.js";
+import type {
+  MemberDetail as MemberDetailType,
+  AddonRow as AddonRowType,
+  AccessState,
+  DeviceRow,
+} from "../lib/api.js";
 import { AddonRow } from "./AddonRow.js";
 import { DebridForm } from "./DebridForm.js";
+import { AccessTab } from "./AccessTab.js";
 
 type Tab = "addons" | "access";
 
 export interface MemberDetailProps {
   member: MemberDetailType;
   busy?: boolean;
+  access: AccessState | null;
   onToggle: (addon: AddonRowType, enabled: boolean) => void;
   onEditUrl: (addon: AddonRowType, url: string) => void;
   onDelete: (addon: AddonRowType) => void;
@@ -15,11 +22,16 @@ export interface MemberDetailProps {
   onAdd: (url: string) => void;
   onReset: () => void;
   onOnboardDebrid: (premiumizeKey: string, aiostreamsUrl: string) => void;
+  onSetActive: (active: boolean) => void;
+  onSetMaxDevices: (max: number) => void;
+  onRemoveDevice: (device: DeviceRow) => void;
+  onRemoveAllDevices: () => void;
 }
 
 export function MemberDetail({
   member,
   busy = false,
+  access,
   onToggle,
   onEditUrl,
   onDelete,
@@ -27,6 +39,10 @@ export function MemberDetail({
   onAdd,
   onReset,
   onOnboardDebrid,
+  onSetActive,
+  onSetMaxDevices,
+  onRemoveDevice,
+  onRemoveAllDevices,
 }: MemberDetailProps) {
   const [tab, setTab] = useState<Tab>("addons");
   const [newUrl, setNewUrl] = useState("");
@@ -52,10 +68,14 @@ export function MemberDetail({
       </div>
 
       {tab === "access" ? (
-        <p className="muted">
-          Access / kill-switch is not implemented in v1. This tab is reserved so it can be added
-          without restructuring the layout (see plans/MEMBER-ACCESS-PLAN.md).
-        </p>
+        <AccessTab
+          access={access}
+          busy={busy}
+          onSetActive={onSetActive}
+          onSetMaxDevices={onSetMaxDevices}
+          onRemoveDevice={onRemoveDevice}
+          onRemoveAllDevices={onRemoveAllDevices}
+        />
       ) : (
         <>
           <div>

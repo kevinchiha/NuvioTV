@@ -23,6 +23,13 @@ create role kevbox_admin with login password 'CHANGE_ME_strong_password' bypassr
 grant connect on database postgres to kevbox_admin;
 grant usage on schema public to kevbox_admin;
 grant select, insert, update, delete on public.member_addon to kevbox_admin;
+-- Access kill-switch + one-device-per-member limit (folded into member_access_setup.sql /
+-- member_device_setup.sql as the canonical source; mirrored here for the operator runbook).
+-- USAGE on schema public is already held from the role bootstrap above; no sequence grant is
+-- needed (these tables use natural keys — uuid PK / composite PK, no serial/identity).
+grant select, insert, update, delete on public.member_access to kevbox_admin;
+grant select, insert, update, delete on public.member_device to kevbox_admin;
+grant select, insert, update, delete on public.member_device_policy to kevbox_admin;
 grant execute on function public.default_member_addons() to kevbox_admin;
 -- Email lookup join — only the columns the admin needs from auth.users.
 grant usage on schema auth to kevbox_admin;

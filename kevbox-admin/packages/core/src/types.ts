@@ -45,3 +45,36 @@ export function mapAddonRow(r: {
     updatedAt: new Date(r.updated_at).toISOString(),
   };
 }
+
+export interface DeviceRow {
+  deviceId: string;
+  deviceName: string | null;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface AccessState {
+  userId: string;
+  active: boolean;
+  maxDevices: number;
+  devices: DeviceRow[];
+}
+
+/**
+ * Maps a raw member_device DB row to DeviceRow. Unlike mapAddonRow, device_id is an opaque
+ * client-generated TEXT id (a UUID minted on the TV) — NOT a numeric PK — so it is carried through
+ * verbatim with no Number() coercion.
+ */
+export function mapDeviceRow(r: {
+  device_id: string;
+  device_name: string | null;
+  first_seen: string | Date;
+  last_seen: string | Date;
+}): DeviceRow {
+  return {
+    deviceId: r.device_id,
+    deviceName: r.device_name,
+    firstSeen: new Date(r.first_seen).toISOString(),
+    lastSeen: new Date(r.last_seen).toISOString(),
+  };
+}

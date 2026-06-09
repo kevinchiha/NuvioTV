@@ -14,6 +14,12 @@ import {
   actionOnboardDebrid,
   actionBulkAdd,
   actionBulkSwap,
+  actionAccess,
+  actionAccessDisable,
+  actionAccessEnable,
+  actionAccessMaxDevices,
+  actionDeviceRemove,
+  actionDeviceRemoveAll,
 } from "./actions.js";
 
 /** Resolve a pool, run `fn(pool)`, always close the pool, and exit non-zero on error. */
@@ -132,6 +138,56 @@ program
   .description("Swap one addon URL for another across every member (requires --yes).")
   .action(async (fromUrl: string, toUrl: string, opts: { yes?: boolean }) => {
     await withPool((pool) => actionBulkSwap(pool, fromUrl, toUrl, opts, consoleSink));
+  });
+
+program
+  .command("access")
+  .argument("<ref>", "member email or userId")
+  .description("Show a member's access state, device cap, and bound devices.")
+  .action(async (ref: string) => {
+    await withPool((pool) => actionAccess(pool, ref, consoleSink));
+  });
+
+program
+  .command("access-disable")
+  .argument("<ref>", "member email or userId")
+  .description("Disable a member's access (the kill-switch locks their TVs out).")
+  .action(async (ref: string) => {
+    await withPool((pool) => actionAccessDisable(pool, ref, consoleSink));
+  });
+
+program
+  .command("access-enable")
+  .argument("<ref>", "member email or userId")
+  .description("Re-enable a member's access.")
+  .action(async (ref: string) => {
+    await withPool((pool) => actionAccessEnable(pool, ref, consoleSink));
+  });
+
+program
+  .command("access-max-devices")
+  .argument("<ref>", "member email or userId")
+  .argument("<n>", "device cap (integer >= 1)", (v) => parseInt(v, 10))
+  .description("Set a member's per-device cap (does NOT evict already-seated devices).")
+  .action(async (ref: string, n: number) => {
+    await withPool((pool) => actionAccessMaxDevices(pool, ref, n, consoleSink));
+  });
+
+program
+  .command("device-remove")
+  .argument("<ref>", "member email or userId")
+  .argument("<deviceId>", "the opaque device id to deauthorize")
+  .description("Deauthorize a single device from a member.")
+  .action(async (ref: string, deviceId: string) => {
+    await withPool((pool) => actionDeviceRemove(pool, ref, deviceId, consoleSink));
+  });
+
+program
+  .command("device-remove-all")
+  .argument("<ref>", "member email or userId")
+  .description("Deauthorize all of a member's devices.")
+  .action(async (ref: string) => {
+    await withPool((pool) => actionDeviceRemoveAll(pool, ref, consoleSink));
   });
 
 await program.parseAsync(process.argv);

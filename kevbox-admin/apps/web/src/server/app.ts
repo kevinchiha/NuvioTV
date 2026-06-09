@@ -4,6 +4,7 @@ import type { Db } from "@kevbox-admin/core";
 import { requireAdmin, type Verifier } from "./auth.js";
 import { registerMemberRoutes } from "./routes/members.js";
 import { registerAddonRoutes } from "./routes/addons.js";
+import { registerAccessRoutes } from "./routes/access.js";
 import { registerActionRoutes } from "./routes/actions.js";
 import { registerBulkRoutes } from "./routes/bulk.js";
 
@@ -57,6 +58,7 @@ export function buildApp(opts: BuildAppOptions): FastifyInstance {
     api.addHook("preHandler", requireAdmin(opts.verifier, opts.adminEmails));
     registerMemberRoutes(api, opts.db);
     registerAddonRoutes(api, opts.db);
+    registerAccessRoutes(api, opts.db);
     registerActionRoutes(api, opts.db);
     registerBulkRoutes(api, opts.db);
   }, { prefix: "/api" });

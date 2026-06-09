@@ -1,4 +1,4 @@
-import type { MemberSummary, MemberDetail, AddonRow } from "@kevbox-admin/core";
+import type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow } from "@kevbox-admin/core";
 
 /** Render the member overview table as a single multi-line string. */
 export function formatMembers(members: MemberSummary[]): string {
@@ -31,6 +31,26 @@ export function formatMember(member: MemberDetail): string {
 /** Render a single addon row as one line (used after add/update/toggle). */
 export function formatAddon(a: AddonRow): string {
   return `#${a.id}  sort=${a.sortOrder}  ${a.enabled ? "on" : "off"}  ${a.url}`;
+}
+
+/** Render a member's access state (kill-switch + device usage + device table). */
+export function formatAccess(state: AccessState): string {
+  const status = state.active ? "Enabled" : "Disabled";
+  const usage = `${state.devices.length} of ${state.maxDevices} devices used`;
+  return `Access: ${status}\n${usage}\n${formatDevices(state.devices)}`;
+}
+
+/** Render the member's bound devices as a table; "(no devices)" when empty. */
+export function formatDevices(devices: DeviceRow[]): string {
+  if (devices.length === 0) return "(no devices)";
+  const header = ["DEVICE_ID", "NAME", "FIRST_SEEN", "LAST_SEEN"];
+  const rows = devices.map((d) => [
+    d.deviceId,
+    d.deviceName ?? "(no name)",
+    d.firstSeen,
+    d.lastSeen,
+  ]);
+  return renderTable(header, rows);
 }
 
 /** Left-aligned, column-padded text table. */

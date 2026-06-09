@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Api, downloadSnapshot, type MemberSummary, type MemberDetail as MemberDetailType, type AddonRow as AddonRowType } from "./lib/api.js";
+import { Api, downloadSnapshot, type MemberSummary, type MemberDetail as MemberDetailType, type AddonRow as AddonRowType, type AccessState, type DeviceRow } from "./lib/api.js";
 import { signIn, signOut, currentToken } from "./lib/supabase.js";
 import { Login } from "./components/Login.js";
 import { MemberList } from "./components/MemberList.js";
@@ -19,6 +19,7 @@ export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [members, setMembers] = useState<MemberSummary[]>([]);
   const [selected, setSelected] = useState<MemberDetailType | null>(null);
+  const [selectedAccess, setSelectedAccess] = useState<AccessState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
@@ -40,8 +41,9 @@ export function App() {
 
   const reloadSelected = useCallback(
     async (userId: string) => {
-      const { member } = await api.getMember(userId);
+      const [{ member }, { access }] = await Promise.all([api.getMember(userId), api.getAccess(userId)]);
       setSelected(member);
+      setSelectedAccess(access);
     },
     [api],
   );
@@ -131,8 +133,64 @@ export function App() {
         const { snapshot } = await api.bulkSwap({ fromUrl, toUrl, confirm: true });
         downloadSnapshot(snapshot, "bulk-swap");
         await refreshMembers();
-        if (selected) await reloadSelected(selected.userId);
+        if (selected) await reloadSelected(selected.userId); // onBulkSwap re-fetches access too (reloadSelected is the single fetch point).
       }),
+    });
+  }
+
+  // ---- access kill-switch + device-limit callbacks ----
+  // Enable is direct (re-grants access); Disable is destructive → routes through ConfirmModal.
+  function onSetActive(active: boolean) {
+    if (!selected) return;
+    const userId = selected.userId;
+    if (active) {
+      void withBusy(async () => { await api.setActive(userId, true); await afterMutate(); });
+      return;
+    }
+    setPending({
+      title: "Disable member access",
+      message: (
+        <>
+          Disable access for <strong>{selected.email ?? userId}</strong>? Their TV shows the
+          locked-out screen within a few minutes.
+        </>
+      ),
+      run: () => withBusy(async () => { await api.setActive(userId, false); await afterMutate(); }),
+    });
+  }
+  function onSetMaxDevices(max: number) {
+    if (!selected) return;
+    const userId = selected.userId;
+    void withBusy(async () => { await api.setMaxDevices(userId, max); await afterMutate(); });
+  }
+  function onRemoveDevice(device: DeviceRow) {
+    if (!selected) return;
+    const userId = selected.userId;
+    const label = `${device.deviceName ?? "(unknown model)"} (${device.deviceId.slice(-8)})`;
+    setPending({
+      title: "Remove device",
+      message: (
+        <>
+          Remove <strong>{label}</strong>? This is <strong>not undoable</strong> — a
+          returning/cleared TV mints a new device id, so the binding is gone.
+        </>
+      ),
+      run: () => withBusy(async () => { await api.removeDevice(userId, device.deviceId); await afterMutate(); }),
+    });
+  }
+  function onRemoveAllDevices() {
+    if (!selected) return;
+    const userId = selected.userId;
+    const count = selectedAccess?.devices.length ?? 0;
+    setPending({
+      title: "Remove all devices",
+      message: (
+        <>
+          Remove all <strong>{count}</strong> device(s)? This is <strong>not undoable</strong> — a
+          returning/cleared TV mints a new device id, so the bindings are gone.
+        </>
+      ),
+      run: () => withBusy(async () => { await api.removeAllDevices(userId); await afterMutate(); }),
     });
   }
 
@@ -168,6 +226,7 @@ export function App() {
           <MemberDetail
             member={selected}
             busy={busy}
+            access={selectedAccess}
             onToggle={onToggle}
             onEditUrl={onEditUrl}
             onDelete={onDelete}
@@ -175,6 +234,10 @@ export function App() {
             onAdd={onAdd}
             onReset={onReset}
             onOnboardDebrid={onOnboardDebrid}
+            onSetActive={onSetActive}
+            onSetMaxDevices={onSetMaxDevices}
+            onRemoveDevice={onRemoveDevice}
+            onRemoveAllDevices={onRemoveAllDevices}
           />
         ) : (
           <p className="muted">Select a member from the left.</p>

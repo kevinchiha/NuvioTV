@@ -11,6 +11,12 @@ import {
   actionOnboardDebrid,
   actionBulkAdd,
   actionBulkSwap,
+  actionAccess,
+  actionAccessDisable,
+  actionAccessEnable,
+  actionAccessMaxDevices,
+  actionDeviceRemove,
+  actionDeviceRemoveAll,
 } from "../src/actions.js";
 
 const SUFFIX = "@cli-test.dev";
@@ -205,4 +211,98 @@ test("actionBulkSwap with --yes swaps the url everywhere", async () => {
     [id],
   );
   expect(rows.map((r) => r.url)).toEqual(["https://swapto.example"]);
+});
+
+test("actionAccess shows the fail-open defaults (Enabled) for a fresh member", async () => {
+  await seedMember(`acc${SUFFIX}`);
+  const { sink, text } = makeSink();
+  await actionAccess(pool, `acc${SUFFIX}`, sink);
+  expect(text()).toContain("Enabled");
+  expect(text()).toContain("0 of 1 devices used");
+  expect(text()).toContain("(no devices)");
+});
+
+test("actionAccess reports an unknown member", async () => {
+  const { sink, text } = makeSink();
+  await actionAccess(pool, `accghost${SUFFIX}`, sink);
+  expect(text()).toMatch(/not found/i);
+});
+
+test("actionAccessDisable flips active to false", async () => {
+  const id = await seedMember(`accdis${SUFFIX}`);
+  const { sink, text } = makeSink();
+  await actionAccessDisable(pool, `accdis${SUFFIX}`, sink);
+  expect(text()).toContain("Disabled");
+  const { rows } = await pool.query<{ active: boolean }>(
+    "select active from public.member_access where user_id = $1",
+    [id],
+  );
+  expect(rows[0].active).toBe(false);
+});
+
+test("actionAccessEnable flips active back to true", async () => {
+  const id = await seedMember(`accen${SUFFIX}`);
+  await pool.query(
+    "insert into public.member_access (user_id, active) values ($1, false)",
+    [id],
+  );
+  const { sink, text } = makeSink();
+  await actionAccessEnable(pool, `accen${SUFFIX}`, sink);
+  expect(text()).toContain("Enabled");
+  const { rows } = await pool.query<{ active: boolean }>(
+    "select active from public.member_access where user_id = $1",
+    [id],
+  );
+  expect(rows[0].active).toBe(true);
+});
+
+test("actionAccessMaxDevices sets max_devices", async () => {
+  const id = await seedMember(`accmax${SUFFIX}`);
+  const { sink, text } = makeSink();
+  await actionAccessMaxDevices(pool, `accmax${SUFFIX}`, 3, sink);
+  expect(text()).toContain("0 of 3 devices used");
+  const { rows } = await pool.query<{ max_devices: number }>(
+    "select max_devices from public.member_device_policy where user_id = $1",
+    [id],
+  );
+  expect(Number(rows[0].max_devices)).toBe(3);
+});
+
+test("actionDeviceRemove removes a seeded device row", async () => {
+  const id = await seedMember(`devrm${SUFFIX}`);
+  await pool.query(
+    "insert into public.member_device (user_id, device_id, device_name) values ($1,'dev-1','KevBox A')",
+    [id],
+  );
+  const { sink, text } = makeSink();
+  await actionDeviceRemove(pool, `devrm${SUFFIX}`, "dev-1", sink);
+  expect(text()).toMatch(/removed/i);
+  const { rows } = await pool.query<{ n: number }>(
+    "select count(*)::int as n from public.member_device where user_id = $1",
+    [id],
+  );
+  expect(rows[0].n).toBe(0);
+});
+
+test("actionDeviceRemove reports a missing device without crashing", async () => {
+  await seedMember(`devnf${SUFFIX}`);
+  const { sink, text } = makeSink();
+  await actionDeviceRemove(pool, `devnf${SUFFIX}`, "ghost-device", sink);
+  expect(text()).toMatch(/not found/i);
+});
+
+test("actionDeviceRemoveAll clears the member's device rows", async () => {
+  const id = await seedMember(`devall${SUFFIX}`);
+  await pool.query(
+    "insert into public.member_device (user_id, device_id) values ($1,'d-a'), ($1,'d-b')",
+    [id],
+  );
+  const { sink, text } = makeSink();
+  await actionDeviceRemoveAll(pool, `devall${SUFFIX}`, sink);
+  expect(text()).toMatch(/2 device/i);
+  const { rows } = await pool.query<{ n: number }>(
+    "select count(*)::int as n from public.member_device where user_id = $1",
+    [id],
+  );
+  expect(rows[0].n).toBe(0);
 });

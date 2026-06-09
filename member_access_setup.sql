@@ -26,6 +26,11 @@ create policy "read own access"
 revoke insert, update, delete, truncate, references, trigger
   on public.member_access from anon, authenticated;
 
+-- 2c. Admin role grant. The kevbox-admin app connects as role kevbox_admin (BYPASSRLS), which skips
+--     RLS POLICIES but NOT table-level GRANTs — so the explicit grant below is required for the admin
+--     to manage the kill-switch (mirrors member_addon_setup.sql). Idempotent; safe to re-run.
+grant select, insert, update, delete on public.member_access to kevbox_admin;
+
 -- 3. Authoritative verdict RPC — the ONLY read path the app uses ------------------
 --    SECURITY DEFINER + pinned search_path. Resolves auth.uid() from the JWT (tamper-proof) and
 --    returns a 3-state result. RAISES on an unauthenticated caller so the client routes it to
