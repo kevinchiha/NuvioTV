@@ -1,0 +1,30 @@
+[Unit]
+Description=KevBox Admin (Fastify) — admin.kevbox.dev
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kevbox-admin
+Group=kevbox-admin
+WorkingDirectory=/opt/kevbox-admin/current
+# Secrets + PORT come from this file ONLY (never from git). See deploy/env.example.
+EnvironmentFile=/etc/kevbox-admin/env
+ExecStart=/usr/bin/node /opt/kevbox-admin/current/dist/server.js
+Restart=on-failure
+RestartSec=3
+# The server binds 127.0.0.1:$PORT (loopback); nginx is the only public ingress.
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/kevbox-admin
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
