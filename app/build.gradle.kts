@@ -88,8 +88,8 @@ android {
         applicationId = "tv.kevbox"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1023
-        versionName = "0.7.6-beta"
+        versionCode = 1024
+        versionName = "0.7.7-beta"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
         buildConfigField("String", "INTRODB_API_URL", "\"${localProperties.getProperty("INTRODB_API_URL", "")}\"")
@@ -136,6 +136,10 @@ android {
             buildConfigField("boolean", "FEATURE_IN_APP_TRAILERS_ENABLED", "true")
             buildConfigField("boolean", "FEATURE_EXTERNAL_TRAILERS_ENABLED", "true")
             buildConfigField("boolean", "FEATURE_MEMBER_ADDON_CONFIG", "true")
+            // KevBox family build: remote access kill-switch + one-device-per-member limit ON.
+            // See plans/MEMBER-ACCESS-PLAN.md, member_access_setup.sql, member_device_setup.sql.
+            buildConfigField("boolean", "FEATURE_ACCESS_CONTROL", "true")
+            buildConfigField("boolean", "FEATURE_DEVICE_LIMIT", "true")
         }
         create("playstore") {
             dimension = "distribution"
@@ -145,6 +149,9 @@ android {
             buildConfigField("boolean", "FEATURE_IN_APP_TRAILERS_ENABLED", "false")
             buildConfigField("boolean", "FEATURE_EXTERNAL_TRAILERS_ENABLED", "true")
             buildConfigField("boolean", "FEATURE_MEMBER_ADDON_CONFIG", "false")
+            // Public flavor never ships the kill-switch and never calls the family Supabase project.
+            buildConfigField("boolean", "FEATURE_ACCESS_CONTROL", "false")
+            buildConfigField("boolean", "FEATURE_DEVICE_LIMIT", "false")
         }
     }
 
