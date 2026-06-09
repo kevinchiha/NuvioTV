@@ -15,7 +15,7 @@ export async function listMembers(db: Db): Promise<MemberSummary[]> {
               where m.user_id = u.id
                 and m.url not in (select url from public.default_member_addons())
             ) as has_debrid
-       from auth.users u
+       from public.kevbox_auth_users u
       order by u.email nulls last`,
   );
   return rows.map((r: any) => ({
@@ -30,7 +30,7 @@ export async function listMembers(db: Db): Promise<MemberSummary[]> {
 /** ref = email or userId (uuid). Returns null if no such member. */
 export async function getMember(db: Db, ref: string): Promise<MemberDetail | null> {
   const { rows: u } = await db.query(
-    `select id, email from auth.users where id::text = $1 or email = $1 limit 1`,
+    `select id, email from public.kevbox_auth_users where id::text = $1 or email = $1 limit 1`,
     [ref],
   );
   if (u.length === 0) return null;

@@ -16,7 +16,7 @@ export interface AddonSnapshotRow {
 export async function snapshotAllAddons(db: Db): Promise<AddonSnapshotRow[]> {
   const { rows } = await db.query(
     `select m.user_id, u.email, m.url, m.enabled, m.sort_order
-       from public.member_addon m join auth.users u on u.id = m.user_id
+       from public.member_addon m join public.kevbox_auth_users u on u.id = m.user_id
       order by u.email nulls last, m.sort_order, m.id`,
   );
   return rows.map((r: any) => ({
@@ -37,7 +37,7 @@ export async function bulkAddAddon(
   if (confirm !== true) throw new Error("bulkAddAddon requires confirm=true");
   const { rowCount } = await db.query(
     `insert into public.member_addon (user_id, url, sort_order)
-     select id, $1, $2 from auth.users
+     select id, $1, $2 from public.kevbox_auth_users
      on conflict (user_id, url) do nothing`,
     [opts.url.trim(), opts.sortOrder],
   );

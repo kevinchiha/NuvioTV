@@ -21,6 +21,14 @@ create view public.member_addon_v as
   select m.*, u.email as auth_email
   from public.member_addon m join auth.users u on u.id = m.user_id;
 
+-- Mirrors the production public.kevbox_auth_users view (owned by postgres, runs with owner
+-- privileges) that core queries instead of auth.users directly. On Supabase the auth schema is
+-- owned by supabase_admin and the least-priv kevbox_admin role cannot be granted USAGE on it, so
+-- the admin reads member emails through this owner-privileged public view (spec §4.1). Exposes
+-- only id/email/created_at. Here in the test DB it is a plain view over the local auth.users.
+create view public.kevbox_auth_users as
+  select id, email, created_at from auth.users;
+
 -- Mirrors the production default_member_addons() shape. Test URLs (4 distinct rows) — the
 -- core logic only depends on there being N default rows, not on the exact prod URLs.
 create function public.default_member_addons() returns table (url text, sort_order int)
