@@ -4,3 +4,6 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Generated graphify knowledge graph (mirrors the root .gitignore convention)
+graphify-out/
