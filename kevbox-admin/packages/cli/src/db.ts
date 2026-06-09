@@ -49,9 +49,22 @@ export function resolveDbUrl(localPropertiesPath: string = DEFAULT_LOCAL_PROPERT
   );
 }
 
-/** Create a pg Pool from the resolved connection string. Caller owns pool.end(). */
+/**
+ * Create a pg Pool from the resolved connection string. Caller owns pool.end().
+ *
+ * SSL: same Supabase-pooler handling as the web server — strip `sslmode` and set `ssl` explicitly
+ * (encrypted, chain not verified) for Supabase/sslmode URLs, so the operator can point the CLI at
+ * the pooler without the "self-signed certificate in certificate chain" failure; a plain local
+ * docker URL gets no ssl.
+ */
 export function createPool(localPropertiesPath?: string): pg.Pool {
-  return new Pool({ connectionString: resolveDbUrl(localPropertiesPath) });
+  const url = new URL(resolveDbUrl(localPropertiesPath));
+  const wantsSsl = url.searchParams.has("sslmode") || /supabase\.(co|com)$/.test(url.hostname);
+  url.searchParams.delete("sslmode");
+  return new Pool({
+    connectionString: url.toString(),
+    ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
+  });
 }
 
 /** Re-export for callers that only need the injected-query type. */
