@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Api, downloadSnapshot, type MemberSummary, type MemberDetail as MemberDetailType, type AddonRow as AddonRowType, type AccessState, type DeviceRow } from "./lib/api.js";
 import { signIn, signOut, currentToken } from "./lib/supabase.js";
+import { resolveMemberDeepLink } from "./lib/deep-link.js";
 import { Login } from "./components/Login.js";
 import { MemberList } from "./components/MemberList.js";
 import { MemberDetail } from "./components/MemberDetail.js";
@@ -71,6 +72,46 @@ export function App() {
       await reloadSelected(m.userId);
     });
   }
+
+  // Deep-link from www.kevbox.dev: ?member=<email|userId> auto-opens that member once the list
+  // has loaded. Runs once; clears the param so a manual reload won't re-trigger. Resolves against
+  // the loaded list first, then falls back to a server lookup so it still works if listMembers is
+  // ever paginated.
+  const deepLinkRef = useRef<string | null>(
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("member"),
+  );
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current || !authed || members.length === 0) return;
+    const outcome = resolveMemberDeepLink(members, deepLinkRef.current);
+    if (outcome.kind === "none") return;
+    deepLinkHandled.current = true;
+
+    // Strip ?member (preserving any other params) so a reload won't re-select.
+    const params = new URLSearchParams(window.location.search);
+    params.delete("member");
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+
+    if (outcome.kind === "select") {
+      void selectMember(outcome.member);
+      return;
+    }
+    // miss → ask the server (resolves email-or-userId); only error if it truly doesn't exist.
+    void (async () => {
+      try {
+        const { member } = await api.getMember(outcome.ref);
+        setView("member");
+        await reloadSelected(member.userId);
+      } catch {
+        setError(`No member found for "${outcome.ref}"`);
+      }
+    })();
+    // selectMember/reloadSelected/api are stable enough; the deepLinkHandled ref makes this run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, members]);
 
   // ---- addon op callbacks (optimistic-ish: re-fetch the member after each) ----
   function afterMutate() {
