@@ -168,7 +168,7 @@ data class DrawerItem(
 )
 
 private data class MainUiPrefs(
-    val theme: AppTheme = AppTheme.WHITE,
+    val theme: AppTheme = AppTheme.OCEAN,
     val font: AppFont = AppFont.INTER,
     val amoledMode: Boolean = false,
     val amoledSurfacesMode: Boolean = false,
@@ -520,10 +520,12 @@ class MainActivity : ComponentActivity() {
                     val effectiveExperienceMode = mainUiPrefs.experienceMode
                         ?: if (layoutChosen) ExperienceMode.ADVANCED else null
                     val needsExperienceSelection = effectiveExperienceMode == null
-                    val needsEssentialAddonSetup =
-                        effectiveExperienceMode == ExperienceMode.ESSENTIAL &&
-                            installedAddons.orEmpty().isEmpty() &&
-                            !mainUiPrefs.addonSetupSkipped
+                    // KevBox TV: never show the on-device essential-addon-setup screen. Addons are
+                    // baked defaults + remote per-member config (member_addon / kevbox-admin); family
+                    // members must not view/edit/enable/disable/delete addons. Forcing false keeps that
+                    // addon-management onboarding surface unreachable (it was already effectively dead
+                    // since the 4 baked defaults mean installedAddons is never empty).
+                    val needsEssentialAddonSetup = false
 
                     if (needsEssentialAddonSetup) {
                         EssentialAddonSetupScreen(
@@ -689,13 +691,12 @@ class MainActivity : ComponentActivity() {
                                     iconRes = R.raw.sidebar_library
                                 )
                             )
-                            add(
-                                DrawerItem(
-                                    route = Screen.AddonManager.route,
-                                    label = strNavAddons,
-                                    iconRes = R.raw.sidebar_plugin
-                                )
-                            )
+                            // KevBox TV: the Addons entry is intentionally removed from the sidebar.
+                            // The operator manages each member's addons remotely (kevbox-admin /
+                            // member_addon); family members must not view/edit/enable/disable/delete
+                            // addons on-device. The Screen.AddonManager route is also unreachable from
+                            // Settings (see SettingsScreen). MemberConfigService still applies config
+                            // programmatically — it does not use this screen.
                             add(
                                 DrawerItem(
                                     route = Screen.Settings.route,

@@ -768,7 +768,7 @@ class PlayerSettingsDataStore @Inject constructor(
                 internalPlayerEngine = prefs[internalPlayerEngineKey]?.let {
                     runCatching { InternalPlayerEngine.valueOf(it) }.getOrDefault(InternalPlayerEngine.EXOPLAYER)
                 } ?: InternalPlayerEngine.EXOPLAYER,
-                autoSwitchInternalPlayerOnError = prefs[autoSwitchInternalPlayerOnErrorKey] ?: false,
+                autoSwitchInternalPlayerOnError = prefs[autoSwitchInternalPlayerOnErrorKey] ?: true,
                 useLibass = prefs[useLibassKey] ?: false,
                 libassRenderType = prefs[libassRenderTypeKey]?.let {
                     try { LibassRenderType.valueOf(it) } catch (e: Exception) { LibassRenderType.OVERLAY_OPEN_GL }
@@ -802,8 +802,8 @@ class PlayerSettingsDataStore @Inject constructor(
                 preferredAudioLanguage = normalizeSelectableLanguageCode(
                     prefs[preferredAudioLanguageKey] ?: AudioLanguageOption.DEVICE
                 ),
-                secondaryPreferredAudioLanguage = prefs[secondaryPreferredAudioLanguageKey]
-                    ?.let(::normalizeSecondaryAudioLanguageCode),
+                secondaryPreferredAudioLanguage = (prefs[secondaryPreferredAudioLanguageKey] ?: "fr")
+                    .let(::normalizeSecondaryAudioLanguageCode),
                 loadingOverlayEnabled = prefs[loadingOverlayEnabledKey] ?: true,
                 showPlayerLoadingStatus = prefs[showPlayerLoadingStatusKey] ?: true,
                 pauseOverlayEnabled = prefs[pauseOverlayEnabledKey] ?: true,
@@ -894,10 +894,10 @@ class PlayerSettingsDataStore @Inject constructor(
                         prefs[subtitlePreferredLanguageKey],
                         prefs[subtitleSecondaryLanguageKey]
                     ),
-                    secondaryPreferredLanguage = prefs[subtitleSecondaryLanguageKey]
-                        ?.let(::normalizeSelectableLanguageCode)
-                        ?.takeUnless { it == SUBTITLE_LANGUAGE_FORCED },
-                    useForcedSubtitles = (prefs[subtitleUseForcedSubtitlesKey] ?: false) ||
+                    secondaryPreferredLanguage = (prefs[subtitleSecondaryLanguageKey] ?: "fr")
+                        .let(::normalizeSelectableLanguageCode)
+                        .takeUnless { it == SUBTITLE_LANGUAGE_FORCED },
+                    useForcedSubtitles = (prefs[subtitleUseForcedSubtitlesKey] ?: true) ||
                         prefs[subtitlePreferredLanguageKey]?.let(::normalizeSelectableLanguageCode) == SUBTITLE_LANGUAGE_FORCED ||
                         prefs[subtitleSecondaryLanguageKey]?.let(::normalizeSelectableLanguageCode) == SUBTITLE_LANGUAGE_FORCED,
                     showOnlyPreferredLanguages = prefs[subtitleShowOnlyPreferredLanguagesKey] ?: false,
