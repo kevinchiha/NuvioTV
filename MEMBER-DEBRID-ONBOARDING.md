@@ -1,9 +1,14 @@
 # KevBox TV — Per-member debrid onboarding (runbook)
 
-> **What this is:** the step-by-step for giving each family member their own debrid stream sources
-> (**Torrentio** + **AIOStreams**) with **their own keys**. Each member uses a *different* debrid
-> account/key — keys are never shared. Related: `MEMBER-CONFIG-PLAN.md` (the remote-control feature),
-> `UPSTREAM-SYNC.md` (fork rules).
+> **What this is:** the step-by-step for onboarding each family member end-to-end:
+> **(1)** their own debrid stream sources (**Torrentio** + **AIOStreams**) with **their own keys**, and
+> **(2)** their own **Trakt** account for personal watch-history, scrobbling, ratings, and Continue
+> Watching. Each member uses *different* debrid creds **and** a *different* Trakt account — nothing is
+> shared. Related: `MEMBER-CONFIG-PLAN.md` (the remote-control feature), `UPSTREAM-SYNC.md` (fork rules).
+>
+> **⚠️ Per member you must do BOTH:** ① add their debrid rows in Supabase (steps 1–5 below) **and**
+> ② sign them into Trakt on their TV (its own section further down). Skipping Trakt = that member has
+> **no** personal watch tracking — easy to forget, so it has its own checklist below.
 
 ## The model
 
@@ -18,6 +23,10 @@ Why debrid isn't baked: a single baked URL can't hold five members' different ke
 encrypts its debrid key *inside* the URL (no swappable field), so the only safe home for per-member
 credentials is the per-member `member_addon` table. Baking one would silently share one person's debrid
 with everyone.
+
+**Trakt is a third thing — not an addon, not a Supabase row.** It's an on-device OAuth sign-in (the
+token lives on the TV in `TraktAuthDataStore`, *not* in `member_addon`). It has its own onboarding
+section below; don't try to model it as an addon URL.
 
 ## Per-member onboarding — do this once per member
 
@@ -51,23 +60,64 @@ on conflict (user_id, url) do nothing;
    - `sort_order` 4–5 places them after the 4 universal addons (0–3).
 
 **5. Apply on the TV**
-   - Once the member-config feature is built, it applies on the member's next sign-in / app-open — no
-     restart. Until then, add the same two addons on-device via the app's Add-Addon screen.
+   - The member-config feature is live (`MemberConfigService`, shipped on `kevbox`), so the two rows
+     apply automatically on that member's next sign-in / app-open — no restart, no on-device step. If
+     they're already signed in, reopening the app pulls the new rows.
+   - Manual fallback (only if needed): add the same two addons on-device via the app's Add-Addon screen.
+
+## Per-member Trakt sign-in — do this once per member (on the TV)
+
+> **Crucial, easy-to-forget step.** Without it, that member has **no** personal watch history, **no**
+> scrobbling, **no** Continue Watching synced to their Trakt, and **no** Trakt lists/ratings. Do this for
+> every member right after their debrid rows are in.
+
+**Why this is on-device (not Supabase like debrid):** Trakt auth is an OAuth token stored locally on the
+TV, not in `member_addon`. The app's Trakt API credentials are already baked into the build
+(`TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET`), so the member needs **only a free Trakt account** — no
+developer/API-app setup on their end.
+
+**1. Make sure the member has their own Trakt account**
+   - Free at <https://trakt.tv/auth/join>. **One account per member — never shared** (a shared account
+     merges everyone's watch history, scrobbles, and ratings — the Trakt twin of sharing a debrid key).
+
+**2. On that member's TV: Settings → Trakt → Connect**
+   - The screen shows a short **code** plus a **QR code** that points to
+     `https://trakt.tv/activate/<code>` (code pre-filled). A countdown shows when the code expires.
+
+**3. Activate on a phone/laptop**
+   - Scan the QR (or open <https://trakt.tv/activate>), **sign in to that member's own Trakt account**,
+     and approve the code shown on the TV.
+
+**4. Confirm it took**
+   - The TV flips to **Connected** and shows that member's Trakt stats strip. Done — scrobbling, watch
+     history, and Continue Watching now flow to their Trakt. No restart needed.
 
 ## Editing / rotating later
 - **Change a member's Premiumize key:** edit that member's Torrentio row `url` (swap the `premiumize=…`
   value). - **New AIOStreams config:** replace that member's AIOStreams row `url` with the new full URL.
-- One member's URL works across **all of that member's devices** — no per-device step.
+- One member's debrid URL works across **all of that member's devices** — no per-device step.
+- **Switch a member's Trakt account:** on their TV, Settings → Trakt → **Disconnect** (confirm), then
+  **Connect** again and approve with the other account.
+- **Trakt is per-device, not synced:** unlike debrid (which follows the member to any device via
+  Supabase), Trakt is signed in on the TV itself. A new or replaced TV needs the device-code sign-in
+  (Trakt steps 2–3) again.
 
 ## Reset / remove
 - **Reset a member to universal defaults:** `delete from member_addon where user_id='<uuid>';` then
   re-run `select … from public.default_member_addons()` (see `MEMBER-CONFIG-PLAN.md`). This **drops their
   debrid** — re-run the onboarding insert (step 4) to restore it.
 - **Remove one source:** `delete from member_addon where user_id='<uuid>' and url like 'https://torrentio%';`
+- **Disconnect Trakt:** on the TV, Settings → Trakt → **Disconnect** — revokes the token on that TV. The
+  member's history stays safe on Trakt's servers; reconnect any time via the Trakt steps above.
 
 ## Gotchas
 - **Never share keys.** Each member's Torrentio key and AIOStreams URL are their own. A shared AIOStreams
   URL = a shared debrid account (and its concurrent-stream limits).
+- **Never share a Trakt account either.** One Trakt account per member — sharing merges everyone's watch
+  history, scrobbles, and ratings into one timeline. Same rule as debrid keys.
+- **The Trakt code expires.** The device code shown on the TV has a countdown; if it lapses before the
+  member approves, tap **Connect** again for a fresh one. (Re-opening the screen reuses a still-valid code
+  rather than burning Trakt's tightly rate-limited code endpoint.)
 - **The URL is a bearer secret.** Anyone with a member's URL can use their debrid. It lives in the APK
   (universal addons) and the `member_addon` table (debrid) — fine for family, don't post publicly.
 - **Key case is preserved** on-device (the canonical form only lowercases an internal dedup key, not the
