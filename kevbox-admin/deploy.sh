@@ -73,6 +73,9 @@ ssh "$SSH_ALIAS" -p "$SSH_PORT" "set -euo pipefail
   sudo mkdir -p '$REMOTE_DIR/releases/$RELEASE'
   sudo tar -C '$REMOTE_DIR/releases/$RELEASE' -xzf '/tmp/$TARBALL'
   rm -f '/tmp/$TARBALL'
+  # tar restores the laptop stage dir's owner/0700 onto the release dir; the hardened unit runs
+  # as kevbox-admin, so hand the release to that user or systemd fails CHDIR (status=200/CHDIR).
+  sudo chown -R kevbox-admin:kevbox-admin '$REMOTE_DIR/releases/$RELEASE'
   sudo ln -sfn '$REMOTE_DIR/releases/$RELEASE' '$REMOTE_DIR/current'
   sudo systemctl restart '$SERVICE'
   # Prune all but the 5 most recent releases.
