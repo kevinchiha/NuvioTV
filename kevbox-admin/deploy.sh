@@ -30,7 +30,10 @@ REMOTE_DIR="${KEVBOX_ADMIN_REMOTE_DIR:-/opt/kevbox-admin}"
 SERVICE="${KEVBOX_ADMIN_SERVICE:-kevbox-admin}"
 DOMAIN="${KEVBOX_ADMIN_DOMAIN:-admin.kevbox.dev}"
 
-REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+# The npm-workspaces root is this script's own dir (kevbox-admin/), which lives INSIDE the
+# NuvioTV git repo. Use the script dir, NOT `git rev-parse --show-toplevel` (that returns the
+# NuvioTV root, which has no package.json / kevbox-admin workspaces and would break the build).
+REPO="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO"
 
 # --- 1. Build core + web --------------------------------------------------------
