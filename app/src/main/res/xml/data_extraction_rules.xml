@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31+) backup/transfer rules.
+
+  The access kill-switch keeps tamper-resistant grace clocks and a per-device id on
+  disk via two preferences DataStores:
+    - files/datastore/access_control.preferences_pb  (AccessControlDataStore)
+    - files/datastore/device_guard.preferences_pb    (DeviceGuardDataStore)
+
+  These MUST NOT be carried to another install/device via cloud backup or device
+  transfer, otherwise a locked-out member could clone a "last verified" state and
+  bypass the grace window, or duplicate a device id past the device limit.
+
+  Path is relative to the app's internal files/ directory.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/access_control.preferences_pb" />
+        <exclude domain="file" path="datastore/device_guard.preferences_pb" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/access_control.preferences_pb" />
+        <exclude domain="file" path="datastore/device_guard.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>

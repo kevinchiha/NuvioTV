@@ -34,6 +34,8 @@
     <application
         android:name=".NuvioApplication"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/full_backup_content"
         android:banner="@mipmap/banner"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

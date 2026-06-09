@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Legacy backup rules (API < 31, used by android:fullBackupContent).
+
+  Excludes the access kill-switch DataStores so the grace clocks + device id cannot
+  be cloned via adb backup / cloud backup on older devices. Keep in sync with
+  data_extraction_rules.xml (the API 31+ equivalent).
+
+  Path is relative to the app's internal files/ directory.
+-->
+<full-backup-content>
+    <exclude domain="file" path="datastore/access_control.preferences_pb" />
+    <exclude domain="file" path="datastore/device_guard.preferences_pb" />
+</full-backup-content>

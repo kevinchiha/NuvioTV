@@ -55,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -113,6 +114,9 @@ import androidx.tv.material3.rememberDrawerState
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 import com.nuvio.tv.R
+import com.nuvio.tv.core.access.AccessControl
+import com.nuvio.tv.core.access.AccessControlService
+import com.nuvio.tv.core.access.DeviceGuardService
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.core.profile.ProfileManager
@@ -136,6 +140,8 @@ import com.nuvio.tv.ui.components.ProfileAvatarCircle
 import com.nuvio.tv.ui.navigation.NuvioNavHost
 import com.nuvio.tv.ui.navigation.Screen
 import com.nuvio.tv.ui.screens.account.AuthEmailOnboardingScreen
+import com.nuvio.tv.ui.screens.account.LockReason
+import com.nuvio.tv.ui.screens.account.LockedOutScreen
 import com.nuvio.tv.ui.screens.addon.EssentialAddonSetupScreen
 import com.nuvio.tv.ui.screens.profile.ProfileSelectionScreen
 import com.nuvio.tv.ui.theme.NuvioColors
@@ -153,6 +159,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 val LocalSidebarExpanded = compositionLocalOf { false }
@@ -233,6 +240,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker
 
+    @Inject
+    lateinit var accessControlService: AccessControlService
+
+    @Inject
+    lateinit var deviceGuardService: DeviceGuardService
+
     private lateinit var jankStats: JankStats
 
     /** Activity-level launcher for external video players. Survives all navigation changes. */
@@ -295,10 +308,40 @@ class MainActivity : ComponentActivity() {
             val hasSeenAuthQrOnFirstLaunch by hasSeenAuthQrFlow.collectAsState(initial = null)
             val authState by authManager.authState.collectAsState()
 
+            // Coroutine scope for the LockedOutScreen Retry button (the file otherwise uses
+            // lifecycleScope; the gate's Retry callback needs a composition-scoped one).
+            val scope = rememberCoroutineScope()
+
+            // KevBox TV access kill-switch / device-limit gate state. Seeded from the persisted
+            // value before first render so a previously-locked member never flashes full content.
+            val lockedOut by accessControlService.lockedOut.collectAsState()
+            val deviceLockedOut by deviceGuardService.deviceLockedOut.collectAsState()
+            val accessInit by accessControlService.initialized.collectAsState()
+            val deviceInit by deviceGuardService.initialized.collectAsState()
+
             LaunchedEffect(hasSeenAuthQrOnFirstLaunch, authState) {
                 if (hasSeenAuthQrOnFirstLaunch == false && authState is AuthState.FullAccount) {
                     appOnboardingDataStore.setHasSeenAuthQrOnFirstLaunch(true)
                     onboardingCompletedThisSession = true
+                }
+            }
+
+            // Access kill-switch + device-limit poller. Lives at the OUTER composable level (not in
+            // the Surface) so it keeps running while the lock gate early-returns and auto-recovers on
+            // re-enable. The loop is in the effect body so a FullAccount → Loading → FullAccount
+            // transition can't stack pollers. refreshAccess()/refreshDeviceClaim() never throw; the
+            // runCatching is belt-and-suspenders so one bad cycle can't kill the loop.
+            LaunchedEffect(authState) {
+                if (authState is AuthState.FullAccount) {
+                    if (BuildConfig.FEATURE_ACCESS_CONTROL) accessControlService.refreshAccess()
+                    if (BuildConfig.FEATURE_DEVICE_LIMIT) deviceGuardService.refreshDeviceClaim()
+                    while (isActive) {
+                        delay(AccessControl.CHECK_INTERVAL_MS)
+                        runCatching {
+                            if (BuildConfig.FEATURE_ACCESS_CONTROL) accessControlService.refreshAccess()
+                            if (BuildConfig.FEATURE_DEVICE_LIMIT) deviceGuardService.refreshDeviceClaim()
+                        }
+                    }
                 }
             }
 
@@ -537,6 +580,42 @@ class MainActivity : ComponentActivity() {
                         )
                         return@Surface
                     }
+
+                    // KevBox TV access kill-switch / device-limit gate. Placed after the
+                    // onboarding/profile/loading guards and before the scaffold render. The poller
+                    // LaunchedEffect (outer level, above the Surface) keeps running while locked, so
+                    // re-enabling the member flips the screen mid-session on the next check.
+                    val accessGateActive = BuildConfig.FEATURE_ACCESS_CONTROL || BuildConfig.FEATURE_DEVICE_LIMIT
+                    if (accessGateActive) {
+                        // Wait for the persisted lock state to land so a previously-locked member
+                        // never flashes full content for a frame at cold start. Only require a
+                        // service's `initialized` if that service's feature is actually enabled.
+                        val accessReady = !BuildConfig.FEATURE_ACCESS_CONTROL || accessInit
+                        val deviceReady = !BuildConfig.FEATURE_DEVICE_LIMIT || deviceInit
+                        if (!(accessReady && deviceReady)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(NuvioColors.Background)
+                            )
+                            return@Surface
+                        }
+                        val accessLocked = BuildConfig.FEATURE_ACCESS_CONTROL && lockedOut
+                        val deviceLocked = BuildConfig.FEATURE_DEVICE_LIMIT && deviceLockedOut
+                        if (accessLocked || deviceLocked) {
+                            LockedOutScreen(
+                                reason = if (accessLocked) LockReason.ACCESS else LockReason.DEVICE,
+                                onRetry = {
+                                    scope.launch {
+                                        if (BuildConfig.FEATURE_ACCESS_CONTROL) accessControlService.refreshAccess()
+                                        if (BuildConfig.FEATURE_DEVICE_LIMIT) deviceGuardService.refreshDeviceClaim()
+                                    }
+                                }
+                            )
+                            return@Surface
+                        }
+                    }
+
                     val sidebarCollapsed = mainUiPrefs.sidebarCollapsed
                     val modernSidebarEnabled = mainUiPrefs.modernSidebarEnabled
                     val modernSidebarBlurEnabled =
@@ -805,6 +884,16 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (::jankStats.isInitialized) jankStats.isTrackingEnabled = true
         startupSyncService.requestForegroundSync()
+        // KevBox TV access kill-switch / device-limit catch-up. The foreground poller is a
+        // LaunchedEffect that is cancelled while the Activity is STOPPED (Home → launcher, app
+        // switch, external-player handoff), but the process often stays resident on Android TV, so
+        // the grace clock keeps ticking. This post-resume check is the real enforcement point.
+        if (BuildConfig.FEATURE_ACCESS_CONTROL) {
+            lifecycleScope.launch { accessControlService.refreshAccess() }
+        }
+        if (BuildConfig.FEATURE_DEVICE_LIMIT) {
+            lifecycleScope.launch { deviceGuardService.refreshDeviceClaim() }
+        }
         lifecycleScope.launch {
             if (isFirstResumeAfterCreate) {
                 isFirstResumeAfterCreate = false
