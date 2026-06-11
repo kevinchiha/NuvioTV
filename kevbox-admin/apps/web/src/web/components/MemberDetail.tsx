@@ -4,17 +4,20 @@ import type {
   AddonRow as AddonRowType,
   AccessState,
   DeviceRow,
+  MemberActivity,
 } from "../lib/api.js";
 import { AddonRow } from "./AddonRow.js";
 import { DebridForm } from "./DebridForm.js";
 import { AccessTab } from "./AccessTab.js";
+import { ActivityTab } from "./ActivityTab.js";
 
-type Tab = "addons" | "access";
+type Tab = "addons" | "access" | "activity";
 
 export interface MemberDetailProps {
   member: MemberDetailType;
   busy?: boolean;
   access: AccessState | null;
+  activity: MemberActivity | null;
   onToggle: (addon: AddonRowType, enabled: boolean) => void;
   onEditUrl: (addon: AddonRowType, url: string) => void;
   onDelete: (addon: AddonRowType) => void;
@@ -32,6 +35,7 @@ export function MemberDetail({
   member,
   busy = false,
   access,
+  activity,
   onToggle,
   onEditUrl,
   onDelete,
@@ -65,6 +69,12 @@ export function MemberDetail({
         >
           Access
         </button>
+        <button
+          className={`tab${tab === "activity" ? " active" : ""}`}
+          onClick={() => setTab("activity")}
+        >
+          Activity
+        </button>
       </div>
 
       {tab === "access" ? (
@@ -76,6 +86,8 @@ export function MemberDetail({
           onRemoveDevice={onRemoveDevice}
           onRemoveAllDevices={onRemoveAllDevices}
         />
+      ) : tab === "activity" ? (
+        <ActivityTab activity={activity} />
       ) : (
         <>
           <div>

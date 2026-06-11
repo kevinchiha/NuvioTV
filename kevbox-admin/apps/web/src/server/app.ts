@@ -7,6 +7,7 @@ import { registerAddonRoutes } from "./routes/addons.js";
 import { registerAccessRoutes } from "./routes/access.js";
 import { registerActionRoutes } from "./routes/actions.js";
 import { registerBulkRoutes } from "./routes/bulk.js";
+import { registerActivityRoutes } from "./routes/activity.js";
 
 export interface BuildAppOptions {
   db: Db;
@@ -61,6 +62,7 @@ export function buildApp(opts: BuildAppOptions): FastifyInstance {
     registerAccessRoutes(api, opts.db);
     registerActionRoutes(api, opts.db);
     registerBulkRoutes(api, opts.db);
+    registerActivityRoutes(api, opts.db);
   }, { prefix: "/api" });
 
   // Serve the built SPA (production only). SPA fallback: any non-/api GET → index.html.

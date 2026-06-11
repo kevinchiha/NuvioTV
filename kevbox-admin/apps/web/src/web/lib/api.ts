@@ -1,6 +1,8 @@
 import type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow } from "@kevbox-admin/core";
+import type { MemberActivity, ActivityRankRow, GoingDarkRow, FleetStats } from "@kevbox-admin/core";
 
 export type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow };
+export type { MemberActivity, ActivityRankRow, GoingDarkRow, FleetStats } from "@kevbox-admin/core";
 
 /** A function that returns the current bearer token (or null if signed out). */
 export type TokenProvider = () => Promise<string | null>;
@@ -87,6 +89,14 @@ export class Api {
   removeAllDevices(userId: string): Promise<{ ok: true }> {
     return this.request("DELETE", `/members/${encodeURIComponent(userId)}/devices`);
   }
+  getMemberActivity(userId: string): Promise<{ activity: MemberActivity | null }> {
+    return this.request("GET", `/members/${encodeURIComponent(userId)}/activity`);
+  }
+  getLeaderboard(window: "today" | "7d" | "30d", order: "most" | "least"): Promise<{ rows: ActivityRankRow[] }> {
+    return this.request("GET", `/activity/leaderboard?window=${window}&order=${order}`);
+  }
+  getGoingDark(): Promise<{ rows: GoingDarkRow[] }> { return this.request("GET", "/activity/going-dark"); }
+  getFleetStats(): Promise<{ stats: FleetStats }> { return this.request("GET", "/activity/stats"); }
 }
 
 /** Trigger a browser download of the pre-bulk snapshot JSON so a wrong bulk op is recoverable. */

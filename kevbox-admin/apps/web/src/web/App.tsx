@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Api, downloadSnapshot, type MemberSummary, type MemberDetail as MemberDetailType, type AddonRow as AddonRowType, type AccessState, type DeviceRow } from "./lib/api.js";
+import { Api, downloadSnapshot, type MemberSummary, type MemberDetail as MemberDetailType, type AddonRow as AddonRowType, type AccessState, type DeviceRow, type MemberActivity } from "./lib/api.js";
 import { signIn, signOut, currentToken } from "./lib/supabase.js";
 import { resolveMemberDeepLink } from "./lib/deep-link.js";
 import { Login } from "./components/Login.js";
 import { MemberList } from "./components/MemberList.js";
 import { MemberDetail } from "./components/MemberDetail.js";
 import { BulkOps } from "./components/BulkOps.js";
+import { FleetView } from "./components/FleetView.js";
 import { ConfirmModal } from "./components/ConfirmModal.js";
 
 /** A queued confirm action: shows the modal, runs `run()` on confirm. */
@@ -21,10 +22,11 @@ export function App() {
   const [members, setMembers] = useState<MemberSummary[]>([]);
   const [selected, setSelected] = useState<MemberDetailType | null>(null);
   const [selectedAccess, setSelectedAccess] = useState<AccessState | null>(null);
+  const [selectedActivity, setSelectedActivity] = useState<MemberActivity | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
-  const [view, setView] = useState<"member" | "bulk">("member");
+  const [view, setView] = useState<"member" | "bulk" | "fleet">("member");
 
   // On mount, check for an existing session.
   useEffect(() => {
@@ -42,11 +44,29 @@ export function App() {
 
   const reloadSelected = useCallback(
     async (userId: string) => {
-      const [{ member }, { access }] = await Promise.all([api.getMember(userId), api.getAccess(userId)]);
+      const [{ member }, { access }, { activity }] = await Promise.all([
+        api.getMember(userId),
+        api.getAccess(userId),
+        api.getMemberActivity(userId),
+      ]);
       setSelected(member);
       setSelectedAccess(access);
+      setSelectedActivity(activity);
     },
     [api],
+  );
+
+  // Open a member by id, reusing the ?member= deep-link path (server lookup) rather than an
+  // in-memory MemberSummary lookup — a leaderboard / going-dark userId may not be in `members`.
+  const openMemberById = useCallback(
+    (userId: string) => {
+      void withBusy(async () => {
+        const { member } = await api.getMember(userId);
+        setView("member");
+        await reloadSelected(member.userId);
+      });
+    },
+    [api, reloadSelected],
   );
 
   async function withBusy(fn: () => Promise<void>) {
@@ -68,6 +88,7 @@ export function App() {
 
   async function selectMember(m: MemberSummary) {
     setView("member");
+    setSelectedActivity(null); // clear prior member's activity until the fresh fetch lands
     await withBusy(async () => {
       await reloadSelected(m.userId);
     });
@@ -247,6 +268,13 @@ export function App() {
         </div>
         <button
           style={{ width: "100%", margin: "8px 0" }}
+          className={view === "fleet" ? "primary" : ""}
+          onClick={() => setView("fleet")}
+        >
+          Fleet
+        </button>
+        <button
+          style={{ width: "100%", margin: "8px 0" }}
           className={view === "bulk" ? "primary" : ""}
           onClick={() => setView("bulk")}
         >
@@ -261,13 +289,16 @@ export function App() {
 
       <div className="pane">
         {error && <p className="error">{error}</p>}
-        {view === "bulk" ? (
+        {view === "fleet" ? (
+          <FleetView api={api} onOpenMember={openMemberById} />
+        ) : view === "bulk" ? (
           <BulkOps onBulkAdd={onBulkAdd} onBulkSwap={onBulkSwap} />
         ) : selected ? (
           <MemberDetail
             member={selected}
             busy={busy}
             access={selectedAccess}
+            activity={selectedActivity}
             onToggle={onToggle}
             onEditUrl={onEditUrl}
             onDelete={onDelete}
