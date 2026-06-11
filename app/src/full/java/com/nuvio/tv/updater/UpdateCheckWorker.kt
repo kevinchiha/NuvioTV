@@ -10,6 +10,8 @@ import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.updater.model.AppUpdate
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.io.File
@@ -31,6 +33,13 @@ class UpdateCheckWorker(
         // does real work in a release build (BuildConfig.IS_DEBUG_BUILD == false).
         if (BuildConfig.IS_DEBUG_BUILD) return Result.success()
 
+        // The daily periodic job and the one-time startup kick can fire concurrently in the same
+        // process; serialize so two runs never race on the shared cacheDir/updates files (the
+        // loser then sees alreadyCached and cleanly no-ops). withLock releases on any return/throw.
+        return runMutex.withLock { runCheck() }
+    }
+
+    private suspend fun runCheck(): Result {
         val entry = EntryPointAccessors.fromApplication(
             applicationContext,
             UpdateWorkerEntryPoint::class.java,
@@ -125,5 +134,9 @@ class UpdateCheckWorker(
         const val UNIQUE_NAME = "kevbox-daily-update-check"
         const val UNIQUE_NAME_ONESHOT = "kevbox-update-check-now"
         private const val TAG = "UpdateCheckWorker"
+
+        // Process-wide lock so the periodic job and the one-time kick can't run the check
+        // concurrently and race on the shared cache files.
+        private val runMutex = Mutex()
     }
 }
