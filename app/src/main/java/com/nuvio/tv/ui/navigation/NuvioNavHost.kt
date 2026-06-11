@@ -206,7 +206,8 @@ fun NuvioNavHost(
                     )
                 },
                 onContinueWatchingClick = { item ->
-                    navController.navigate(createContinueWatchingRoute(item))
+                    // KevBox: always show the stream picker on click; never auto-resume a stream.
+                    navController.navigate(createContinueWatchingRoute(item, manualSelection = true))
                 },
                 onContinueWatchingStartFromBeginning = { item ->
                     navController.navigate(
@@ -324,6 +325,8 @@ fun NuvioNavHost(
                             contentId = contentId,
                             contentName = title,
                             runtime = runtime,
+                            // KevBox: always show the stream picker; never auto-resume a stream.
+                            manualSelection = true,
                             returnToDetailOnBack = contentType.equals("series", ignoreCase = true),
                             contentLanguage = contentLanguage
                         )
