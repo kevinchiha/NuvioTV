@@ -175,19 +175,8 @@ fun AboutSettingsContent(
                 //     onClick = onNavigateToSupportersContributors
                 // )
 
-                SettingsActionRow(
-                    title = stringResource(R.string.about_licenses_attributions),
-                    subtitle = stringResource(R.string.about_licenses_attributions_subtitle),
-                    trailingIcon = Icons.Default.ChevronRight,
-                    // Inherits the initial focus when in-app updates are off (e.g. playstore),
-                    // taking over the fallback the hidden Privacy Policy row used to hold.
-                    modifier = if (!AppFeaturePolicy.inAppUpdatesEnabled && initialFocusRequester != null) {
-                        Modifier.focusRequester(initialFocusRequester)
-                    } else {
-                        Modifier
-                    },
-                    onClick = onNavigateToLicensesAttributions
-                )
+                // Temporarily hidden while validating the About screen layout.
+                // The licenses screen and navigation route remain intact.
             }
             SettingsVerticalScrollIndicators(state = aboutScrollState)
             }
