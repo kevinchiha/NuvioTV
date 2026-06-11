@@ -141,7 +141,10 @@ fun AboutSettingsContent(
 
                 Spacer(modifier = Modifier.height(NuvioTheme.spacing.xxs))
 
-                if (AppFeaturePolicy.inAppUpdatesEnabled) {
+                // Gate the manual check the SAME way as the auto-check + dialog host in MainActivity
+                // (`!IS_DEBUG_BUILD`): the UpdatePromptDialog is only composed in non-debug builds, so
+                // showing this row in a debug build let it run but render nothing. Hide it in debug.
+                if (AppFeaturePolicy.inAppUpdatesEnabled && !BuildConfig.IS_DEBUG_BUILD) {
                     val updateViewModel: UpdateViewModel = hiltViewModel(context as ComponentActivity)
                     SettingsActionRow(
                         title = stringResource(R.string.about_check_updates),
