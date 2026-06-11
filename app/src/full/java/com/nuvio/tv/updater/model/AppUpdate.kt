@@ -40,6 +40,7 @@ data class UpdateManifest(
  * before install.
  */
 @Keep
+@Serializable
 data class AppUpdate(
     val versionCode: Int,
     val tag: String,
