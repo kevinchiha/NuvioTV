@@ -2,6 +2,10 @@
 
 package com.nuvio.tv.ui.screens.settings
 
+import com.nuvio.tv.ui.theme.NuvioTheme
+
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -37,7 +41,6 @@ import androidx.tv.material3.Text
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.R
 import com.nuvio.tv.core.build.AppFeaturePolicy
-import com.nuvio.tv.ui.theme.NuvioColors
 import com.nuvio.tv.updater.UpdateViewModel
 
 @Composable
@@ -91,7 +94,7 @@ fun AboutSettingsContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
 
                 Image(
                     painter = painterResource(id = R.drawable.app_logo_wordmark),
@@ -105,14 +108,14 @@ fun AboutSettingsContent(
                 Text(
                     text = stringResource(R.string.about_made_with_love),
                     style = MaterialTheme.typography.labelSmall,
-                    color = NuvioColors.TextSecondary,
+                    color = NuvioTheme.colors.TextSecondary,
                     textAlign = TextAlign.Center
                 )
 
                 Text(
                     text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
                     style = MaterialTheme.typography.labelSmall,
-                    color = NuvioColors.TextSecondary,
+                    color = NuvioTheme.colors.TextSecondary,
                     textAlign = TextAlign.Center
                 )
 
@@ -135,7 +138,7 @@ fun AboutSettingsContent(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(NuvioTheme.spacing.xxs))
 
                 if (AppFeaturePolicy.inAppUpdatesEnabled) {
                     val updateViewModel: UpdateViewModel = hiltViewModel(context as ComponentActivity)
