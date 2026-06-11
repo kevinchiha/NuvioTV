@@ -20,7 +20,11 @@ class ApkDownloader @Inject constructor(
     ): Result<File> {
         return runCatching {
             destinationFile.parentFile?.mkdirs()
-            if (destinationFile.exists()) destinationFile.delete()
+
+            // Stream into a .part temp, then atomically rename, so a partial/concurrent write is
+            // never visible at the final path (and the worker's prune skips .part files).
+            val partFile = File(destinationFile.parentFile, destinationFile.name + ".part")
+            if (partFile.exists()) partFile.delete()
 
             val request = Request.Builder()
                 .url(url)
@@ -45,7 +49,7 @@ class ApkDownloader @Inject constructor(
                 val total = body.contentLength().takeIf { it > 0 }
 
                 body.byteStream().use { input ->
-                    FileOutputStream(destinationFile).use { output ->
+                    FileOutputStream(partFile).use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         var downloaded = 0L
                         while (true) {
@@ -58,6 +62,13 @@ class ApkDownloader @Inject constructor(
                         output.flush()
                     }
                 }
+            }
+
+            if (destinationFile.exists()) destinationFile.delete()
+            if (!partFile.renameTo(destinationFile)) {
+                // Cross-device or rename refusal: fall back to copy+delete.
+                partFile.copyTo(destinationFile, overwrite = true)
+                partFile.delete()
             }
 
             destinationFile
