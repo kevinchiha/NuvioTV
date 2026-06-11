@@ -6,6 +6,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "import-global-vision": "node ./scripts/import-global-vision.mjs"
   }
 }
