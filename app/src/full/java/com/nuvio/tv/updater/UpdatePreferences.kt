@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +44,34 @@ class UpdatePreferences @Inject constructor(
     suspend fun setLastCheckAtMs(value: Long) {
         dataStore.edit { prefs ->
             prefs[lastCheckAtKey] = value
+        }
+    }
+
+    private val predownloadApkPathKey = stringPreferencesKey("predownloaded_apk_path")
+    private val predownloadUpdateJsonKey = stringPreferencesKey("predownloaded_update_json")
+
+    /** Absolute path of a background-downloaded, SHA-256-verified APK (or null). */
+    val predownloadApkPath: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[predownloadApkPathKey]
+    }
+
+    /** Serialized [com.nuvio.tv.updater.model.AppUpdate] matching [predownloadApkPath] (or null). */
+    val predownloadUpdateJson: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[predownloadUpdateJsonKey]
+    }
+
+    suspend fun setPredownload(apkPath: String, updateJson: String) {
+        dataStore.edit { prefs ->
+            prefs[predownloadApkPathKey] = apkPath
+            prefs[predownloadUpdateJsonKey] = updateJson
+        }
+    }
+
+    /** Clears the pre-download pointers. The caller deletes the on-disk APK (no file handle here). */
+    suspend fun clearPredownload() {
+        dataStore.edit { prefs ->
+            prefs.remove(predownloadApkPathKey)
+            prefs.remove(predownloadUpdateJsonKey)
         }
     }
 }
