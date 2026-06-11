@@ -80,25 +80,40 @@ with:
 Hilt `@EntryPoint` (installed in `SingletonComponent`) exposing `UpdateRepository`,
 `ApkDownloader`, and `UpdatePreferences` to the non-injected `CoroutineWorker`.
 
-### 4. `UpdatePreferences` (+2 keys)
+### 4. `UpdatePreferences` (+2 keys) and `AppUpdate` serialization
+Make `model/AppUpdate.kt` `@Serializable` (kotlinx.serialization is already configured —
+`UpdateManifest` uses it) so the full update metadata can be cached for offline surfacing.
+Add an `UpdateJson` holder (`Json { ignoreUnknownKeys = true }`) shared by worker + ViewModel.
 Add to the existing `update_settings` DataStore:
-- `predownloadedVersionCode: Int?` (`intPreferencesKey("predownloaded_version_code")`)
-- `predownloadedApkPath: String?` (`stringPreferencesKey("predownloaded_apk_path")`)
-Plus a setter that writes both atomically and a clearer that removes both. Worker writes;
-ViewModel reads.
+- `predownloadApkPath: String?` (`stringPreferencesKey("predownloaded_apk_path")`)
+- `predownloadUpdateJson: String?` (`stringPreferencesKey("predownloaded_update_json")` —
+  the serialized `AppUpdate`, which carries `versionCode`, `assetUrl`, `sha256`, `notes`, etc.)
+Plus `setPredownload(apkPath, updateJson)` (writes both atomically) and `clearPredownload()`
+(removes both). Worker writes; ViewModel reads.
 
-### 5. `UpdateViewModel.init` integration (instant-install from cache)
-Before/alongside the existing live check:
-1. Read `predownloadedVersionCode` + `predownloadedApkPath`. If the path points to an
-   existing file, the version is `> BuildConfig.VERSION_CODE`, and it is not the
-   `ignoredVersionCode`, immediately populate UI state with the matching `AppUpdate`
-   metadata and `downloadedApkPath`, and `showDialog = true` — so the dialog offers
-   **Install** (skipping the download step).
-2. Still run the existing `getLatestUpdate()` live check, so a release newer than the
-   pre-downloaded one is caught (download-on-demand fallback via the existing
-   `downloadUpdate()` path).
-If the cached file is missing or fails verification, clear the cached keys and fall back to
-the normal flow.
+### 5. `UpdateViewModel` integration (merged resolve — instant install from cache)
+Refactor `checkForUpdates(force, showNoUpdateFeedback)` (the existing public entry, used by
+`init` and the About screen) into a single coherent resolve, with the decision logic
+extracted to a **pure, unit-testable** `UpdateResolution.resolve(...)`:
+1. Read `ignoredVersionCode`, `predownloadApkPath`, and the decoded `predownloadUpdateJson`.
+2. Run the live `getLatestUpdate()` (best-effort; `null` on failure) and persist
+   `lastCheckAtMs`.
+3. `UpdateResolution.resolve(liveUpdate, cachedUpdate, cachedApkPath, cachedApkExists,
+   currentVersionCode, ignoredVersionCode, force)` returns the effective update
+   (**live wins; cached metadata is the offline fallback**), whether an update is available,
+   whether to show the dialog, and an `installableApkPath` — the cached path **only when the
+   cached file exists and its versionCode matches the effective update** (so a newer live
+   release than what was pre-downloaded correctly falls back to download-on-demand rather
+   than installing a stale APK).
+4. Map the decision onto UI state: a non-null `installableApkPath` sets `downloadedApkPath`
+   + `downloadProgress = 1f` → the dialog offers **Install** (skipping download); offline
+   with a valid cached APK still surfaces the install dialog.
+5. If no update is available, best-effort `clearPredownload()` (drops a now-installed/stale
+   cached APK).
+
+The live check's failure path is made **non-destructive** (a transient launch-time check
+failure no longer nulls out a known/ cached update; it only surfaces an error dialog when
+the user `force`d the check).
 
 ### 6. Scheduling seam (full-only)
 Call `UpdateWorkScheduler.ensureScheduled(application)` from the **`full`** variant of
@@ -116,12 +131,14 @@ Add `androidx.work:work-runtime-ktx` to `gradle/libs.versions.toml` and referenc
             ┌──────────── daily (WorkManager, app may be closed) ────────────┐
 WM trigger → getLatestUpdate() → persist result + lastCheckAtMs
             → newer & !ignored & !cached & unmetered? → download + SHA-256 verify
-            → persist predownloadedVersionCode + predownloadedApkPath
+            → persist predownloadApkPath + predownloadUpdateJson (serialized AppUpdate)
             └────────────────────────────────────────────────────────────────┘
 
-app open → UpdateViewModel.init → read predownloaded cache
-         → verified APK for newer, non-ignored version? → show dialog w/ instant Install
-         → also run live getLatestUpdate() refresh (catches anything newer)
+app open → UpdateViewModel.checkForUpdates(force=false)
+         → live getLatestUpdate() (null on failure) + read cached pre-download
+         → UpdateResolution.resolve(): effective = live ?: cached
+         → installable = cached APK iff file exists & versionCode matches effective
+         → map to UI state → dialog offers Install (cached) or Download (newer than cache)
 ```
 
 ## Error handling
@@ -137,16 +154,23 @@ app open → UpdateViewModel.init → read predownloaded cache
 
 Cleanup: APK files for stale `versionCode`s are pruned from `cacheDir/updates`.
 
-## Testing (full-variant unit tests)
+## Testing
 
-Following the existing `HeartbeatSchedulerTest` style:
-- Extract the "should download?" decision into a **pure function** taking
-  `(remoteVersionCode, currentVersionCode, ignoredVersionCode, alreadyCachedForVersion,
-  isUnmetered)` → `Boolean`, and unit-test its truth table (newer/older/equal,
-  ignored, already-cached, metered/unmetered).
-- `UpdatePreferences` round-trip for the two new keys (set → read → clear).
-- `UpdateViewModel` surfaces an instant-install dialog from a cached verified pre-download
-  **without** invoking the downloader, and falls back/clears when the cached file is absent.
+Pure-JVM unit tests under `app/src/testFull/` (JUnit4; the existing test setup has no
+Robolectric, so all logic that must be tested is extracted away from Android APIs). Run via
+`./gradlew testFullDebugUnitTest`.
+
+- **`UpdateDownloadDecision.shouldDownload(remoteVersionCode, currentVersionCode,
+  ignoredVersionCode, alreadyCachedForRemote, isUnmetered): Boolean`** — full truth table
+  (newer/older/equal, ignored, already-cached, metered/unmetered). This is the worker's
+  download gate.
+- **`UpdateResolution.resolve(...)`** — full table: live-present vs offline cached-fallback,
+  newer/older/equal, ignored, installable-match vs version-mismatch, `force`.
+
+Android-coupled pieces (the `CoroutineWorker` plumbing, `UpdatePreferences` DataStore,
+`UpdateWorkScheduler`, the `PluginRuntimeHooks` wiring, and the `UpdateViewModel` state
+mapping) are thin and verified by compilation + the project's emulator smoke-test flow,
+matching how the telemetry feature was validated.
 
 ## Flavor safety checklist
 
