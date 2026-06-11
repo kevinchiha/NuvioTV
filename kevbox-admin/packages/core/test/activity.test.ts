@@ -108,6 +108,8 @@ describe("listGoingDark", () => {
       const dark = await createTestMember(db, "dark@test.dev");
       const live = await createTestMember(db, "live@test.dev");
       await db.query("insert into public.member_access(user_id, active) values ($1,true),($2,true)", [dark, live]);
+      // both phoned home at some point (real churned members have an old heartbeat)
+      await db.query("insert into public.member_heartbeat(user_id, device_id, last_heartbeat) values ($1,'d',now() - interval '40 days'),($2,'d',now())", [dark, live]);
       await seedDay(db, dark, 40, 5000); // last watched 40 days ago
       await seedDay(db, live, 1, 5000);  // watched yesterday
       const rows = await listGoingDark(db, { days: 14 });
@@ -131,6 +133,7 @@ describe("listGoingDark", () => {
     await withRollback(async (db) => {
       const edge = await createTestMember(db, "edge@test.dev");
       await db.query("insert into public.member_access(user_id, active) values ($1,true)", [edge]);
+      await db.query("insert into public.member_heartbeat(user_id, device_id, last_heartbeat) values ($1,'d',now() - interval '14 days')", [edge]);
       await seedDay(db, edge, 14, 5000); // day-14 excluded by `> date - 14`
       const rows = await listGoingDark(db, { days: 14 });
       expect(rows.map((r) => r.userId)).toContain(edge);
@@ -143,6 +146,16 @@ describe("listGoingDark", () => {
       await db.query("insert into public.member_access(user_id, active) values ($1,false)", [off]);
       const rows = await listGoingDark(db, { days: 14 });
       expect(rows.map((r) => r.userId)).not.toContain(off);
+    });
+  });
+
+  test("a member that never recorded a heartbeat is excluded (never onboarded, not churned)", async () => {
+    await withRollback(async (db) => {
+      const neverSeen = await createTestMember(db, "neverseen@test.dev");
+      await db.query("insert into public.member_access(user_id, active) values ($1,true)", [neverSeen]);
+      // access granted, zero watch, and NO member_heartbeat row → never phoned home
+      const rows = await listGoingDark(db, { days: 14 });
+      expect(rows.map((r) => r.userId)).not.toContain(neverSeen);
     });
   });
 });

@@ -75,9 +75,10 @@ export async function listGoingDark(db: Db, opts: { days: number }): Promise<Goi
        left join public.kevbox_auth_users u on u.id = a.user_id
        left join (select user_id, max(last_heartbeat) as last_heartbeat from public.member_heartbeat group by user_id) hb on hb.user_id = a.user_id
       where a.active = true
+        and hb.last_heartbeat is not null  -- exclude never-onboarded members (granted access but never phoned home)
         and coalesce((select sum(watch_seconds) from public.member_activity_daily d
                        where d.user_id = a.user_id and d.day > (now() at time zone 'utc')::date - $1::int), 0) = 0
-      order by hb.last_heartbeat asc nulls first`,
+      order by hb.last_heartbeat asc`,
     [opts.days],
   );
   return rows.map((r: any) => ({
