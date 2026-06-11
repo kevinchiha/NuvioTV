@@ -2,8 +2,6 @@
 
 package com.nuvio.tv.ui.screens.settings
 
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -118,6 +116,25 @@ fun AboutSettingsContent(
                     textAlign = TextAlign.Center
                 )
 
+                // KevBox §11 telemetry notice — durations-only activity/diagnostics. Shown ONLY on
+                // builds that actually report (full flavor: FEATURE_TELEMETRY=true); never on playstore.
+                if (BuildConfig.FEATURE_TELEMETRY) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.about_telemetry_notice_title),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NuvioColors.TextSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = stringResource(R.string.about_telemetry_notice),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NuvioColors.TextSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(2.dp))
 
                 if (AppFeaturePolicy.inAppUpdatesEnabled) {
@@ -137,23 +154,17 @@ fun AboutSettingsContent(
                     )
                 }
 
-                SettingsActionRow(
-                    title = stringResource(R.string.about_privacy_policy),
-                    subtitle = stringResource(R.string.about_privacy_policy_subtitle),
-                    trailingIcon = Icons.Default.OpenInNew,
-                    modifier = if (!AppFeaturePolicy.inAppUpdatesEnabled && initialFocusRequester != null) {
-                        Modifier.focusRequester(initialFocusRequester)
-                    } else {
-                        Modifier
-                    },
-                    onClick = {
-                        val intent = Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse("https://tapframe.github.io/NuvioStreaming/#privacy-policy")
-                        )
-                        context.startActivity(intent)
-                    }
-                )
+                // KevBox: upstream "Privacy Policy" row pointed to Nuvio's own policy
+                // (tapframe.github.io/NuvioStreaming) — wrong target for the family build. Hidden
+                // (hide, don't delete). KevBox's durations-only notice is the block above, gated on
+                // FEATURE_TELEMETRY. The initial-focus fallback (when in-app updates are off, e.g.
+                // playstore) now lives on the Licenses row below.
+                // SettingsActionRow(
+                //     title = stringResource(R.string.about_privacy_policy),
+                //     subtitle = stringResource(R.string.about_privacy_policy_subtitle),
+                //     trailingIcon = Icons.Default.OpenInNew,
+                //     onClick = { /* opened Nuvio's privacy policy URL */ }
+                // )
 
                 // KevBox: upstream "Supporters & Contributors" (donations / Ko-fi / sponsors)
                 // hidden for the private family build. Screen + route left intact (hide, don't delete).
@@ -168,6 +179,13 @@ fun AboutSettingsContent(
                     title = stringResource(R.string.about_licenses_attributions),
                     subtitle = stringResource(R.string.about_licenses_attributions_subtitle),
                     trailingIcon = Icons.Default.ChevronRight,
+                    // Inherits the initial focus when in-app updates are off (e.g. playstore),
+                    // taking over the fallback the hidden Privacy Policy row used to hold.
+                    modifier = if (!AppFeaturePolicy.inAppUpdatesEnabled && initialFocusRequester != null) {
+                        Modifier.focusRequester(initialFocusRequester)
+                    } else {
+                        Modifier
+                    },
                     onClick = onNavigateToLicensesAttributions
                 )
             }
