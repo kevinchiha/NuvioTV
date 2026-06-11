@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
 import java.io.File
 import javax.inject.Inject
 
@@ -56,37 +57,57 @@ class UpdateViewModel @Inject constructor(
             _uiState.update { it.copy(isChecking = true, errorMessage = null, showNoUpdateToastHint = false) }
 
             val ignoredVersionCode = updatePreferences.ignoredVersionCode.first()
+            val cachedApkPath = updatePreferences.predownloadApkPath.first()
+            val cachedUpdate = updatePreferences.predownloadUpdateJson.first()
+                ?.let { runCatching { UpdateJson.json.decodeFromString<AppUpdate>(it) }.getOrNull() }
 
-            val result = updateRepository.getLatestUpdate()
+            val live = updateRepository.getLatestUpdate()
             updatePreferences.setLastCheckAtMs(System.currentTimeMillis())
 
-            result
-                .onSuccess { update ->
-                    val remoteNewer = update.versionCode > BuildConfig.VERSION_CODE
-                    val shouldShow = remoteNewer && (ignoredVersionCode == null || ignoredVersionCode != update.versionCode)
+            val decision = UpdateResolution.resolve(
+                liveUpdate = live.getOrNull(),
+                cachedUpdate = cachedUpdate,
+                cachedApkPath = cachedApkPath,
+                cachedApkExists = cachedApkPath != null && File(cachedApkPath).exists(),
+                currentVersionCode = BuildConfig.VERSION_CODE,
+                ignoredVersionCode = ignoredVersionCode,
+                force = force,
+            )
 
-                    _uiState.update {
-                        it.copy(
-                            isChecking = false,
-                            update = update,
-                            isUpdateAvailable = remoteNewer,
-                            showDialog = shouldShow || force,
-                            showNoUpdateToastHint = showNoUpdateFeedback && !remoteNewer,
-                            errorMessage = null
-                        )
-                    }
+            // Drop a now-installed/stale cached pre-download (file + pointer) so it can't resurface.
+            if (!decision.isUpdateAvailable && cachedApkPath != null) {
+                runCatching { File(cachedApkPath).delete() }
+                updatePreferences.clearPredownload()
+            }
+
+            if (decision.update == null) {
+                // Nothing live, nothing cached.
+                _uiState.update {
+                    it.copy(
+                        isChecking = false,
+                        showDialog = force,
+                        errorMessage = if (force) {
+                            live.exceptionOrNull()?.message ?: context.getString(R.string.update_error_check_failed)
+                        } else {
+                            it.errorMessage
+                        },
+                    )
                 }
-                .onFailure { e ->
-                    _uiState.update {
-                        it.copy(
-                            isChecking = false,
-                            update = null,
-                            isUpdateAvailable = false,
-                            showDialog = force, // show error dialog if user forced a check
-                            errorMessage = e.message ?: context.getString(R.string.update_error_check_failed)
-                        )
-                    }
-                }
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(
+                    isChecking = false,
+                    update = decision.update,
+                    isUpdateAvailable = decision.isUpdateAvailable,
+                    downloadedApkPath = decision.installableApkPath,
+                    downloadProgress = if (decision.installableApkPath != null) 1f else null,
+                    showDialog = decision.showDialog,
+                    showNoUpdateToastHint = showNoUpdateFeedback && !decision.isUpdateAvailable,
+                    errorMessage = null,
+                )
+            }
         }
     }
 
