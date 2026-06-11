@@ -24,7 +24,14 @@ class HeartbeatScheduler(
     private var job: Job? = null
 
     fun start(deviceId: String, emitSessionStart: Boolean = true) {
-        if (job?.isActive == true) return
+        if (job?.isActive == true) {
+            // Reuse the running ticker for a same-playback resume/rebuffer (no duplicate job, no
+            // re-emit). But if a fresh playback explicitly requests session_start while a stale
+            // ticker is still active (e.g. leaked after a playback error), cancel the stale job and
+            // start clean so the requested session_start is never silently dropped.
+            if (!emitSessionStart) return
+            job?.cancel()
+        }
         job = scope.launch {
             if (emitSessionStart) runCatching { repo.heartbeat(deviceId, "session_start") }
             while (isActive) {

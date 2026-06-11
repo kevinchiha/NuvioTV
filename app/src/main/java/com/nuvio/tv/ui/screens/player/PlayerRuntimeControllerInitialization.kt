@@ -1092,14 +1092,23 @@ internal fun PlayerRuntimeController.initializePlayer(
                         cancelFirstFrameWatchdog()
                         // Telemetry (durations-only): report the error code + short message before any
                         // retry/fallback branching below. Fail-soft and gated; sends NO url/title/position.
-                        if (BuildConfig.FEATURE_TELEMETRY) telemetryDeviceId?.let { dev ->
-                            scope.launch {
-                                runCatching {
-                                    telemetryRepository.error(
-                                        dev,
-                                        error.errorCode.toString(),
-                                        error.message ?: "playback error"
-                                    )
+                        if (BuildConfig.FEATURE_TELEMETRY) {
+                            // Stop the heartbeat ticker on EVERY error before the retry/fallback early
+                            // returns below. A ticker started during the failed playback must not keep
+                            // beating (phantom watch_seconds) and must not block the next playback's
+                            // session_start. Auto-recovery is unaffected: onIsPlayingChanged(true) will
+                            // restart the ticker, and telemetrySessionStarted stays true so no duplicate
+                            // session_start is emitted.
+                            heartbeatScheduler.stop()
+                            telemetryDeviceId?.let { dev ->
+                                scope.launch {
+                                    runCatching {
+                                        telemetryRepository.error(
+                                            dev,
+                                            error.errorCode.toString(),
+                                            error.message ?: "playback error"
+                                        )
+                                    }
                                 }
                             }
                         }
