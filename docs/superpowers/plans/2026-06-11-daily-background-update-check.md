@@ -4,9 +4,9 @@
 
 **Goal:** Add a once-a-day WorkManager background check (full flavor) that pre-downloads + SHA-256-verifies a newer APK on unmetered networks, so the existing update dialog offers an instant Install on next app open.
 
-**Architecture:** A plain `CoroutineWorker` (no `@HiltWorker`) resolves its dependencies through a Hilt `@EntryPoint`, keeping the whole feature inside `app/src/full/`. The download gate and the ViewModel's resolve logic are extracted into pure, unit-tested functions; the Android-coupled plumbing is verified by build + emulator. WorkManager is added only to the `full` flavor.
+**Architecture:** A plain `CoroutineWorker` (no `@HiltWorker`) resolves its dependencies through a Hilt `@EntryPoint`, keeping the whole feature inside `app/src/full/`. All decision logic — the download gate, the cache-match predicate, the prune selection, the asset-URL trust check, and the ViewModel's resolve — is extracted into pure, unit-tested functions; the Android-coupled plumbing is verified by build + an emulator smoke test on a **release** build. WorkManager is added only to the `full` flavor.
 
-**Tech Stack:** Kotlin, WorkManager (`androidx.work:work-runtime-ktx`), Hilt, DataStore Preferences, kotlinx.serialization, JUnit4 + MockK (pure-JVM tests).
+**Tech Stack:** Kotlin, WorkManager (`androidx.work:work-runtime-ktx`), Hilt, DataStore Preferences, kotlinx.serialization, JUnit4 (pure-JVM tests; no mocking needed).
 
 **Spec:** `docs/superpowers/specs/2026-06-11-daily-background-update-check-design.md`
 
@@ -18,18 +18,22 @@
 |---|---|---|
 | `gradle/libs.versions.toml` | WorkManager version + library alias | Modify |
 | `app/build.gradle.kts` | `fullImplementation` WorkManager | Modify |
-| `app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt` | Pure worker download gate | Create |
+| `app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt` | Pure worker logic: download gate + `isCachedFor` + `staleFileNames` + `isTrustedAssetUrl` | Create |
 | `app/src/full/java/com/nuvio/tv/updater/UpdateResolution.kt` | Pure ViewModel resolve logic | Create |
+| `app/src/full/java/com/nuvio/tv/updater/Checksum.kt` | Correct the integrity-vs-authenticity doc comment | Modify |
+| `app/src/full/java/com/nuvio/tv/updater/ApkDownloader.kt` | Atomic `.part`-then-rename write (no partial file ever at the final path) | Modify |
 | `app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt` | Make `AppUpdate` `@Serializable` | Modify |
 | `app/src/full/java/com/nuvio/tv/updater/UpdateJson.kt` | Shared `Json` instance | Create |
 | `app/src/full/java/com/nuvio/tv/updater/UpdatePreferences.kt` | +2 pre-download keys | Modify |
 | `app/src/full/java/com/nuvio/tv/updater/UpdateWorkerEntryPoint.kt` | Hilt EntryPoint for the worker | Create |
 | `app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt` | The daily worker | Create |
-| `app/src/full/java/com/nuvio/tv/updater/UpdateWorkScheduler.kt` | Enqueue the periodic work | Create |
+| `app/src/full/java/com/nuvio/tv/updater/UpdateWorkScheduler.kt` | Enqueue periodic + one-time work | Create |
 | `app/src/full/java/com/nuvio/tv/core/runtime/PluginRuntimeHooks.kt` | Schedule on app start (full only) | Modify |
-| `app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt` | Merged resolve + instant install | Modify |
-| `app/src/testFull/java/com/nuvio/tv/updater/UpdateDownloadDecisionTest.kt` | Tests for the gate | Create |
+| `app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt` | Merged resolve + instant install + cache cleanup | Modify |
+| `app/src/testFull/java/com/nuvio/tv/updater/UpdateDownloadDecisionTest.kt` | Tests for the pure worker logic | Create |
 | `app/src/testFull/java/com/nuvio/tv/updater/UpdateResolutionTest.kt` | Tests for resolve | Create |
+
+> **`app/src/testFull/` is a new, flavor-scoped unit-test source set** (AGP recognizes it implicitly). The new tests must NOT go in the shared `app/src/test/`: `UpdateResolution`/`UpdateDownloadDecision`/`AppUpdate` exist only in the `full` flavor, so putting them in `app/src/test/` would break `testPlaystoreDebugUnitTest`.
 
 ---
 
@@ -37,7 +41,7 @@
 
 **Files:**
 - Modify: `gradle/libs.versions.toml`
-- Modify: `app/build.gradle.kts` (dependencies block, near the other `add("fullImplementation", …)` calls ~line 439-443)
+- Modify: `app/build.gradle.kts` (dependencies block, near the other `add("fullImplementation", …)` calls ~line 440-443)
 
 - [ ] **Step 1: Add the version**
 
@@ -46,6 +50,8 @@ In `gradle/libs.versions.toml`, under `[versions]` (next to `datastore = "1.1.1"
 ```toml
 workManager = "2.10.0"
 ```
+
+(compileSdk 36 / minSdk 24 / AGP 8.13.2 satisfy WorkManager 2.10's requirements — verified.)
 
 - [ ] **Step 2: Add the library alias**
 
@@ -57,7 +63,7 @@ androidx-work-runtime = { group = "androidx.work", name = "work-runtime-ktx", ve
 
 - [ ] **Step 3: Wire it into the full flavor only**
 
-In `app/build.gradle.kts`, in the `dependencies { … }` block alongside the existing `add("fullImplementation", …)` lines, add:
+In `app/build.gradle.kts`, in the `dependencies { … }` block alongside the existing `add("fullImplementation", libs.jsoup)` / `add("fullImplementation", libs.nicehttp)` lines, add:
 
 ```kotlin
 add("fullImplementation", libs.androidx.work.runtime)
@@ -77,11 +83,13 @@ git commit -m "build(updater): add WorkManager to the full flavor"
 
 ---
 
-### Task 2: `UpdateDownloadDecision` — pure download gate (TDD)
+### Task 2: `UpdateDownloadDecision` — pure worker logic (TDD)
 
 **Files:**
 - Create: `app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt`
 - Test: `app/src/testFull/java/com/nuvio/tv/updater/UpdateDownloadDecisionTest.kt`
+
+This object holds **all** the worker's pure decisions: the download gate (`shouldDownload`), the shared cache-match predicate (`isCachedFor`, also used by `UpdateResolution`), the prune selection (`staleFileNames`), and the asset-URL trust gate (`isTrustedAssetUrl`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -90,6 +98,7 @@ Create `app/src/testFull/java/com/nuvio/tv/updater/UpdateDownloadDecisionTest.kt
 ```kotlin
 package com.nuvio.tv.updater
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -104,14 +113,20 @@ class UpdateDownloadDecisionTest {
         unmetered: Boolean = true,
     ) = UpdateDownloadDecision.shouldDownload(remote, current, ignored, alreadyCached, unmetered)
 
+    // --- shouldDownload ---
+
     @Test
     fun `downloads when newer, not ignored, not cached, on unmetered`() {
         assertTrue(decide())
     }
 
     @Test
-    fun `skips when remote is not newer`() {
+    fun `skips when remote equals current`() {
         assertFalse(decide(remote = 1028, current = 1028))
+    }
+
+    @Test
+    fun `skips when remote is older than current`() {
         assertFalse(decide(remote = 1027, current = 1028))
     }
 
@@ -134,6 +149,68 @@ class UpdateDownloadDecisionTest {
     fun `skips when network is metered`() {
         assertFalse(decide(unmetered = false))
     }
+
+    // --- isCachedFor ---
+
+    @Test
+    fun `isCachedFor true when version matches and file exists`() {
+        assertTrue(UpdateDownloadDecision.isCachedFor(1030, 1030, cachedFileExists = true))
+    }
+
+    @Test
+    fun `isCachedFor false when version differs`() {
+        assertFalse(UpdateDownloadDecision.isCachedFor(1029, 1030, cachedFileExists = true))
+    }
+
+    @Test
+    fun `isCachedFor false when file missing`() {
+        assertFalse(UpdateDownloadDecision.isCachedFor(1030, 1030, cachedFileExists = false))
+    }
+
+    @Test
+    fun `isCachedFor false when no cached version`() {
+        assertFalse(UpdateDownloadDecision.isCachedFor(null, 1030, cachedFileExists = true))
+    }
+
+    // --- staleFileNames ---
+
+    @Test
+    fun `staleFileNames returns everything except the kept name`() {
+        assertEquals(
+            listOf("old-1.apk", "old-2.apk"),
+            UpdateDownloadDecision.staleFileNames(listOf("old-1.apk", "keep.apk", "old-2.apk"), "keep.apk"),
+        )
+    }
+
+    @Test
+    fun `staleFileNames with null keep returns everything`() {
+        assertEquals(
+            listOf("a.apk", "b.apk"),
+            UpdateDownloadDecision.staleFileNames(listOf("a.apk", "b.apk"), null),
+        )
+    }
+
+    // --- isTrustedAssetUrl ---
+
+    @Test
+    fun `isTrustedAssetUrl trusts https on the configured host`() {
+        assertTrue(UpdateDownloadDecision.isTrustedAssetUrl("https://tv.kevbox.dev/k.apk", "https://tv.kevbox.dev"))
+    }
+
+    @Test
+    fun `isTrustedAssetUrl rejects http on the configured host`() {
+        assertFalse(UpdateDownloadDecision.isTrustedAssetUrl("http://tv.kevbox.dev/k.apk", "https://tv.kevbox.dev"))
+    }
+
+    @Test
+    fun `isTrustedAssetUrl rejects https on a different host`() {
+        assertFalse(UpdateDownloadDecision.isTrustedAssetUrl("https://evil.example/k.apk", "https://tv.kevbox.dev"))
+    }
+
+    @Test
+    fun `isTrustedAssetUrl rejects a malformed url`() {
+        assertFalse(UpdateDownloadDecision.isTrustedAssetUrl("not a url", "https://tv.kevbox.dev"))
+    }
 }
 ```
 
@@ -149,11 +226,16 @@ Create `app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt`:
 ```kotlin
 package com.nuvio.tv.updater
 
+import java.net.URI
+
 /**
- * Pure decision for whether the background worker should pre-download an APK.
- * Extracted from [UpdateCheckWorker] so it can be unit-tested without Android APIs.
+ * Pure decisions for the background [UpdateCheckWorker], extracted so they can be unit-tested
+ * without Android APIs. [isCachedFor] is also reused by [UpdateResolution] so the worker's
+ * "already cached?" and the ViewModel's "installable?" never drift.
  */
 object UpdateDownloadDecision {
+
+    /** Whether the worker should pre-download an APK for [remoteVersionCode]. */
     fun shouldDownload(
         remoteVersionCode: Int,
         currentVersionCode: Int,
@@ -165,19 +247,40 @@ object UpdateDownloadDecision {
             ignoredVersionCode != remoteVersionCode &&
             !alreadyCachedForRemote &&
             isUnmetered
+
+    /** True when a previously cached pre-download still satisfies [targetVersionCode]. */
+    fun isCachedFor(
+        cachedVersionCode: Int?,
+        targetVersionCode: Int,
+        cachedFileExists: Boolean,
+    ): Boolean =
+        cachedVersionCode != null && cachedVersionCode == targetVersionCode && cachedFileExists
+
+    /** Names in [allNames] to prune — everything except [keepName] (null keeps nothing). */
+    fun staleFileNames(allNames: List<String>, keepName: String?): List<String> =
+        allNames.filter { it != keepName }
+
+    /** Only download an asset served over https from the same host as [baseUrl]. */
+    fun isTrustedAssetUrl(assetUrl: String, baseUrl: String): Boolean {
+        val asset = runCatching { URI(assetUrl) }.getOrNull() ?: return false
+        if (!"https".equals(asset.scheme, ignoreCase = true)) return false
+        val assetHost = asset.host ?: return false
+        val baseHost = runCatching { URI(baseUrl) }.getOrNull()?.host ?: return false
+        return assetHost.equals(baseHost, ignoreCase = true)
+    }
 }
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `./gradlew testFullDebugUnitTest --tests "com.nuvio.tv.updater.UpdateDownloadDecisionTest"`
-Expected: PASS (6 tests).
+Expected: PASS (17 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt app/src/testFull/java/com/nuvio/tv/updater/UpdateDownloadDecisionTest.kt
-git commit -m "feat(updater): pure download gate for the background check"
+git commit -m "feat(updater): pure worker decisions (download gate, cache-match, prune, url-trust)"
 ```
 
 ---
@@ -188,7 +291,7 @@ git commit -m "feat(updater): pure download gate for the background check"
 - Create: `app/src/full/java/com/nuvio/tv/updater/UpdateResolution.kt`
 - Test: `app/src/testFull/java/com/nuvio/tv/updater/UpdateResolutionTest.kt`
 
-Note: this task uses the existing `AppUpdate` data class (no serialization needed yet).
+Note: this task uses the existing `AppUpdate` data class (no serialization needed yet) and reuses `UpdateDownloadDecision.isCachedFor` from Task 2.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -292,6 +395,30 @@ class UpdateResolutionTest {
     }
 
     @Test
+    fun `ignored version with a matching cached apk stays hidden but is still installable`() {
+        // Decided behavior: the dialog is hidden (ignored, no force), but the cached path is
+        // still resolved so a later force-check can offer instant Install.
+        val d = UpdateResolution.resolve(
+            liveUpdate = update(1030), cachedUpdate = update(1030), cachedApkPath = "/cache/u.apk",
+            cachedApkExists = true, currentVersionCode = 1028, ignoredVersionCode = 1030,
+            force = false,
+        )
+        assertFalse(d.showDialog)
+        assertEquals("/cache/u.apk", d.installableApkPath)
+    }
+
+    @Test
+    fun `force offers instant install of an ignored, pre-downloaded version`() {
+        val d = UpdateResolution.resolve(
+            liveUpdate = update(1030), cachedUpdate = update(1030), cachedApkPath = "/cache/u.apk",
+            cachedApkExists = true, currentVersionCode = 1028, ignoredVersionCode = 1030,
+            force = true,
+        )
+        assertTrue(d.showDialog)
+        assertEquals("/cache/u.apk", d.installableApkPath)
+    }
+
+    @Test
     fun `force shows the dialog even for an ignored version`() {
         val d = UpdateResolution.resolve(
             liveUpdate = update(1030), cachedUpdate = null, cachedApkPath = null,
@@ -345,7 +472,10 @@ import com.nuvio.tv.updater.model.AppUpdate
  * Pure resolve logic for [UpdateViewModel]: merges the live check result with the cached
  * background pre-download. Live wins; cached metadata is the offline fallback. A cached APK
  * is only "installable" when its file exists and its versionCode matches the effective
- * update (so a newer live release than what was pre-downloaded falls back to download).
+ * update — the same [UpdateDownloadDecision.isCachedFor] predicate the worker uses. The
+ * installable path is computed independent of the ignore flag; the dialog is gated by
+ * [Decision.showDialog], so an ignored-but-pre-downloaded version stays hidden until a force
+ * check (then it correctly offers instant Install).
  */
 object UpdateResolution {
 
@@ -371,7 +501,7 @@ object UpdateResolution {
         val remoteNewer = effective.versionCode > currentVersionCode
         val notIgnored = ignoredVersionCode == null || ignoredVersionCode != effective.versionCode
         val installable = cachedApkPath?.takeIf {
-            cachedApkExists && cachedUpdate?.versionCode == effective.versionCode
+            UpdateDownloadDecision.isCachedFor(cachedUpdate?.versionCode, effective.versionCode, cachedApkExists)
         }
 
         return Decision(
@@ -387,7 +517,7 @@ object UpdateResolution {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `./gradlew testFullDebugUnitTest --tests "com.nuvio.tv.updater.UpdateResolutionTest"`
-Expected: PASS (8 tests).
+Expected: PASS (10 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -398,15 +528,16 @@ git commit -m "feat(updater): pure resolve logic merging live check with cached 
 
 ---
 
-### Task 4: Make `AppUpdate` serializable + shared `UpdateJson`
+### Task 4: Make `AppUpdate` serializable, add `UpdateJson`, correct the `Checksum` comment
 
 **Files:**
 - Modify: `app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt`
 - Create: `app/src/full/java/com/nuvio/tv/updater/UpdateJson.kt`
+- Modify: `app/src/full/java/com/nuvio/tv/updater/Checksum.kt`
 
 - [ ] **Step 1: Annotate `AppUpdate`**
 
-In `app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt`, add the import and annotation. The existing declaration is:
+In `app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt`, the existing declaration is:
 
 ```kotlin
 @Keep
@@ -436,16 +567,41 @@ internal object UpdateJson {
 }
 ```
 
-- [ ] **Step 3: Verify it compiles**
+- [ ] **Step 3: Correct the misleading security comment in `Checksum.kt`**
+
+The current doc comment overstates the guarantee. Replace:
+
+```kotlin
+/**
+ * SHA-256 verification for downloaded APKs (ported from kevbox-support `Checksum`).
+ * A compromised/misconfigured host cannot push an APK that doesn't match the manifest hash.
+ */
+```
+
+with:
+
+```kotlin
+/**
+ * SHA-256 verification for downloaded APKs (ported from kevbox-support `Checksum`).
+ *
+ * This is an INTEGRITY check (guards against a corrupted/truncated download), NOT authenticity:
+ * the hash comes from the same host as the APK (over the app's trust-all OkHttpClient), so a
+ * forged manifest can supply a matching hash. Authenticity is enforced at install time by
+ * Android's signing-certificate match against the installed app (the release keystore).
+ * See the spec's Security section.
+ */
+```
+
+- [ ] **Step 4: Verify it compiles**
 
 Run: `./gradlew compileFullDebugKotlin`
 Expected: BUILD SUCCESSFUL.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt app/src/full/java/com/nuvio/tv/updater/UpdateJson.kt
-git commit -m "feat(updater): make AppUpdate serializable for cached pre-download"
+git add app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt app/src/full/java/com/nuvio/tv/updater/UpdateJson.kt app/src/full/java/com/nuvio/tv/updater/Checksum.kt
+git commit -m "feat(updater): serializable AppUpdate + shared Json; correct checksum security note"
 ```
 
 ---
@@ -465,7 +621,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 
 - [ ] **Step 2: Add keys, flows, and setters**
 
-After the existing `lastCheckAtMs` flow / `setLastCheckAtMs` (i.e. inside the class, before the closing brace), add:
+After the existing `setLastCheckAtMs` (i.e. inside the class, before the closing brace), add:
 
 ```kotlin
     private val predownloadApkPathKey = stringPreferencesKey("predownloaded_apk_path")
@@ -488,6 +644,7 @@ After the existing `lastCheckAtMs` flow / `setLastCheckAtMs` (i.e. inside the cl
         }
     }
 
+    /** Clears the pre-download pointers. The caller deletes the on-disk APK (no file handle here). */
     suspend fun clearPredownload() {
         dataStore.edit { prefs ->
             prefs.remove(predownloadApkPathKey)
@@ -554,12 +711,75 @@ git commit -m "feat(updater): Hilt entry point for the background worker"
 
 ---
 
-### Task 7: `UpdateCheckWorker` — the daily worker
+### Task 7: `ApkDownloader` atomic write + `UpdateCheckWorker` — the daily worker
 
 **Files:**
+- Modify: `app/src/full/java/com/nuvio/tv/updater/ApkDownloader.kt`
 - Create: `app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt`
 
-- [ ] **Step 1: Create the worker**
+- [ ] **Step 1: Make `ApkDownloader` write atomically (`.part` then rename)**
+
+Both the worker and the foreground `UpdateViewModel.downloadUpdate` compute the **same** destination filename in `cacheDir/updates`. Today `ApkDownloader` deletes-then-streams in place, so a worker run overlapping a manual download (or the worker's prune) can corrupt or delete a half-written file. Fix it once, for both paths: stream into a `<name>.part` temp and atomically rename on success, so a partial file is never visible at the final path. In `ApkDownloader.kt`, replace the body of `download(...)` (the `runCatching { … }` block) with:
+
+```kotlin
+        return runCatching {
+            destinationFile.parentFile?.mkdirs()
+
+            // Stream into a .part temp, then atomically rename, so a partial/concurrent write is
+            // never visible at the final path (and the worker's prune skips .part files).
+            val partFile = File(destinationFile.parentFile, destinationFile.name + ".part")
+            if (partFile.exists()) partFile.delete()
+
+            val request = Request.Builder()
+                .url(url)
+                .build()
+
+            // KevBox: APKs are 80–150 MB. The shared client has a 30s read timeout (fine for API
+            // calls); relax read/write/call timeouts to unlimited for the large streamed download
+            // so a slow family TV link doesn't abort it. connectTimeout stays inherited (fail fast
+            // on a dead host).
+            val downloadClient = okHttpClient.newBuilder()
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .writeTimeout(0, TimeUnit.MILLISECONDS)
+                .callTimeout(0, TimeUnit.MILLISECONDS)
+                .build()
+
+            downloadClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("Download failed: HTTP ${response.code}")
+                }
+
+                val body = response.body ?: error("Empty download body")
+                val total = body.contentLength().takeIf { it > 0 }
+
+                body.byteStream().use { input ->
+                    FileOutputStream(partFile).use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var downloaded = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            onProgress(downloaded, total)
+                        }
+                        output.flush()
+                    }
+                }
+            }
+
+            if (destinationFile.exists()) destinationFile.delete()
+            if (!partFile.renameTo(destinationFile)) {
+                // Cross-device or rename refusal: fall back to copy+delete.
+                partFile.copyTo(destinationFile, overwrite = true)
+                partFile.delete()
+            }
+
+            destinationFile
+        }
+```
+
+- [ ] **Step 2: Create the worker**
 
 Create `app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt`:
 
@@ -569,9 +789,11 @@ package com.nuvio.tv.updater
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.nuvio.tv.BuildConfig
+import com.nuvio.tv.updater.model.AppUpdate
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.decodeFromString
@@ -579,9 +801,11 @@ import kotlinx.serialization.encodeToString
 import java.io.File
 
 /**
- * Once-a-day background check. If a newer, non-ignored build exists and the device is on an
- * unmetered network, downloads + SHA-256-verifies the APK and caches its path + metadata so
- * [UpdateViewModel] can offer an instant Install on next app open. No notifications.
+ * Once-a-day background check. If a newer, non-ignored build exists on a trusted (https +
+ * configured-host) URL and the device is on an unmetered network, downloads + SHA-256-verifies
+ * the APK and caches its path + metadata so [UpdateViewModel] can offer an instant Install on
+ * next app open. No notifications. Pruning runs on every invocation, keeping at most the one
+ * APK still worth installing. Logs at decision points so a release smoke test can follow it.
  */
 class UpdateCheckWorker(
     appContext: Context,
@@ -589,7 +813,8 @@ class UpdateCheckWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        // Mirror the launch-time gate: never auto-act in debug builds.
+        // Mirror the launch-time gate: never auto-act in debug/benchmark builds. The worker only
+        // does real work in a release build (BuildConfig.IS_DEBUG_BUILD == false).
         if (BuildConfig.IS_DEBUG_BUILD) return Result.success()
 
         val entry = EntryPointAccessors.fromApplication(
@@ -600,40 +825,67 @@ class UpdateCheckWorker(
         val downloader = entry.apkDownloader()
         val prefs = entry.updatePreferences()
 
-        val update = repo.getLatestUpdate().getOrElse { return Result.retry() }
+        val update = repo.getLatestUpdate().getOrElse {
+            Log.w(TAG, "Update check failed; will retry: ${it.message}")
+            return Result.retry()
+        }
         prefs.setLastCheckAtMs(System.currentTimeMillis())
 
+        val dir = File(applicationContext.cacheDir, "updates")
         val ignored = prefs.ignoredVersionCode.first()
         val cachedPath = prefs.predownloadApkPath.first()
         val cachedVersion = prefs.predownloadUpdateJson.first()
-            ?.let { runCatching { UpdateJson.json.decodeFromString<com.nuvio.tv.updater.model.AppUpdate>(it) }.getOrNull()?.versionCode }
-        val alreadyCached = cachedVersion == update.versionCode &&
-            cachedPath != null && File(cachedPath).exists()
+            ?.let { runCatching { UpdateJson.json.decodeFromString<AppUpdate>(it) }.getOrNull()?.versionCode }
+        val cachedFileExists = cachedPath != null && File(cachedPath).exists()
+        val alreadyCached = UpdateDownloadDecision.isCachedFor(cachedVersion, update.versionCode, cachedFileExists)
 
-        val shouldDownload = UpdateDownloadDecision.shouldDownload(
+        // Keep an already-valid pre-download only while it is still an upgrade over the installed
+        // build; otherwise nothing is worth keeping (prune clears everything).
+        val targetIsUpgrade = update.versionCode > BuildConfig.VERSION_CODE
+        var keepName: String? =
+            if (targetIsUpgrade && alreadyCached && cachedPath != null) File(cachedPath).name else null
+
+        val trusted = UpdateDownloadDecision.isTrustedAssetUrl(update.assetUrl, BuildConfig.UPDATE_BASE_URL)
+        if (!trusted) Log.w(TAG, "Untrusted asset URL, skipping download: ${update.assetUrl}")
+
+        val shouldDownload = trusted && UpdateDownloadDecision.shouldDownload(
             remoteVersionCode = update.versionCode,
             currentVersionCode = BuildConfig.VERSION_CODE,
             ignoredVersionCode = ignored,
             alreadyCachedForRemote = alreadyCached,
             isUnmetered = isUnmetered(applicationContext),
         )
-        if (!shouldDownload) return Result.success()
 
-        val dir = File(applicationContext.cacheDir, "updates")
-        val safeName = update.assetName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        val dest = File(dir, safeName)
+        if (shouldDownload) {
+            val safeName = update.assetName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val dest = File(dir, safeName)
 
-        val file = downloader.download(update.assetUrl, dest) { _, _ -> }
-            .getOrElse { return Result.retry() }
+            val file = downloader.download(update.assetUrl, dest) { _, _ -> }.getOrElse {
+                Log.w(TAG, "Download failed; will retry: ${it.message}")
+                pruneStale(dir, keepName)
+                return Result.retry()
+            }
 
-        val verified = runCatching { Checksum.verify(file, update.sha256) }.getOrDefault(false)
-        if (!verified) {
-            runCatching { file.delete() }
-            return Result.retry()
+            val verified = runCatching { Checksum.verify(file, update.sha256) }.getOrDefault(false)
+            if (!verified) {
+                Log.w(TAG, "SHA-256 mismatch for ${file.name}; deleting and retrying")
+                runCatching { file.delete() }
+                pruneStale(dir, keepName)
+                return Result.retry()
+            }
+
+            prefs.setPredownload(file.absolutePath, UpdateJson.json.encodeToString(update))
+            keepName = file.name
+            Log.i(TAG, "Pre-downloaded + verified ${file.name} (versionCode ${update.versionCode})")
+        } else {
+            Log.i(
+                TAG,
+                "No download this run (trusted=$trusted, alreadyCached=$alreadyCached, " +
+                    "remote=${update.versionCode}, current=${BuildConfig.VERSION_CODE})",
+            )
         }
 
-        prefs.setPredownload(file.absolutePath, UpdateJson.json.encodeToString(update))
-        pruneExcept(dir, file)
+        pruneStale(dir, keepName)
         return Result.success()
     }
 
@@ -643,34 +895,41 @@ class UpdateCheckWorker(
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
-    /** Keep only the freshly cached APK; delete any other stale APKs in the updates dir. */
-    private fun pruneExcept(dir: File, keep: File) {
-        dir.listFiles()?.forEach { f ->
-            if (f.absolutePath != keep.absolutePath) runCatching { f.delete() }
+    /**
+     * Keep only [keepName]; delete other finalized APKs. Skips in-progress `.part` files so a
+     * concurrent foreground download (ApkDownloader streams to `<name>.part` then renames) is
+     * never deleted mid-write.
+     */
+    private fun pruneStale(dir: File, keepName: String?) {
+        val names = dir.listFiles()?.filterNot { it.name.endsWith(".part") }?.map { it.name } ?: return
+        UpdateDownloadDecision.staleFileNames(names, keepName).forEach { name ->
+            runCatching { File(dir, name).delete() }
         }
     }
 
     companion object {
         const val UNIQUE_NAME = "kevbox-daily-update-check"
+        const val UNIQUE_NAME_ONESHOT = "kevbox-update-check-now"
+        private const val TAG = "UpdateCheckWorker"
     }
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [ ] **Step 3: Verify it compiles**
 
 Run: `./gradlew compileFullDebugKotlin`
 Expected: BUILD SUCCESSFUL.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt
-git commit -m "feat(updater): daily CoroutineWorker that pre-downloads + verifies APK"
+git add app/src/full/java/com/nuvio/tv/updater/ApkDownloader.kt app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt
+git commit -m "feat(updater): atomic APK write + daily CoroutineWorker (trusted pre-download, verify, prune)"
 ```
 
 ---
 
-### Task 8: `UpdateWorkScheduler` — enqueue the periodic work
+### Task 8: `UpdateWorkScheduler` — enqueue periodic + one-time work
 
 **Files:**
 - Create: `app/src/full/java/com/nuvio/tv/updater/UpdateWorkScheduler.kt`
@@ -686,16 +945,18 @@ import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkRequest
 import java.util.concurrent.TimeUnit
 
 /**
- * Schedules the once-a-day [UpdateCheckWorker]. Idempotent — safe to call on every app start
- * (KEEP preserves the already-scheduled work). The CONNECTED constraint gates only the cheap
- * version check; the worker itself enforces unmetered-only for the actual APK download.
+ * Schedules the once-a-day [UpdateCheckWorker] plus a prompt one-time kick. Idempotent — safe to
+ * call on every app start. The CONNECTED constraint gates only the cheap version check; the
+ * worker itself enforces unmetered-only for the actual APK download.
  */
 object UpdateWorkScheduler {
 
@@ -704,7 +965,9 @@ object UpdateWorkScheduler {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(1, TimeUnit.DAYS)
+        val wm = WorkManager.getInstance(context)
+
+        val periodic = PeriodicWorkRequestBuilder<UpdateCheckWorker>(1, TimeUnit.DAYS)
             .setConstraints(constraints)
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,
@@ -713,10 +976,25 @@ object UpdateWorkScheduler {
             )
             .build()
 
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+        // UPDATE (not KEEP): a future change to the period/constraints/backoff propagates to
+        // already-installed TVs instead of being frozen at the first-ever enqueue. An unchanged
+        // request is a no-op (no reschedule), so this stays safe to call on every app start.
+        wm.enqueueUniquePeriodicWork(
             UpdateCheckWorker.UNIQUE_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            request,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            periodic,
+        )
+
+        // PeriodicWork's first run is deferred up to the interval (~24h). Kick a one-time run so a
+        // freshly set-up TV pre-downloads promptly. KEEP = at most one in flight; the worker's own
+        // debug/trust/metered/already-cached gates still apply.
+        val initial = OneTimeWorkRequestBuilder<UpdateCheckWorker>()
+            .setConstraints(constraints)
+            .build()
+        wm.enqueueUniqueWork(
+            UpdateCheckWorker.UNIQUE_NAME_ONESHOT,
+            ExistingWorkPolicy.KEEP,
+            initial,
         )
     }
 }
@@ -731,7 +1009,7 @@ Expected: BUILD SUCCESSFUL.
 
 ```bash
 git add app/src/full/java/com/nuvio/tv/updater/UpdateWorkScheduler.kt
-git commit -m "feat(updater): schedule the daily update-check worker"
+git commit -m "feat(updater): schedule daily + prompt one-time update-check work"
 ```
 
 ---
@@ -768,7 +1046,8 @@ Append the scheduling call (wrapped so it can never crash app start) so it becom
         AcraApplication.context = application
 
         // KevBox TV: register the once-a-day background update check (full flavor only).
-        // Idempotent (KEEP), and best-effort so a WorkManager hiccup never blocks startup.
+        // Idempotent (UPDATE periodic + KEEP one-time), best-effort so a WorkManager hiccup
+        // never blocks startup.
         try {
             com.nuvio.tv.updater.UpdateWorkScheduler.ensureScheduled(application)
         } catch (t: Throwable) {
@@ -838,8 +1117,9 @@ Replace the entire existing `checkForUpdates(force, showNoUpdateFeedback)` funct
                 force = force,
             )
 
-            // Drop a now-installed/stale cached pre-download so it can't resurface.
+            // Drop a now-installed/stale cached pre-download (file + pointer) so it can't resurface.
             if (!decision.isUpdateAvailable && cachedApkPath != null) {
+                runCatching { File(cachedApkPath).delete() }
                 updatePreferences.clearPredownload()
             }
 
@@ -880,9 +1160,9 @@ Replace the entire existing `checkForUpdates(force, showNoUpdateFeedback)` funct
 Run: `./gradlew compileFullDebugKotlin`
 Expected: BUILD SUCCESSFUL.
 
-- [ ] **Step 4: Sanity-check the dialog's Install path**
+- [ ] **Step 4: Confirm the dialog's Install path (resolved — no change expected)**
 
-Read `app/src/full/java/com/nuvio/tv/updater/ui/UpdatePromptDialog.kt` and confirm that a non-null `state.downloadedApkPath` renders the **Install** action (the same state `downloadUpdate()` produces on success). If the dialog keys off a different field, adjust the state mapping in Step 2 to match. No code change expected if it keys off `downloadedApkPath`.
+The dialog already keys the Install action off `state.downloadedApkPath != null` (`UpdatePromptDialog.kt:468`), so the `installableApkPath → downloadedApkPath` mapping surfaces **Install** on next open. No change needed. (Cosmetic only: a pre-existing 700 ms anti-double-click debounce at `UpdatePromptDialog.kt:104-120` briefly disables the button when the dialog opens, so "instant" Install arms ~0.7 s late.)
 
 - [ ] **Step 5: Commit**
 
@@ -900,7 +1180,7 @@ git commit -m "feat(updater): surface cached background pre-download as instant 
 - [ ] **Step 1: Run the full unit-test suite**
 
 Run: `./gradlew testFullDebugUnitTest`
-Expected: PASS, including `UpdateDownloadDecisionTest` (6) and `UpdateResolutionTest` (8).
+Expected: PASS, including `UpdateDownloadDecisionTest` (17) and `UpdateResolutionTest` (10).
 
 - [ ] **Step 2: Build the full debug APK**
 
@@ -915,13 +1195,17 @@ Expected: BUILD SUCCESSFUL — confirms WorkManager + the worker are not referen
 - [ ] **Step 4: R8 sanity on the full release**
 
 Run: `./gradlew assembleFullRelease`
-Expected: BUILD SUCCESSFUL with no R8 errors (`AppUpdate` is `@Keep`; the worker is referenced by name through WorkManager, which the default rules handle).
+Expected: BUILD SUCCESSFUL with no R8 errors. The newly-`@Serializable` `AppUpdate` is kept by the **existing** `-keep class com.nuvio.tv.updater.model.** { *; }` + `**$$serializer` rules in `app/proguard-rules.pro` (the same rules that protect `UpdateManifest`), not by `@Keep` alone. `UpdateCheckWorker` (package `com.nuvio.tv.updater`, outside `.model`) is kept by `work-runtime`'s bundled consumer rule (`* extends androidx.work.ListenableWorker` + its constructor). (`assembleFullRelease` signs with the KevBox release keystore from `local.properties` — already present.)
 
-- [ ] **Step 5: Emulator smoke test (manual)**
+- [ ] **Step 5: Emulator/device smoke test (manual — RELEASE build)**
 
-Install the full debug APK, launch the app, and confirm it starts without crashing (the scheduler runs in `PluginRuntimeHooks.onApplicationCreate`). To exercise the worker on demand without waiting a day:
+The worker returns `Result.success()` immediately when `BuildConfig.IS_DEBUG_BUILD` is true, which it is for **both `debug` and `benchmark`** (`app/build.gradle.kts:186,245`). **Only a `fullRelease` build exercises the real path** — do not smoke-test a debug APK for the download/cache behavior.
 
-Run: `adb shell cmd jobscheduler run -f com.nuvio.tv <jobId>` *(or)* use WorkManager's test inspection; alternatively temporarily lower the period during local testing. Confirm via logcat that the worker runs and, when a newer `version.json` is served, caches an APK under `cacheDir/updates`.
+1. Serve a `version.json` at `UPDATE_BASE_URL` (`https://tv.kevbox.dev`) whose `versionCode` is **newer** than the build you install (or build a release at a lower `versionCode`).
+2. Build + install the release: `./gradlew assembleFullRelease` then `adb install -r app/build/outputs/apk/full/release/*.apk` (installed applicationId is **`tv.kevbox`**, not `com.nuvio.tv` — that's the Gradle namespace).
+3. Launch the app. `PluginRuntimeHooks.onApplicationCreate` enqueues the periodic work **and** a one-time kick, so on an unmetered network the worker runs within ~seconds/minutes.
+4. Observe via logcat (release builds aren't `run-as`-inspectable): `adb logcat -s UpdateCheckWorker` — expect `Pre-downloaded + verified <name> (versionCode …)`. To inspect the scheduled jobs: `adb shell dumpsys jobscheduler | grep tv.kevbox`.
+5. Behavioral confirm: force-close and reopen the app → the update dialog offers **Install** immediately (no download spinner), proving the cached pre-download surfaced through `UpdateResolution` + the ViewModel mapping. (If logcat shows `No download this run (... alreadyCached=false ...)` with `trusted=false`, the manifest URL host/scheme is wrong; if it never downloads on the expected network, you're on a metered link.)
 
 - [ ] **Step 6: Final commit (if any verification fixups were needed)**
 
@@ -934,7 +1218,8 @@ git commit -m "test(updater): verify daily update check across full + playstore 
 
 ## Self-Review Notes (author)
 
-- **Spec coverage:** WorkManager dep (T1), download gate (T2), resolve logic (T3), serialization (T4), prefs (T5), EntryPoint (T6), worker (T7), scheduler (T8), full-only seam (T9), ViewModel surfacing + non-destructive failure + stale-clear (T10), both-flavor build + R8 (T11). All spec sections mapped.
-- **Type consistency:** `UpdateDownloadDecision.shouldDownload(...)`, `UpdateResolution.resolve(...)` / `Decision(update, isUpdateAvailable, showDialog, installableApkPath)`, `UpdatePreferences.setPredownload/clearPredownload/predownloadApkPath/predownloadUpdateJson`, `UpdateWorkerEntryPoint.{updateRepository,apkDownloader,updatePreferences}`, `UpdateCheckWorker.UNIQUE_NAME`, `UpdateWorkScheduler.ensureScheduled` — names are used identically across tasks.
-- **Catalog accessor:** TOML alias `androidx-work-runtime` → Gradle accessor `libs.androidx.work.runtime`.
-- **Known manual gate:** T10 Step 4 verifies the dialog's Install trigger field before relying on `downloadedApkPath`.
+- **Spec coverage:** WorkManager dep (T1), pure worker logic incl. cache-match/prune/url-trust (T2), resolve logic (T3), serialization + checksum-comment fix (T4), prefs (T5), EntryPoint (T6), worker with trust gate + unconditional prune + logging (T7), scheduler with UPDATE periodic + one-time kick (T8), full-only seam (T9), ViewModel surfacing + non-destructive failure + stale file+pointer clear (T10), both-flavor build + R8 + **release** smoke test (T11). All spec sections mapped.
+- **Type consistency:** `UpdateDownloadDecision.{shouldDownload, isCachedFor, staleFileNames, isTrustedAssetUrl}`, `UpdateResolution.resolve(...)` / `Decision(update, isUpdateAvailable, showDialog, installableApkPath)`, `UpdatePreferences.{setPredownload, clearPredownload, predownloadApkPath, predownloadUpdateJson}`, `UpdateWorkerEntryPoint.{updateRepository, apkDownloader, updatePreferences}`, `UpdateCheckWorker.{UNIQUE_NAME, UNIQUE_NAME_ONESHOT}`, `UpdateWorkScheduler.ensureScheduled`, `BuildConfig.UPDATE_BASE_URL` — names used identically across tasks and verified against source.
+- **Catalog accessor:** TOML alias `androidx-work-runtime` → Gradle accessor `libs.androidx.work.runtime` (same dash→dot rule as `androidx-core-ktx` → `libs.androidx.core.ktx`).
+- **Shared predicate:** the worker's `alreadyCached` and `UpdateResolution`'s `installableApkPath` both go through `UpdateDownloadDecision.isCachedFor`, so the two cannot drift.
+- **Gaps closed vs. v1:** release-build smoke test (debug gate no-op), worker decisions extracted + tested, unconditional prune (spec↔code reconciled), ViewModel deletes the stale APK file, asset-URL https+host trust gate, security framing corrected (keystore signature = authenticity), `UPDATE` periodic policy, one-time day-1 kick, correct `tv.kevbox` applicationId + `dumpsys`/logcat trigger, atomic `.part` APK write (worker↔foreground race), MockK dropped, `testFull` source-set note, R8 keep rationale corrected.
