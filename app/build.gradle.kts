@@ -140,6 +140,9 @@ android {
             // See plans/MEMBER-ACCESS-PLAN.md, member_access_setup.sql, member_device_setup.sql.
             buildConfigField("boolean", "FEATURE_ACCESS_CONTROL", "true")
             buildConfigField("boolean", "FEATURE_DEVICE_LIMIT", "true")
+            // KevBox family build: durations-only member activity telemetry ON.
+            // See plans/2026-06-09-member-activity-telemetry.md, member_telemetry_setup.sql.
+            buildConfigField("boolean", "FEATURE_TELEMETRY", "true")
         }
         create("playstore") {
             dimension = "distribution"
@@ -152,6 +155,8 @@ android {
             // Public flavor never ships the kill-switch and never calls the family Supabase project.
             buildConfigField("boolean", "FEATURE_ACCESS_CONTROL", "false")
             buildConfigField("boolean", "FEATURE_DEVICE_LIMIT", "false")
+            // Public flavor never collects telemetry and never calls the family Supabase project.
+            buildConfigField("boolean", "FEATURE_TELEMETRY", "false")
         }
     }
 

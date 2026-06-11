@@ -8,9 +8,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.nuvio.tv.core.debrid.DirectDebridResolver
 import com.nuvio.tv.core.debrid.DirectDebridStreamPreparer
 import com.nuvio.tv.core.plugin.PluginManager
+import com.nuvio.tv.core.telemetry.TelemetryRepository
 import com.nuvio.tv.core.torrent.TorrentService
 import com.nuvio.tv.core.torrent.TorrentSettings
 import com.nuvio.tv.data.local.AudioDelayRouteDataStore
+import com.nuvio.tv.data.local.DeviceGuardDataStore
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.DeviceLocalPlayerPreferences
 import com.nuvio.tv.data.local.StreamLinkCacheDataStore
@@ -64,6 +66,8 @@ class PlayerViewModel @Inject constructor(
     private val directDebridStreamPreparer: DirectDebridStreamPreparer,
     private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
+    private val telemetryRepository: TelemetryRepository,
+    private val deviceGuardDataStore: DeviceGuardDataStore,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -101,6 +105,8 @@ class PlayerViewModel @Inject constructor(
         tmdbSettingsDataStore = tmdbSettingsDataStore,
         directDebridResolver = directDebridResolver,
         directDebridStreamPreparer = directDebridStreamPreparer,
+        telemetryRepository = telemetryRepository,
+        deviceGuardDataStore = deviceGuardDataStore,
         savedStateHandle = savedStateHandle,
         scope = viewModelScope
     )

@@ -1,6 +1,7 @@
 package com.nuvio.tv.ui.screens.player
 
 import android.util.Log
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
@@ -162,6 +163,12 @@ internal fun PlayerRuntimeController.releaseMpvPlayer() {
 internal fun PlayerRuntimeController.pauseForLifecycle() {
     // Mark we're in background so onPlayerError can defer recovery to onResume.
     isInBackground = true
+
+    // Telemetry (H2/M9): cancel heartbeats on background so a backgrounded-but-not-cleared
+    // player never accrues phantom watch-time (spec §6/§10 "cancel on background"). For the
+    // ExoPlayer path, the subsequent playWhenReady=false also fires onIsPlayingChanged(false),
+    // but the MPV path returns early — so stop explicitly here.
+    if (BuildConfig.FEATURE_TELEMETRY) heartbeatScheduler.stop()
 
     // Release the MediaSession so the system doesn't route media commands
     // (play/pause, audio focus) to this player while the app is in the background.

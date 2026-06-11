@@ -2,6 +2,7 @@ package com.nuvio.tv.ui.screens.player
 
 import android.content.Intent
 import android.media.audiofx.AudioEffect
+import com.nuvio.tv.BuildConfig
 import kotlinx.coroutines.flow.update
 
 internal fun PlayerRuntimeController.releasePlayer() {
@@ -10,6 +11,8 @@ internal fun PlayerRuntimeController.releasePlayer() {
 
 internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) {
     isReleasingPlayer = true
+    // Telemetry (M9): the ticker lives on viewModelScope and must not outlive the player.
+    if (BuildConfig.FEATURE_TELEMETRY) heartbeatScheduler.stop()
     if (flushPlaybackState) {
         stopTorrentStream()
         flushPlaybackSnapshotForSwitchOrExit()

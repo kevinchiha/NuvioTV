@@ -45,6 +45,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
 import androidx.media3.session.MediaSession
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.R
 import com.nuvio.tv.core.player.DolbyVisionCodecFallback
 import com.nuvio.tv.core.player.DolbyVisionBaseLayerPolicy
@@ -891,6 +892,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                         }
 
                         if (playbackState == Player.STATE_ENDED) {
+                            // Telemetry (M9): playback finished — stop beating even if isPlaying
+                            // didn't toggle false first.
+                            if (BuildConfig.FEATURE_TELEMETRY) heartbeatScheduler.stop()
                             // emitCompletionScrobbleStop(progressPercent = 99.5f)
                             // Re-persist diagnostics with the final rebuffer totals (the
                             // first-frame snapshot captured 0, since rebuffers accrue after).
@@ -918,6 +922,22 @@ internal fun PlayerRuntimeController.initializePlayer(
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         _uiState.update { it.copy(isPlaying = isPlaying) }
+                        // Telemetry (H2): drive the heartbeat ticker off the real "actively playing"
+                        // signal — NOT onPlaybackStateChanged (a pure pause toggles isPlaying without
+                        // changing playbackState, and play is deferred to onRenderedFirstFrame).
+                        // session_start is emitted exactly once per playback; pause→resume / rebuffer /
+                        // retry / engine-failover keep telemetrySessionStarted true so it is NOT re-emitted.
+                        if (BuildConfig.FEATURE_TELEMETRY) {
+                            telemetryDeviceId?.let { dev ->
+                                if (isPlaying) {
+                                    val firstForThisPlayback = !telemetrySessionStarted
+                                    telemetrySessionStarted = true
+                                    heartbeatScheduler.start(dev, emitSessionStart = firstForThisPlayback)
+                                } else {
+                                    heartbeatScheduler.stop() // pause → stop the ticker (no phantom watch-time)
+                                }
+                            }
+                        }
                         if (isPlaying) {
                             userPausedManually = false
                             cancelPauseOverlay()
@@ -1070,6 +1090,19 @@ internal fun PlayerRuntimeController.initializePlayer(
                     override fun onPlayerError(error: PlaybackException) {
                         if (isReleasingPlayer && error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) return
                         cancelFirstFrameWatchdog()
+                        // Telemetry (durations-only): report the error code + short message before any
+                        // retry/fallback branching below. Fail-soft and gated; sends NO url/title/position.
+                        if (BuildConfig.FEATURE_TELEMETRY) telemetryDeviceId?.let { dev ->
+                            scope.launch {
+                                runCatching {
+                                    telemetryRepository.error(
+                                        dev,
+                                        error.errorCode.toString(),
+                                        error.message ?: "playback error"
+                                    )
+                                }
+                            }
+                        }
                         val detailedError = buildString {
                             append(error.message ?: "Playback error")
                             val cause = error.cause
@@ -1442,6 +1475,9 @@ internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
     cancelFirstFrameWatchdog()
     cancelStallWatchdog()
     hasRenderedFirstFrame = false
+    // Telemetry (H2): a NEW playback emits exactly one session_start. Reset here (mirrors
+    // hasRenderedFirstFrame) so pause→resume / retry / engine-failover do NOT re-emit it.
+    telemetrySessionStarted = false
     shouldEnforceAutoplayOnFirstReady = true
     userPausedManually = false
     timeoutRecoveryAttempts = 0

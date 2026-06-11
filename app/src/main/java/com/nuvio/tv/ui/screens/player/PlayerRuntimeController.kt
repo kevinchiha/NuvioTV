@@ -10,11 +10,15 @@ import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.player.BitrateAwareLoadControl
 import com.nuvio.tv.core.debrid.DirectDebridResolver
 import com.nuvio.tv.core.debrid.DirectDebridStreamPreparer
 import com.nuvio.tv.core.plugin.PluginManager
+import com.nuvio.tv.core.telemetry.HeartbeatScheduler
+import com.nuvio.tv.core.telemetry.TelemetryRepository
 import com.nuvio.tv.core.torrent.TorrentService
+import com.nuvio.tv.data.local.DeviceGuardDataStore
 import com.nuvio.tv.data.local.AutoSkipSegmentType
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.data.local.MpvHardwareDecodeMode
@@ -84,6 +88,8 @@ class PlayerRuntimeController(
     internal val tmdbSettingsDataStore: com.nuvio.tv.data.local.TmdbSettingsDataStore,
     internal val directDebridResolver: DirectDebridResolver,
     internal val directDebridStreamPreparer: DirectDebridStreamPreparer,
+    internal val telemetryRepository: TelemetryRepository,
+    internal val deviceGuardDataStore: DeviceGuardDataStore,
     savedStateHandle: SavedStateHandle,
     internal val scope: CoroutineScope
 ) {
@@ -258,6 +264,14 @@ class PlayerRuntimeController(
     val exoPlayer: ExoPlayer?
         get() = _exoPlayer
     internal var playbackSpeedAwareAudioSink: PlaybackSpeedAwareAudioSink? = null
+
+    // ── Durations-only member activity telemetry (FEATURE_TELEMETRY gated) ──
+    /** Fires a 60s playback heartbeat while playing; driven by onIsPlayingChanged. */
+    internal val heartbeatScheduler = HeartbeatScheduler(telemetryRepository, scope, 60_000L)
+    /** Cached per-install device id (resolved once off the suspend DataStore); telemetry no-ops while null. */
+    @Volatile internal var telemetryDeviceId: String? = null
+    /** True once session_start has been emitted for the CURRENT playback. Reset in resetLoadingOverlayForNewStream() (mirrors hasRenderedFirstFrame). */
+    @Volatile internal var telemetrySessionStarted = false
 
     internal var progressJob: Job? = null
     internal var vodTelemetryJob: Job? = null
@@ -503,6 +517,13 @@ class PlayerRuntimeController(
         observeTorrentSettings()
         observeStreamBadgeSettings()
         observeDeviceLocalAspectMode()
+        // Telemetry (M7): resolve the device id once off the suspend DataStore so the non-suspend
+        // Player.Listener callbacks can read it synchronously; heartbeat/error no-op while it's null.
+        if (BuildConfig.FEATURE_TELEMETRY) {
+            scope.launch {
+                runCatching { telemetryDeviceId = deviceGuardDataStore.getOrCreateDeviceId() }
+            }
+        }
     }
 
     private fun observeTorrentSettings() {
@@ -527,6 +548,7 @@ class PlayerRuntimeController(
     }
 
     fun onCleared() {
+        if (BuildConfig.FEATURE_TELEMETRY) heartbeatScheduler.stop()
         releasePlayer()
         stopTorrentStream()
         vodTelemetryJob?.cancel()
