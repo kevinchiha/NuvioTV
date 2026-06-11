@@ -66,3 +66,102 @@ create table public.member_device_policy (
   max_devices int not null default 1,
   updated_at  timestamptz not null default now()
 );
+
+-- ===== Member activity telemetry (durations only) =====
+-- Per-member-per-day watch-time rollup (authoritative metric).
+create table public.member_activity_daily (
+  user_id          uuid not null references auth.users(id) on delete cascade,
+  day              date not null,
+  watch_seconds    int  not null default 0,
+  heartbeats       int  not null default 0,
+  sessions         int  not null default 0,
+  last_app_version text,
+  updated_at       timestamptz not null default now(),
+  primary key (user_id, day)
+);
+
+-- Accrual baseline + last-known app version, per (member, device). Decoupled from member_device.
+create table public.member_heartbeat (
+  user_id        uuid not null references auth.users(id) on delete cascade,
+  device_id      text not null,
+  last_heartbeat timestamptz not null default now(),
+  app_version    text,
+  primary key (user_id, device_id)
+);
+
+-- Notable events only (session_start, playback_error). Pruned at 90 days. NEVER content/secrets.
+create table public.member_event (
+  id          bigint generated always as identity primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  device_id   text,
+  occurred_at timestamptz not null default now(),
+  kind        text not null check (kind in ('session_start','playback_error')),
+  app_version text,
+  detail      jsonb
+);
+create index member_event_user_time on public.member_event (user_id, occurred_at desc);
+create index member_event_kind_time on public.member_event (kind, occurred_at desc);
+
+-- Capped wall-clock accrual. Inner fn takes explicit user id → unit-testable without a JWT.
+-- Concurrency (L3): the daily upsert is atomic (ON CONFLICT row lock). Two concurrent beats for the
+-- same (user,device) could each read the old baseline and accrue ≤ CAP; with the one-device limit and
+-- ~60s sequential beats this is improbable and bounded by the 120s cap — so no advisory lock is used.
+create or replace function public.accrue_heartbeat(
+  p_user_id uuid, p_device_id text, p_app_version text, p_cap_seconds int default 120
+) returns int language plpgsql security definer set search_path = '' as $$
+declare v_last timestamptz; v_accrued int;
+begin
+  if p_user_id is null then return 0; end if;
+  select last_heartbeat into v_last
+    from public.member_heartbeat where user_id = p_user_id and device_id = p_device_id;
+  if v_last is null then
+    v_accrued := 0;                                   -- first beat: establish baseline only
+  else
+    v_accrued := least(greatest(0, floor(extract(epoch from (now() - v_last)))::int), p_cap_seconds);
+  end if;
+  insert into public.member_activity_daily(user_id, day, watch_seconds, heartbeats, last_app_version, updated_at)
+    values (p_user_id, (now() at time zone 'utc')::date, v_accrued, 1, p_app_version, now())
+  on conflict (user_id, day) do update
+    set watch_seconds = public.member_activity_daily.watch_seconds + excluded.watch_seconds,
+        heartbeats    = public.member_activity_daily.heartbeats + 1,
+        last_app_version = excluded.last_app_version,
+        updated_at = now();
+  insert into public.member_heartbeat(user_id, device_id, last_heartbeat, app_version)
+    values (p_user_id, p_device_id, now(), p_app_version)
+  on conflict (user_id, device_id) do update
+    set last_heartbeat = now(), app_version = excluded.app_version;
+  return v_accrued;
+end $$;
+
+create or replace function public.record_session_start(
+  p_user_id uuid, p_device_id text, p_app_version text
+) returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if p_user_id is null then return; end if;
+  insert into public.member_activity_daily(user_id, day, sessions, last_app_version, updated_at)
+    values (p_user_id, (now() at time zone 'utc')::date, 1, p_app_version, now())
+  on conflict (user_id, day) do update
+    set sessions = public.member_activity_daily.sessions + 1,
+        last_app_version = excluded.last_app_version, updated_at = now();
+  insert into public.member_event(user_id, device_id, kind, app_version)
+    values (p_user_id, p_device_id, 'session_start', p_app_version);
+  insert into public.member_heartbeat(user_id, device_id, last_heartbeat, app_version)
+    values (p_user_id, p_device_id, now(), p_app_version)
+  on conflict (user_id, device_id) do update set last_heartbeat = now(), app_version = excluded.app_version;
+end $$;
+
+create or replace function public.record_error_event(
+  p_user_id uuid, p_device_id text, p_app_version text, p_detail jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if p_user_id is null then return; end if;
+  insert into public.member_event(user_id, device_id, kind, app_version, detail)
+    values (
+      p_user_id, p_device_id, 'playback_error', p_app_version,
+      jsonb_build_object(                                   -- key allowlist: no secrets/urls/titles
+        'code', left(coalesce(p_detail->>'code',''), 32),
+        -- message_short (spec §7): strip URL-ish tokens, then cap hard at 120.
+        'message_short', left(regexp_replace(coalesce(p_detail->>'message',''), '\S*://\S*', '[url]', 'g'), 120)
+      )
+    );
+end $$;
