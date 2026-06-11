@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Db } from "@kevbox-admin/core";
-import { getMemberActivity, listMembersByActivity, listGoingDark, getFleetStats, getMember } from "@kevbox-admin/core";
+import { getMemberActivity, listMembersByActivity, listGoingDark, getFleetStats, getMember, pruneTelemetry } from "@kevbox-admin/core";
 
 // Clamp an untrusted ?limit= to [1,100] (default 25). Guards NaN/negative from reaching SQL LIMIT.
 function clampLimit(raw?: string): number {
@@ -26,4 +26,8 @@ export function registerActivityRoutes(app: FastifyInstance, db: Db): void {
 
   app.get("/activity/going-dark", async () => ({ rows: await listGoingDark(db, { days: 14 }) }));
   app.get("/activity/stats", async () => ({ stats: await getFleetStats(db) }));
+
+  // Operator-initiated manual prune. Sits behind the `api` scope's requireAdmin, so it needs an
+  // admin JWT and is NOT the headless/unattended path (L7) — the in-process daily timer in app.ts is.
+  app.post("/activity/prune", async () => ({ result: await pruneTelemetry(db) }));
 }

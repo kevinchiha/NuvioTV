@@ -145,3 +145,35 @@ describe("record_error_event", () => {
     });
   });
 });
+
+describe("prune_telemetry", () => {
+  test("deletes old events and old daily rows, keeps recent", async () => {
+    await withRollback(async (db) => {
+      const uid = await createTestMember(db, "p@test.dev");
+      await db.query("insert into public.member_event(user_id, kind, occurred_at) values ($1,'playback_error', now() - interval '200 days')", [uid]);
+      await db.query("insert into public.member_event(user_id, kind, occurred_at) values ($1,'playback_error', now() - interval '2 days')", [uid]);
+      await db.query("insert into public.member_activity_daily(user_id, day, watch_seconds) values ($1, (now() at time zone 'utc')::date - 500, 10)", [uid]);
+      await db.query("insert into public.member_activity_daily(user_id, day, watch_seconds) values ($1, (now() at time zone 'utc')::date - 2, 10)", [uid]);
+      await db.query("select public.prune_telemetry(90, 396)");
+      const ev = await db.query("select count(*)::int as n from public.member_event where user_id=$1", [uid]);
+      const dl = await db.query("select count(*)::int as n from public.member_activity_daily where user_id=$1", [uid]);
+      expect(ev.rows[0].n).toBe(1);   // 200d pruned, 2d kept
+      expect(dl.rows[0].n).toBe(1);   // 500d pruned, 2d kept
+    });
+  });
+
+  test("retention boundary is strict: rows at the cutoff are kept, one past it is pruned", async () => {
+    await withRollback(async (db) => {
+      const uid = await createTestMember(db, "pb@test.dev");
+      // events use strict `occurred_at < now() - 90d`: 89d kept, 91d pruned
+      await db.query("insert into public.member_event(user_id, kind, occurred_at) values ($1,'playback_error', now() - interval '89 days'),($1,'playback_error', now() - interval '91 days')", [uid]);
+      // daily uses strict `day < today - 396`: day-396 kept, day-397 pruned
+      await db.query("insert into public.member_activity_daily(user_id, day, watch_seconds) values ($1, (now() at time zone 'utc')::date - 396, 10),($1, (now() at time zone 'utc')::date - 397, 10)", [uid]);
+      await db.query("select public.prune_telemetry(90, 396)");
+      const ev = await db.query("select count(*)::int as n from public.member_event where user_id=$1", [uid]);
+      const dl = await db.query("select count(*)::int as n from public.member_activity_daily where user_id=$1", [uid]);
+      expect(ev.rows[0].n).toBe(1);   // 89d kept, 91d pruned
+      expect(dl.rows[0].n).toBe(1);   // day-396 kept, day-397 pruned
+    });
+  });
+});

@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
 import type { Db } from "@kevbox-admin/core";
+import { pruneTelemetry } from "@kevbox-admin/core";
 import { requireAdmin, type Verifier } from "./auth.js";
 import { registerMemberRoutes } from "./routes/members.js";
 import { registerAddonRoutes } from "./routes/addons.js";
@@ -64,6 +65,18 @@ export function buildApp(opts: BuildAppOptions): FastifyInstance {
     registerBulkRoutes(api, opts.db);
     registerActivityRoutes(api, opts.db);
   }, { prefix: "/api" });
+
+  // PRIMARY retention automation (M4): an in-process daily timer that prunes telemetry directly
+  // against the pool — no HTTP, no auth, so it works headless (stock Supabase often has pg_cron
+  // disabled). Fail-soft: log and continue, never crash the server. unref() so the timer never
+  // keeps the process alive on its own; onClose clears it so tests/shutdown don't leak handles.
+  const pruneTimer = setInterval(() => {
+    pruneTelemetry(opts.db)
+      .then((r) => app.log.info({ prune: r }, "telemetry retention prune"))
+      .catch((e) => app.log.error({ err: e }, "telemetry prune failed"));
+  }, 24 * 60 * 60 * 1000);
+  pruneTimer.unref?.();
+  app.addHook("onClose", async () => clearInterval(pruneTimer));
 
   // Serve the built SPA (production only). SPA fallback: any non-/api GET → index.html.
   if (opts.publicDir) {

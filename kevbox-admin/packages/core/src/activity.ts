@@ -108,3 +108,10 @@ export async function getFleetStats(db: Db): Promise<FleetStats> {
     totalWatchHours: Math.round(totalSec / 3600), goingDark, errors7d, appVersions: versions,
   };
 }
+
+// Retention prune (Phase 4). Returns the DB's summary string ("pruned N events, M daily rows").
+// Called by the in-process daily timer (app.ts) and the manual POST /activity/prune route.
+export async function pruneTelemetry(db: Db): Promise<string> {
+  const { rows } = await db.query("select public.prune_telemetry(90, 396) as result");
+  return rows[0].result as string;
+}

@@ -165,3 +165,16 @@ begin
       )
     );
 end $$;
+
+-- Retention prune (Phase 4). Strict boundaries: an event/day exactly AT the cutoff is KEPT; only
+-- rows strictly past it are deleted. KEEP BYTE-IDENTICAL with member_telemetry_setup.sql (M2 drift).
+create or replace function public.prune_telemetry(p_event_days int default 90, p_aggregate_days int default 396)
+  returns text language plpgsql security definer set search_path = '' as $$
+declare v_events int; v_days int;
+begin
+  delete from public.member_event where occurred_at < now() - make_interval(days => p_event_days);
+  get diagnostics v_events = row_count;
+  delete from public.member_activity_daily where day < (now() at time zone 'utc')::date - p_aggregate_days;
+  get diagnostics v_days = row_count;
+  return format('pruned %s events, %s daily rows', v_events, v_days);
+end $$;

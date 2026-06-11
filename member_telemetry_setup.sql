@@ -153,6 +153,27 @@ end $$;
 revoke all on function public.record_error(text, text, jsonb) from public, anon;
 grant execute on function public.record_error(text, text, jsonb) to authenticated;
 
+-- 5. Retention prune (Phase 4). Body copied BYTE-IDENTICAL from packages/core/test/schema.sql, where
+--    it has automated TDD coverage. KEEP IN SYNC (M2 drift risk). Strict boundaries: an event/day
+--    exactly AT the cutoff is KEPT; only rows strictly past it are deleted.
+create or replace function public.prune_telemetry(p_event_days int default 90, p_aggregate_days int default 396)
+  returns text language plpgsql security definer set search_path = '' as $$
+declare v_events int; v_days int;
+begin
+  delete from public.member_event where occurred_at < now() - make_interval(days => p_event_days);
+  get diagnostics v_events = row_count;
+  delete from public.member_activity_daily where day < (now() at time zone 'utc')::date - p_aggregate_days;
+  get diagnostics v_days = row_count;
+  return format('pruned %s events, %s daily rows', v_events, v_days);
+end $$;
+-- Lock it down: no client role runs this. The in-process daily timer in apps/web (app.ts) calls it
+-- via the kevbox_admin pool; the manual POST /api/activity/prune route runs as kevbox_admin too (L4).
+revoke all on function public.prune_telemetry(int, int) from public, anon, authenticated;
+grant execute on function public.prune_telemetry(int, int) to kevbox_admin;
+-- Optional automated schedule (uncomment if pg_cron is enabled on this project — verify first with
+--   select * from pg_extension where extname='pg_cron'; — otherwise rely on the in-process timer, M4):
+--   select cron.schedule('prune_telemetry_daily', '0 4 * * *', $$ select public.prune_telemetry(90, 396) $$);
+
 -- Sanity
 select count(*) as activity_rows from public.member_activity_daily;
 
