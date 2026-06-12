@@ -111,6 +111,34 @@ Then `./release.sh …`. Confirm `tv.kevbox.dev/version.json` shows the new vers
 - `/download` always serves **armeabi-v7a** (the family's 32-bit TV hardware); `release.sh` defaults
   to that ABI.
 
+## Getting notified when upstream releases
+
+`nuvio-release-watch.sh` pings an [ntfy](https://ntfy.sh) topic when **NuvioMedia/NuvioTV**
+publishes a new GitHub Release — your cue to run the sync flow above. It's stateful (saves the
+last-seen tag to `~/.cache/nuvio-release-last.txt`), so a missed run only *delays* the alert and
+never re-notifies for a release you've already seen. Install it as a `systemd` user timer:
+
+```bash
+# 1. Private ntfy topic (kept OUT of git). Subscribe to this same topic in the ntfy phone app.
+echo "NTFY_TOPIC=kevbox-nuvio-$(openssl rand -hex 4)" > ~/.config/nuvio-release-watch.env
+
+# 2. Install the units (copies → clean daemon-reload). Repo is assumed at ~/projects/NuvioTV.
+install -Dm644 nuvio-release-watch.service ~/.config/systemd/user/nuvio-release-watch.service
+install -Dm644 nuvio-release-watch.timer   ~/.config/systemd/user/nuvio-release-watch.timer
+
+# 3. Enable (linger lets it fire even when not logged in graphically).
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now nuvio-release-watch.timer
+
+# 4. Record the current tag as baseline now (silent — no notification for today's version):
+systemctl --user start nuvio-release-watch.service
+```
+
+Inspect: `systemctl --user list-timers nuvio-release-watch.timer`, `cat ~/.cache/nuvio-release-last.txt`.
+Test the push path: `source ~/.config/nuvio-release-watch.env && curl -d "test" ntfy.sh/$NTFY_TOPIC`.
+For an always-on server instead, skip systemd and cron it: `0 8,20 * * * NTFY_TOPIC=… /path/to/nuvio-release-watch.sh`.
+
 ## Occasional housekeeping
 
 - If a merge ever gets messy, you can abort and retry: `git merge --abort`.

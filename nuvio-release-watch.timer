@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodic + on-boot check for new upstream NuvioTV releases
+
+[Timer]
+# Catch up shortly after boot (covers runs missed while the machine was off)...
+OnBootSec=2min
+# ...then twice a day. Persistent=true reruns a missed scheduled trigger on next boot.
+OnCalendar=*-*-* 08,20:00:00
+Persistent=true
+# Avoid hammering the GitHub API at the same exact second.
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

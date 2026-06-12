@@ -1,0 +1,12 @@
+[Unit]
+Description=Check upstream NuvioTV for a new release and notify via ntfy
+Documentation=https://github.com/kevinchiha/NuvioTV/blob/kevbox/UPSTREAM-SYNC.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Topic + any overrides live OUTSIDE the repo (keeps the ntfy topic private):
+#   echo 'NTFY_TOPIC=kevbox-nuvio-xxxxxxxx' > ~/.config/nuvio-release-watch.env
+EnvironmentFile=%h/.config/nuvio-release-watch.env
+ExecStart=%h/projects/NuvioTV/nuvio-release-watch.sh
