@@ -78,3 +78,18 @@ export function mapDeviceRow(r: {
     lastSeen: new Date(r.last_seen).toISOString(),
   };
 }
+
+/** Config the kevbox mutations + renderer need (built from env in server/cli). */
+export interface KevboxConfig {
+  encKey: Buffer;
+  membersFile: string;
+  streamsBaseUrl: string; // e.g. https://streams.kevbox.dev (no trailing slash)
+  addonSort: number; // KEVBOX_ADDON_SORT, default 4
+}
+
+/** Non-secret enrollment view returned to the dashboard (never the key or install URL). */
+export interface KevboxState {
+  name: string;
+  enrolled: boolean;
+  hasKey: boolean;
+}
