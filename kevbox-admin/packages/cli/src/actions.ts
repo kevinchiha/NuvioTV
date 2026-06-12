@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Db } from "@kevbox-admin/core";
+import type { Db, KevboxConfig } from "@kevbox-admin/core";
 import {
   listMembers,
   getMember,
@@ -19,6 +19,13 @@ import {
   setMaxDevices,
   removeDevice,
   removeAllDevices,
+  enrollMember,
+  rotateKey,
+  renameMember,
+  unenrollMember,
+  buildInstallUrl,
+  withKevboxWrite,
+  migrate261,
 } from "@kevbox-admin/core";
 import { formatMembers, formatMember, formatAddon, formatAccess } from "./format.js";
 import type { Ask } from "./prompt.js";
@@ -317,4 +324,73 @@ export async function actionDeviceRemoveAll(db: Db, ref: string, sink: Sink = co
   const before = await getAccess(db, member.userId);
   await removeAllDevices(db, member.userId);
   sink.log(`Removed ${before.devices.length} device(s) from ${member.email ?? member.userId}.`);
+}
+
+/** kevbox-enroll <ref> --premiumize <key> [--name <n>] */
+export async function actionKevboxEnroll(
+  db: Db, ref: string, opts: { premiumize: string; name?: string }, cfg: KevboxConfig, sink: Sink = consoleSink,
+): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const { installUrl } = await withKevboxWrite(db, cfg.membersFile, (d) =>
+    enrollMember(d, member.userId, { aiostreamsName: opts.name, premiumizeKey: opts.premiumize }, cfg),
+  );
+  sink.log(`Enrolled ${member.email ?? member.userId}. Install URL: ${installUrl}`);
+}
+
+/** kevbox-rotate <ref> --premiumize <key> */
+export async function actionKevboxRotate(
+  db: Db, ref: string, opts: { premiumize: string }, cfg: KevboxConfig, sink: Sink = consoleSink,
+): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const { installUrl } = await withKevboxWrite(db, cfg.membersFile, (d) => rotateKey(d, member.userId, opts.premiumize, cfg));
+  sink.log(`Rotated key. New install URL: ${installUrl}`);
+}
+
+/** kevbox-rename <ref> <newName> */
+export async function actionKevboxRename(
+  db: Db, ref: string, newName: string, cfg: KevboxConfig, sink: Sink = consoleSink,
+): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const res = await withKevboxWrite(db, cfg.membersFile, (d) => renameMember(d, member.userId, newName, cfg));
+  sink.log(res.keyless ? `Renamed to ${newName} (no key stored — re-issue a key/URL).` : `Renamed. New install URL: ${res.installUrl}`);
+}
+
+/** kevbox-unenroll <ref> */
+export async function actionKevboxUnenroll(db: Db, ref: string, cfg: KevboxConfig, sink: Sink = consoleSink): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  await withKevboxWrite(db, cfg.membersFile, (d) => unenrollMember(d, member.userId, cfg));
+  sink.log(`Un-enrolled ${member.email ?? member.userId}.`);
+}
+
+/** kevbox-url <ref> — print the key-bearing install URL (reveal). */
+export async function actionKevboxUrl(db: Db, ref: string, cfg: KevboxConfig, sink: Sink = consoleSink): Promise<void> {
+  const member = await requireMember(db, ref, sink);
+  if (!member) return;
+  const url = await buildInstallUrl(db, member.userId, cfg);
+  if (!url) { sink.err("No install URL (member has no stored key)."); return; }
+  sink.log(url);
+}
+
+/** kevbox-migrate --names <comma-list|@file> [--apply] */
+export async function actionKevboxMigrate(
+  db: Db, names: string[], opts: { apply: boolean }, cfg: KevboxConfig, sink: Sink = consoleSink,
+): Promise<void> {
+  // migrate261 THROWS under --apply if there are malformed/lost/conflict names (it blocks the write);
+  // let that propagate so the CLI exits non-zero with the at-risk list. Dry-run never throws.
+  const r = await migrate261(db, names, cfg, opts);
+  sink.log(
+    `${r.applied ? "APPLIED" : "DRY-RUN"}: total ${r.total}, matched ${r.matched}, backfilled ${r.backfilled}, ` +
+      `extras ${r.extras.length}, conflicts ${r.conflicts.length}, malformed ${r.malformed.length}, ` +
+      `lost ${r.lost.length}, renamed ${r.renamed.length}, added ${r.added.length}, rendered ${r.rendered.length}.`,
+  );
+  if (r.extras.length) sink.log(`Extras (unmanaged): ${r.extras.join(", ")}`);
+  if (r.renamed.length) sink.log(`Renamed (verbatim drift): ${r.renamed.join(", ")}`);
+  if (r.added.length) sink.log(`Added (not in input): ${r.added.join(", ")}`);
+  if (r.conflicts.length) sink.err(`Conflicts (skipped): ${r.conflicts.join(", ")}`);
+  if (r.malformed.length) sink.err(`Malformed (at risk — blocks --apply): ${r.malformed.join(", ")}`);
+  if (r.lost.length) sink.err(`LOST (would drop from allowlist — blocks --apply): ${r.lost.join(", ")}`);
 }

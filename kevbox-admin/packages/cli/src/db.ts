@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import type { Db } from "@kevbox-admin/core";
+import { loadEncKey, type KevboxConfig } from "@kevbox-admin/core";
 
 const { Pool } = pg;
 
@@ -65,6 +66,24 @@ export function createPool(localPropertiesPath?: string): pg.Pool {
     connectionString: url.toString(),
     ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
   });
+}
+
+/** Build the KevboxConfig from env (KEVBOX_ENC_KEY + KEVBOX_MEMBERS_FILE required). */
+export function resolveKevboxConfig(): KevboxConfig {
+  const encRaw = process.env.KEVBOX_ENC_KEY?.trim();
+  const file = process.env.KEVBOX_MEMBERS_FILE?.trim();
+  if (!encRaw) throw new Error("KEVBOX_ENC_KEY is required for kevbox commands");
+  if (!file) throw new Error("KEVBOX_MEMBERS_FILE is required for kevbox commands");
+  const addonSort = Number.parseInt(process.env.KEVBOX_ADDON_SORT?.trim() || "4", 10);
+  // Mirror the existing PORT int-validation: a NaN here fails the int-NOT-NULL member_addon insert
+  // and 500s every enroll/rotate/rename, so reject it before any command runs.
+  if (!Number.isInteger(addonSort)) throw new Error("KEVBOX_ADDON_SORT must be an integer");
+  return {
+    encKey: loadEncKey(encRaw),
+    membersFile: file,
+    streamsBaseUrl: (process.env.KEVBOX_STREAMS_BASE_URL?.trim() || "https://streams.kevbox.dev").replace(/\/$/, ""),
+    addonSort,
+  };
 }
 
 /** Re-export for callers that only need the injected-query type. */

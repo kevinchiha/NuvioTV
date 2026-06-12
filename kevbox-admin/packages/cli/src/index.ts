@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { Command } from "commander";
-import { createPool } from "./db.js";
+import { createPool, resolveKevboxConfig } from "./db.js";
 import { ask } from "./prompt.js";
 import { consoleSink } from "./actions.js";
 import {
@@ -20,6 +21,12 @@ import {
   actionAccessMaxDevices,
   actionDeviceRemove,
   actionDeviceRemoveAll,
+  actionKevboxEnroll,
+  actionKevboxRotate,
+  actionKevboxRename,
+  actionKevboxUnenroll,
+  actionKevboxUrl,
+  actionKevboxMigrate,
 } from "./actions.js";
 
 /** Resolve a pool, run `fn(pool)`, always close the pool, and exit non-zero on error. */
@@ -188,6 +195,61 @@ program
   .description("Deauthorize all of a member's devices.")
   .action(async (ref: string) => {
     await withPool((pool) => actionDeviceRemoveAll(pool, ref, consoleSink));
+  });
+
+program
+  .command("kevbox-enroll")
+  .argument("<ref>", "member email or userId")
+  .requiredOption("--premiumize <key>", "the member's Premiumize API key")
+  .option("--name <n>", "explicit AIOStreams name (defaults to email local-part)")
+  .description("Enroll a member into the kevbox allowlist + add their addon URL.")
+  .action(async (ref: string, opts: { premiumize: string; name?: string }) => {
+    await withPool((pool) => actionKevboxEnroll(pool, ref, opts, resolveKevboxConfig(), consoleSink));
+  });
+
+program
+  .command("kevbox-rotate")
+  .argument("<ref>", "member email or userId")
+  .requiredOption("--premiumize <key>", "the new Premiumize API key")
+  .description("Rotate a member's Premiumize key (updates their remote addon URL).")
+  .action(async (ref: string, opts: { premiumize: string }) => {
+    await withPool((pool) => actionKevboxRotate(pool, ref, opts, resolveKevboxConfig(), consoleSink));
+  });
+
+program
+  .command("kevbox-rename")
+  .argument("<ref>", "member email or userId")
+  .argument("<newName>", "the new AIOStreams name")
+  .description("Rename a member's kevbox allowlist name (rebuilds their addon URL).")
+  .action(async (ref: string, newName: string) => {
+    await withPool((pool) => actionKevboxRename(pool, ref, newName, resolveKevboxConfig(), consoleSink));
+  });
+
+program
+  .command("kevbox-unenroll")
+  .argument("<ref>", "member email or userId")
+  .description("Remove a member from the kevbox allowlist.")
+  .action(async (ref: string) => {
+    await withPool((pool) => actionKevboxUnenroll(pool, ref, resolveKevboxConfig(), consoleSink));
+  });
+
+program
+  .command("kevbox-url")
+  .argument("<ref>", "member email or userId")
+  .description("Print a member's key-bearing install URL.")
+  .action(async (ref: string) => {
+    await withPool((pool) => actionKevboxUrl(pool, ref, resolveKevboxConfig(), consoleSink));
+  });
+
+program
+  .command("kevbox-migrate")
+  .requiredOption("--names <list>", "comma-separated KEVBOX_MEMBERS, or @path to a file with one/comma list")
+  .option("--apply", "persist + write members.json (default is dry-run)", false)
+  .description("One-off: import the legacy KEVBOX_MEMBERS allowlist (dry-run unless --apply).")
+  .action(async (opts: { names: string; apply?: boolean }) => {
+    const raw = opts.names.startsWith("@") ? readFileSync(opts.names.slice(1), "utf8") : opts.names;
+    const names = raw.split(/[\s,]+/).map((s) => s.trim()).filter((s) => s.length > 0);
+    await withPool((pool) => actionKevboxMigrate(pool, names, { apply: opts.apply === true }, resolveKevboxConfig(), consoleSink));
   });
 
 await program.parseAsync(process.argv);
