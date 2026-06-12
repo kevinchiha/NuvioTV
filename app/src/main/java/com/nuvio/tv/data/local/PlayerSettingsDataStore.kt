@@ -283,7 +283,7 @@ data class PlayerSettings(
     val parallelConnectionCount: Int = DEFAULT_PARALLEL_CONNECTION_COUNT,
     val parallelChunkSizeMb: Int = DEFAULT_PARALLEL_CHUNK_SIZE_MB,
 
-    val addonSubtitleStartupMode: AddonSubtitleStartupMode = AddonSubtitleStartupMode.ALL_SUBTITLES,
+    val addonSubtitleStartupMode: AddonSubtitleStartupMode = AddonSubtitleStartupMode.PREFERRED_ONLY,
     val enableBufferLogs: Boolean = false,
     val resizeMode: Int = 0
 ) {
@@ -897,7 +897,7 @@ class PlayerSettingsDataStore @Inject constructor(
                     secondaryPreferredLanguage = (prefs[subtitleSecondaryLanguageKey] ?: "fr")
                         .let(::normalizeSelectableLanguageCode)
                         .takeUnless { it == SUBTITLE_LANGUAGE_FORCED },
-                    useForcedSubtitles = (prefs[subtitleUseForcedSubtitlesKey] ?: true) ||
+                    useForcedSubtitles = (prefs[subtitleUseForcedSubtitlesKey] ?: false) ||
                         prefs[subtitlePreferredLanguageKey]?.let(::normalizeSelectableLanguageCode) == SUBTITLE_LANGUAGE_FORCED ||
                         prefs[subtitleSecondaryLanguageKey]?.let(::normalizeSelectableLanguageCode) == SUBTITLE_LANGUAGE_FORCED,
                     showOnlyPreferredLanguages = prefs[subtitleShowOnlyPreferredLanguagesKey] ?: false,
@@ -1276,7 +1276,7 @@ class PlayerSettingsDataStore @Inject constructor(
     }
 
     private fun parseAddonSubtitleStartupMode(value: String?): AddonSubtitleStartupMode {
-        return when (value) { "PREFERRED_ONLY" -> AddonSubtitleStartupMode.PREFERRED_ONLY; "FAST_STARTUP" -> AddonSubtitleStartupMode.FAST_STARTUP; else -> AddonSubtitleStartupMode.ALL_SUBTITLES }
+        return when (value) { "PREFERRED_ONLY" -> AddonSubtitleStartupMode.PREFERRED_ONLY; "FAST_STARTUP" -> AddonSubtitleStartupMode.FAST_STARTUP; "ALL_SUBTITLES" -> AddonSubtitleStartupMode.ALL_SUBTITLES; else -> AddonSubtitleStartupMode.PREFERRED_ONLY }
     }
 
     private fun parseMpvHardwareDecodeMode(value: String?): MpvHardwareDecodeMode {
