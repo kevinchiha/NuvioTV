@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Db } from "@kevbox-admin/core";
+import { loadEncKey } from "@kevbox-admin/core";
 import { buildApp } from "../../src/server/app.js";
 import type { Verifier, VerifiedUser } from "../../src/server/auth.js";
 
@@ -25,4 +26,27 @@ export const tokenIsEmailVerifier: Verifier = async (jwt: string) => {
  */
 export function buildTestApp(db: Db, verifier: Verifier): FastifyInstance {
   return buildApp({ db, verifier, adminEmails: ADMIN_EMAILS });
+}
+
+/**
+ * Build a test app wired with a kevbox config that writes to `membersFile`. The optional
+ * `opts.logStream` is forwarded into the Fastify logger so the redaction test (Step 5b) can capture
+ * log lines and assert no key/URL is logged; omit it for the normal route tests.
+ */
+export function buildKevboxTestApp(
+  db: Db,
+  membersFile: string,
+  opts: { logStream?: { write: (s: string) => void } } = {},
+): FastifyInstance {
+  return buildApp({
+    db, verifier: tokenIsEmailVerifier, adminEmails: ADMIN_EMAILS,
+    // Thread the capture stream into buildApp's logger options so the redaction test can read lines.
+    ...(opts.logStream ? { loggerStream: opts.logStream } : {}),
+    kevbox: {
+      encKey: loadEncKey("0".repeat(64)),
+      membersFile,
+      streamsBaseUrl: "https://streams.kevbox.dev",
+      addonSort: 4,
+    },
+  });
 }

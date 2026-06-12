@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
-import type { Db } from "@kevbox-admin/core";
+import type { Db, KevboxConfig } from "@kevbox-admin/core";
 import { pruneTelemetry } from "@kevbox-admin/core";
 import { requireAdmin, type Verifier } from "./auth.js";
 import { registerMemberRoutes } from "./routes/members.js";
@@ -9,6 +9,7 @@ import { registerAccessRoutes } from "./routes/access.js";
 import { registerActionRoutes } from "./routes/actions.js";
 import { registerBulkRoutes } from "./routes/bulk.js";
 import { registerActivityRoutes } from "./routes/activity.js";
+import { registerKevboxRoutes } from "./routes/kevbox.js";
 
 export interface BuildAppOptions {
   db: Db;
@@ -16,6 +17,14 @@ export interface BuildAppOptions {
   adminEmails: string[];
   /** Absolute path to the built SPA (dist/public). Omit in tests to skip static serving. */
   publicDir?: string;
+  /** Kevbox enrollment config. Omit in tests that don't exercise kevbox routes. */
+  kevbox?: KevboxConfig;
+  /**
+   * Test-only: forward a writable stream into the Fastify logger so a test can capture log lines
+   * (used by the redaction test to prove no Premiumize key / install URL is ever logged, §13).
+   * When set, the logger is forced ON regardless of publicDir.
+   */
+  loggerStream?: { write: (s: string) => void };
 }
 
 /**
@@ -26,9 +35,20 @@ export function buildApp(opts: BuildAppOptions): FastifyInstance {
   // logger ON → request/error lines go to stdout → journald (the deploy troubleshooting steps
   // rely on `journalctl -u kevbox-admin`). bodyLimit caps abuse (admin payloads are tiny JSON).
   // trustProxy: the only ingress is nginx on loopback, so trust its X-Forwarded-* headers.
-  // In tests (no publicDir) keep the logger quiet.
+  // In tests (no publicDir) keep the logger quiet — unless a loggerStream is injected (redaction
+  // test), which forces the logger ON to capture lines.
+  // pino `redact` censors any logged Premiumize key field (Fastify auto-logs request bodies on some
+  // paths); the key-bearing install URL is only in a RESPONSE body, which Fastify never logs (§13, C5).
+  const loggerOpts = {
+    level: "info" as const,
+    redact: {
+      paths: ["req.body.premiumizeKey", "req.body.premiumize", "body.premiumizeKey", "body.premiumize"],
+      censor: "[redacted]",
+    },
+    ...(opts.loggerStream ? { stream: opts.loggerStream } : {}),
+  };
   const app = Fastify({
-    logger: opts.publicDir ? { level: "info" } : false,
+    logger: opts.publicDir || opts.loggerStream ? loggerOpts : false,
     bodyLimit: 256 * 1024,
     trustProxy: true,
   });
@@ -58,12 +78,13 @@ export function buildApp(opts: BuildAppOptions): FastifyInstance {
   // pre-handler only applies to this subtree (static SPA + /healthz stay public).
   app.register(async (api) => {
     api.addHook("preHandler", requireAdmin(opts.verifier, opts.adminEmails));
-    registerMemberRoutes(api, opts.db);
+    registerMemberRoutes(api, opts.db, opts.kevbox);
     registerAddonRoutes(api, opts.db);
     registerAccessRoutes(api, opts.db);
     registerActionRoutes(api, opts.db);
     registerBulkRoutes(api, opts.db);
     registerActivityRoutes(api, opts.db);
+    if (opts.kevbox) registerKevboxRoutes(api, opts.db, opts.kevbox);
   }, { prefix: "/api" });
 
   // PRIMARY retention automation (M4): an in-process daily timer that prunes telemetry directly
