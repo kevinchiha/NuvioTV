@@ -8,8 +8,8 @@ export interface MemberSummary {
   email: string | null;
   createdAt: string;
   addonCount: number;
-  /** true if the member has any addon NOT in default_member_addons() (e.g. a debrid source). */
-  hasDebrid: boolean;
+  /** true if the member has an enrolled kevbox_member row (replaces the old hasDebrid badge). */
+  enrolled: boolean;
 }
 
 export interface AddonRow {

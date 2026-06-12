@@ -3,12 +3,12 @@ import type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow } fr
 /** Render the member overview table as a single multi-line string. */
 export function formatMembers(members: MemberSummary[]): string {
   if (members.length === 0) return "(no members)";
-  const header = ["EMAIL", "USER_ID", "ADDONS", "DEBRID", "CREATED"];
+  const header = ["EMAIL", "USER_ID", "ADDONS", "KEVBOX", "CREATED"];
   const rows = members.map((m) => [
     m.email ?? "(no email)",
     m.userId,
     String(m.addonCount),
-    m.hasDebrid ? "yes" : "no",
+    m.enrolled ? "yes" : "no",
     m.createdAt,
   ]);
   return renderTable(header, rows);

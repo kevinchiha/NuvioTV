@@ -2,22 +2,40 @@ import { expect, test } from "vitest";
 import { withRollback, createTestMember } from "./helpers.js";
 import { listMembers, getMember } from "../src/members.js";
 
-test("listMembers reports addon count and hasDebrid", async () => {
+test("listMembers reports addon count and enrolled", async () => {
   await withRollback(async (db) => {
     const a = await createTestMember(db, "a@test.dev");
-    await createTestMember(db, "b@test.dev"); // no addons
-    // a: one default addon + one extra (debrid-like)
+    const b = await createTestMember(db, "b@test.dev"); // no addons, not enrolled
+    // a: two addons (addonCount coverage)
     await db.query(
       "insert into public.member_addon (user_id, url, sort_order) values ($1,'https://v3-cinemeta.strem.io',0),($1,'https://torrentio.strem.fun/x/manifest.json',4)",
+      [a],
+    );
+    // a is enrolled in kevbox; b is not
+    await db.query(
+      "insert into public.kevbox_member (user_id, aiostreams_name, enrolled) values ($1,'a',true)",
       [a],
     );
     const members = await listMembers(db);
     const ma = members.find((m) => m.email === "a@test.dev")!;
     const mb = members.find((m) => m.email === "b@test.dev")!;
     expect(ma.addonCount).toBe(2);
-    expect(ma.hasDebrid).toBe(true);
+    expect(ma.enrolled).toBe(true);
     expect(mb.addonCount).toBe(0);
-    expect(mb.hasDebrid).toBe(false);
+    expect(mb.enrolled).toBe(false);
+  });
+});
+
+test("listMembers reports enrolled=true only for enrolled kevbox members", async () => {
+  await withRollback(async (db) => {
+    const a = await createTestMember(db, "ls-on@test.dev");
+    const b = await createTestMember(db, "ls-off@test.dev");
+    await db.query(`insert into public.kevbox_member (user_id, aiostreams_name, enrolled) values ($1,'lson',true),($2,'lsoff',false)`, [a, b]);
+    const members = await listMembers(db);
+    const on = members.find((m) => m.userId === a)!;
+    const off = members.find((m) => m.userId === b)!;
+    expect(on.enrolled).toBe(true);
+    expect(off.enrolled).toBe(false);
   });
 });
 

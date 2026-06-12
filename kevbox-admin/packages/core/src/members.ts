@@ -2,19 +2,14 @@ import type { Db, MemberSummary, MemberDetail } from "./types.js";
 import { mapAddonRow } from "./types.js";
 
 export async function listMembers(db: Db): Promise<MemberSummary[]> {
-  // hasDebrid is a COSMETIC overview badge only (no operation gates on it). It is an exact-URL
-  // anti-join against default_member_addons(): "has any addon whose url is NOT a current default".
-  // Caveat: if a default URL is refreshed in default_member_addons() while a member still holds the
-  // old one (the token-rotation case the runbook calls out), that member is transiently flagged
-  // hasDebrid=true until resetToDefaults re-seeds them. Acceptable because it is display-only.
+  // `enrolled` is a display badge: true iff the member has an enrolled kevbox_member row.
   const { rows } = await db.query(
     `select u.id as user_id, u.email, u.created_at,
             (select count(*) from public.member_addon m where m.user_id = u.id)::int as addon_count,
             exists (
-              select 1 from public.member_addon m
-              where m.user_id = u.id
-                and m.url not in (select url from public.default_member_addons())
-            ) as has_debrid
+              select 1 from public.kevbox_member k
+              where k.user_id = u.id and k.enrolled
+            ) as enrolled
        from public.kevbox_auth_users u
       order by u.email nulls last`,
   );
@@ -23,7 +18,7 @@ export async function listMembers(db: Db): Promise<MemberSummary[]> {
     email: r.email,
     createdAt: new Date(r.created_at).toISOString(),
     addonCount: r.addon_count,
-    hasDebrid: r.has_debrid,
+    enrolled: r.enrolled,
   }));
 }
 

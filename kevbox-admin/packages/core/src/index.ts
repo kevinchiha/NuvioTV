@@ -7,3 +7,8 @@ export * from "./reset.js";
 export * from "./debrid.js";
 export * from "./bulk.js";
 export * from "./activity.js";
+export * from "./crypto.js";
+export * from "./kevboxAllowlist.js";
+export * from "./kevboxMember.js";
+export * from "./kevboxWrite.js";
+export * from "./migrate261.js";

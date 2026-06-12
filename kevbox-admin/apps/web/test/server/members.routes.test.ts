@@ -13,12 +13,16 @@ test("GET /api/members returns members with counts", async () => {
       "insert into public.member_addon (user_id, url, sort_order) values ($1,'https://v3-cinemeta.strem.io',0),($1,'https://torrentio.strem.fun/x/manifest.json',4)",
       [id],
     );
+    await db.query(
+      "insert into public.kevbox_member (user_id, aiostreams_name, enrolled) values ($1,'m',true)",
+      [id],
+    );
     const app = buildTestApp(db, tokenIsEmailVerifier);
     const res = await app.inject({ method: "GET", url: "/api/members", headers: ADMIN });
     expect(res.statusCode).toBe(200);
     const member = res.json().members.find((x: any) => x.email === "m@test.dev");
     expect(member.addonCount).toBe(2);
-    expect(member.hasDebrid).toBe(true);
+    expect(member.enrolled).toBe(true);
     await app.close();
   });
 });

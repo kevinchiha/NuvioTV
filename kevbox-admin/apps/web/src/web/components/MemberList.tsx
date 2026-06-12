@@ -25,7 +25,7 @@ export function MemberList({ members, selectedUserId, onSelect }: MemberListProp
         >
           <div>{m.email ?? <span className="muted">(no email)</span>}</div>
           <div className="muted">
-            {fmtDate(m.createdAt)} · {m.addonCount} addons{m.hasDebrid ? " · debrid" : ""}
+            {fmtDate(m.createdAt)} · {m.addonCount} addons{m.enrolled ? " · kevbox" : ""}
           </div>
         </div>
       ))}

@@ -8,7 +8,7 @@ function member(overrides: Partial<MemberSummary>): MemberSummary {
     email: "Jane@Example.com",
     createdAt: "2026-01-01T00:00:00Z",
     addonCount: 0,
-    hasDebrid: false,
+    enrolled: false,
     ...overrides,
   } as MemberSummary;
 }
