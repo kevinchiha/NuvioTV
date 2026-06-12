@@ -6,12 +6,14 @@ import type {
   DeviceRow,
   MemberActivity,
 } from "../lib/api.js";
+import type { KevboxState } from "../lib/api.js";
 import { AddonRow } from "./AddonRow.js";
 import { DebridForm } from "./DebridForm.js";
 import { AccessTab } from "./AccessTab.js";
 import { ActivityTab } from "./ActivityTab.js";
+import { KevboxTab } from "./KevboxTab.js";
 
-type Tab = "addons" | "access" | "activity";
+type Tab = "addons" | "access" | "activity" | "kevbox";
 
 export interface MemberDetailProps {
   member: MemberDetailType;
@@ -29,6 +31,10 @@ export interface MemberDetailProps {
   onSetMaxDevices: (max: number) => void;
   onRemoveDevice: (device: DeviceRow) => void;
   onRemoveAllDevices: () => void;
+  kevbox: KevboxState | null;
+  onSaveKevbox: (body: { name?: string; premiumizeKey?: string }) => void;
+  onUnenrollKevbox: () => void;
+  onRevealKevboxUrl: () => void;
 }
 
 export function MemberDetail({
@@ -47,6 +53,10 @@ export function MemberDetail({
   onSetMaxDevices,
   onRemoveDevice,
   onRemoveAllDevices,
+  kevbox,
+  onSaveKevbox,
+  onUnenrollKevbox,
+  onRevealKevboxUrl,
 }: MemberDetailProps) {
   const [tab, setTab] = useState<Tab>("addons");
   const [newUrl, setNewUrl] = useState("");
@@ -75,6 +85,7 @@ export function MemberDetail({
         >
           Activity
         </button>
+        <button className={`tab${tab === "kevbox" ? " active" : ""}`} onClick={() => setTab("kevbox")}>Kevbox</button>
       </div>
 
       {tab === "access" ? (
@@ -88,6 +99,14 @@ export function MemberDetail({
         />
       ) : tab === "activity" ? (
         <ActivityTab activity={activity} />
+      ) : tab === "kevbox" ? (
+        <KevboxTab
+          kevbox={kevbox}
+          busy={busy}
+          onSave={onSaveKevbox}
+          onUnenroll={onUnenrollKevbox}
+          onRevealUrl={onRevealKevboxUrl}
+        />
       ) : (
         <>
           <div>

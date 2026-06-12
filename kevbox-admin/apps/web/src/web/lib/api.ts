@@ -1,8 +1,12 @@
 import type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow } from "@kevbox-admin/core";
 import type { MemberActivity, ActivityRankRow, GoingDarkRow, FleetStats } from "@kevbox-admin/core";
+import type { KevboxState } from "@kevbox-admin/core";
 
 export type { MemberSummary, MemberDetail, AddonRow, AccessState, DeviceRow };
 export type { MemberActivity, ActivityRankRow, GoingDarkRow, FleetStats } from "@kevbox-admin/core";
+export type { KevboxState } from "@kevbox-admin/core";
+/** MemberDetail as returned by GET /members/:ref (server attaches the kevbox block). */
+export interface MemberDetailWithKevbox extends MemberDetail { kevbox: KevboxState | null }
 
 /** A function that returns the current bearer token (or null if signed out). */
 export type TokenProvider = () => Promise<string | null>;
@@ -43,7 +47,7 @@ export class Api {
   listMembers(): Promise<{ members: MemberSummary[] }> {
     return this.request("GET", "/members");
   }
-  getMember(ref: string): Promise<{ member: MemberDetail }> {
+  getMember(ref: string): Promise<{ member: MemberDetailWithKevbox }> {
     return this.request("GET", `/members/${encodeURIComponent(ref)}`);
   }
   addAddon(userId: string, body: { url: string; enabled?: boolean; sortOrder?: number }): Promise<{ addon: AddonRow }> {
@@ -97,6 +101,15 @@ export class Api {
   }
   getGoingDark(): Promise<{ rows: GoingDarkRow[] }> { return this.request("GET", "/activity/going-dark"); }
   getFleetStats(): Promise<{ stats: FleetStats }> { return this.request("GET", "/activity/stats"); }
+  getKevboxInstallUrl(userId: string): Promise<{ installUrl: string }> {
+    return this.request("GET", `/members/${encodeURIComponent(userId)}/kevbox/install-url`);
+  }
+  putKevbox(userId: string, body: { name?: string; premiumizeKey?: string }): Promise<{ kevbox: KevboxState | null }> {
+    return this.request("PUT", `/members/${encodeURIComponent(userId)}/kevbox`, body);
+  }
+  unenrollKevbox(userId: string): Promise<{ kevbox: KevboxState | null }> {
+    return this.request("DELETE", `/members/${encodeURIComponent(userId)}/kevbox`);
+  }
 }
 
 /** Trigger a browser download of the pre-bulk snapshot JSON so a wrong bulk op is recoverable. */

@@ -23,6 +23,7 @@ export function App() {
   const [selected, setSelected] = useState<MemberDetailType | null>(null);
   const [selectedAccess, setSelectedAccess] = useState<AccessState | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<MemberActivity | null>(null);
+  const [selectedKevbox, setSelectedKevbox] = useState<import("./lib/api.js").KevboxState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
@@ -50,6 +51,7 @@ export function App() {
         api.getMemberActivity(userId),
       ]);
       setSelected(member);
+      setSelectedKevbox(member.kevbox);
       setSelectedAccess(access);
       setSelectedActivity(activity);
     },
@@ -164,6 +166,26 @@ export function App() {
   const onOnboardDebrid = (premiumizeKey: string, aiostreamsUrl: string) =>
     withBusy(async () => {
       if (selected) { await api.onboardDebrid(selected.userId, { premiumizeKey, aiostreamsUrl }); await afterMutate(); }
+    });
+
+  // ---- kevbox enrollment callbacks ----
+  const onSaveKevbox = (body: { name?: string; premiumizeKey?: string }) =>
+    withBusy(async () => { if (selected) { await api.putKevbox(selected.userId, body); await afterMutate(); } });
+  function onUnenrollKevbox() {
+    if (!selected) return;
+    const userId = selected.userId;
+    setPending({
+      title: "Un-enroll from Kevbox",
+      message: <>Remove <strong>{selected.email ?? userId}</strong> from the Kevbox allowlist? Their TV loses the kevbox addon on next sync.</>,
+      run: () => withBusy(async () => { await api.unenrollKevbox(userId); await afterMutate(); }),
+    });
+  }
+  const onRevealKevboxUrl = () =>
+    withBusy(async () => {
+      if (!selected) return;
+      const { installUrl } = await api.getKevboxInstallUrl(selected.userId);
+      await navigator.clipboard.writeText(installUrl).catch(() => undefined);
+      window.prompt("Kevbox install URL (copied):", installUrl);
     });
 
   // ---- destructive / bulk actions go through the ConfirmModal ----
@@ -310,6 +332,10 @@ export function App() {
             onSetMaxDevices={onSetMaxDevices}
             onRemoveDevice={onRemoveDevice}
             onRemoveAllDevices={onRemoveAllDevices}
+            kevbox={selectedKevbox}
+            onSaveKevbox={onSaveKevbox}
+            onUnenrollKevbox={onUnenrollKevbox}
+            onRevealKevboxUrl={onRevealKevboxUrl}
           />
         ) : (
           <p className="muted">Select a member from the left.</p>
