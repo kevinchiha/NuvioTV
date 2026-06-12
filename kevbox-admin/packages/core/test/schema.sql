@@ -178,3 +178,28 @@ begin
   get diagnostics v_days = row_count;
   return format('pruned %s events, %s daily rows', v_events, v_days);
 end $$;
+
+-- ===== KevBox member enrollment (spec §4) =====
+-- Sidecar per auth.users member. aiostreams_name is the CANONICAL verbatim live
+-- allowlist token (never re-derived from email at migration time, C1). Name
+-- uniqueness binds ACTIVE members only (partial index, H5) so a departed member's
+-- name can be reused. premiumize_key_enc nullable (name-only after a backfill miss).
+create table public.kevbox_member (
+  user_id            uuid primary key references auth.users(id) on delete cascade,
+  aiostreams_name    text not null
+                       check (aiostreams_name ~ '^[a-z0-9._+-]{1,64}$'),
+  premiumize_key_enc text,
+  enrolled           boolean not null default true,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+create unique index kevbox_member_name_active
+  on public.kevbox_member (aiostreams_name) where enrolled;
+
+-- Safety net for any legacy allowlist name that does not resolve to an auth.users row.
+create table public.kevbox_allowlist_extra (
+  aiostreams_name text primary key
+                    check (aiostreams_name ~ '^[a-z0-9._+-]{1,64}$'),
+  note            text,
+  created_at      timestamptz not null default now()
+);
