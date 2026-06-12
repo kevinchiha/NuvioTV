@@ -131,3 +131,32 @@ live in `/etc/kevbox-admin/env`, outside the release dirs).
 - **`/api/*` returns 401 with a valid token** → `ADMIN_EMAILS` mismatch, or `SUPABASE_URL`/`SUPABASE_ANON_KEY` wrong (JWT verification fails). Confirm they match the Supabase project.
 - **Not listening on 127.0.0.1:8787** → `PORT` in the env file disagrees with nginx `proxy_pass`, or the server binds `0.0.0.0`. `ss -ltnp | grep 8787`.
 - **Cert won't issue** → DNS not pointing at the VPS yet (`dig +short admin.kevbox.dev A`); wait for TTL and retry certbot.
+
+## KevBox member enrollment (members.json)
+
+One-time provisioning on persovps (spec §15 step 2):
+
+```bash
+sudo groupadd -f kevbox
+sudo install -d -o kevbox-admin -g kevbox -m 2775 /var/lib/kevbox-shared   # setgid: files inherit group kevbox
+sudo usermod -aG kevbox kevbox-admin
+sudo usermod -aG kevbox kevin            # the kevbox container's host user
+# apply schema:
+psql "$SUPABASE_DB_URL" -f deploy/kevbox_member_setup.sql
+sudo systemctl daemon-reload && sudo systemctl restart kevbox-admin
+```
+
+Migrate the legacy 261 (dry-run first):
+
+```bash
+# pull the live list (one-shot input, M1) from the AIOStreams .env on the box:
+export KEVBOX_MEMBERS="$(grep '^KEVBOX_MEMBERS=' /opt/kevbox/AIOStreams/.env | cut -d= -f2-)"
+# DRY-RUN — review the report (expect 0 lost / 0 renamed):
+node packages/cli/dist/index.js kevbox-migrate --names "$KEVBOX_MEMBERS"
+# APPLY once the report looks right:
+node packages/cli/dist/index.js kevbox-migrate --names "$KEVBOX_MEMBERS" --apply
+# verify the written set matches the env set:
+diff <(tr ',' '\n' <<<"$KEVBOX_MEMBERS" | sort -u) <(jq -r '.[]' /var/lib/kevbox-shared/members.json | sort -u)
+```
+
+Rollback (spec §15 step 6): `rm /var/lib/kevbox-shared/members.json` → the container falls back to `KEVBOX_MEMBERS` env.
