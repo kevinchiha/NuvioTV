@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Db, KevboxConfig } from "@kevbox-admin/core";
 import {
   getMember, getKevbox, enrollMember, renameMember, rotateKey, unenrollMember,
-  buildInstallUrl, withKevboxWrite,
+  buildInstallUrl, withKevboxWrite, writeAudit,
 } from "@kevbox-admin/core";
 
 // The name field accepts both `aiostreamsName` (explicit enroll field, matching enrollMember's opts)
@@ -15,6 +15,8 @@ export function registerKevboxRoutes(app: FastifyInstance, db: Db, cfg: KevboxCo
     if (!(await getMember(db, req.params.userId))) return reply.code(404).send({ error: "member not found" });
     const installUrl = await buildInstallUrl(db, req.params.userId, cfg);
     if (!installUrl) return reply.code(404).send({ error: "no install url (member has no stored key)" });
+    // §13: record that the key-bearing URL was revealed — the verb only, NEVER the URL/key value.
+    await writeAudit(db, { adminEmail: req.adminUser?.email ?? null, userId: req.params.userId, action: "kevbox.reveal-url" });
     return { installUrl };
   });
 
@@ -26,6 +28,7 @@ export function registerKevboxRoutes(app: FastifyInstance, db: Db, cfg: KevboxCo
       : typeof req.body?.name === "string" ? req.body.name : undefined;
     const name = typeof rawName === "string" ? rawName.trim() : undefined;
     const key = typeof req.body?.premiumizeKey === "string" ? req.body.premiumizeKey.trim() : undefined;
+    const adminEmail = req.adminUser?.email ?? null;
 
     // TOCTOU fix (H2): read existence + decide enroll-vs-rename-vs-rotate INSIDE the lock, on the
     // LOCKED connection `d` — never on the outer pool `db` before the lock. Read+decide+mutate share
@@ -37,10 +40,18 @@ export function registerKevboxRoutes(app: FastifyInstance, db: Db, cfg: KevboxCo
       if (!enrolled) {
         if (!key) { const e = new Error("premiumizeKey is required to enroll") as Error & { statusCode?: number }; e.statusCode = 400; throw e; }
         await enrollMember(d, userId, { aiostreamsName: name, premiumizeKey: key }, cfg);
+        // §13: audit inside the lock so it commits/rolls back atomically with the mutation; verb only.
+        await writeAudit(d, { adminEmail, userId, action: "kevbox.enroll" });
         return;
       }
-      if (name && name !== current!.name) await renameMember(d, userId, name, cfg);
-      if (key) await rotateKey(d, userId, key, cfg);
+      if (name && name !== current!.name) {
+        await renameMember(d, userId, name, cfg);
+        await writeAudit(d, { adminEmail, userId, action: "kevbox.rename" });
+      }
+      if (key) {
+        await rotateKey(d, userId, key, cfg);
+        await writeAudit(d, { adminEmail, userId, action: "kevbox.rotate" });
+      }
       if (!name && !key) { const e = new Error("nothing to update") as Error & { statusCode?: number }; e.statusCode = 400; throw e; }
     });
 
@@ -57,16 +68,23 @@ export function registerKevboxRoutes(app: FastifyInstance, db: Db, cfg: KevboxCo
   app.delete<{ Params: { userId: string } }>("/members/:userId/kevbox", async (req, reply) => {
     const userId = req.params.userId;
     if (!(await getMember(db, userId))) return reply.code(404).send({ error: "member not found" });
+    const adminEmail = req.adminUser?.email ?? null;
     let warning: string | undefined;
     try {
-      await withKevboxWrite(db, cfg.membersFile, (d) => unenrollMember(d, userId, cfg));
+      await withKevboxWrite(db, cfg.membersFile, async (d) => {
+        await unenrollMember(d, userId, cfg);
+        // §13: audit inside the lock — atomic with the un-enroll; verb only, no key/URL.
+        await writeAudit(d, { adminEmail, userId, action: "kevbox.unenroll" });
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!/empty/i.test(msg)) throw e; // only the empty-set floor is soft; everything else 5xx
-      // The withKevboxWrite txn rolled back (its in-txn render hit the floor). Re-run JUST the
-      // mutation directly on `db` — unenrollMember is a pure mutation that does NOT render — so the
-      // DB un-enroll commits while the (now would-be-empty) members.json is left untouched.
+      // The withKevboxWrite txn rolled back (its in-txn render hit the floor, discarding the in-txn
+      // audit). Re-run JUST the mutation directly on `db` — unenrollMember is a pure mutation that
+      // does NOT render — so the DB un-enroll commits while the (now would-be-empty) members.json is
+      // left untouched; re-record the audit on `db` so the un-enroll is still trailed.
       await unenrollMember(db, userId, cfg);
+      await writeAudit(db, { adminEmail, userId, action: "kevbox.unenroll" });
       warning = "last enrolled member removed; members.json left intact (empty-set safety floor)";
     }
     return { kevbox: await getKevbox(db, userId, cfg), ...(warning ? { warning } : {}) };

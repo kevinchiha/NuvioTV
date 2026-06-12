@@ -203,3 +203,12 @@ create table public.kevbox_allowlist_extra (
   note            text,
   created_at      timestamptz not null default now()
 );
+
+-- Audit trail for kevbox mutations + install-url reveals (spec §13). NEVER stores a key value.
+create table public.kevbox_audit (
+  id          bigint generated always as identity primary key,
+  admin_email text,
+  user_id     uuid,
+  action      text not null,
+  occurred_at timestamptz not null default now()
+);

@@ -27,6 +27,14 @@ test("PUT enroll → GET member shows kevbox block (no key); members.json writte
     expect(put.statusCode).toBe(200);
     expect(put.json().kevbox).toEqual({ name: "route.one", enrolled: true, hasKey: true });
 
+    const audit = await db.query(
+      "select admin_email, action from public.kevbox_audit where user_id = $1 order by id",
+      [uid],
+    );
+    expect(audit.rows.map((r) => r.action)).toContain("kevbox.enroll");
+    expect(audit.rows[0].admin_email).toBe("admin@test.dev");
+    expect(JSON.stringify(audit.rows)).not.toContain("PMK"); // no secret in the audit trail
+
     const get = await app.inject({ method: "GET", url: `/api/members/${uid}`, headers: ADMIN });
     expect(get.json().member.kevbox).toEqual({ name: "route.one", enrolled: true, hasKey: true });
     expect(JSON.stringify(get.json())).not.toContain("PMK"); // key never in the default fetch (C5)

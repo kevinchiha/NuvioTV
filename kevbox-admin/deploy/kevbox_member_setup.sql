@@ -31,6 +31,18 @@ create table if not exists public.kevbox_allowlist_extra (
   created_at      timestamptz not null default now()
 );
 
+-- Audit trail for kevbox mutations + install-url reveals (spec §13). NEVER stores a key value.
+create table if not exists public.kevbox_audit (
+  id          bigint generated always as identity primary key,
+  admin_email text,
+  user_id     uuid,
+  action      text not null,
+  occurred_at timestamptz not null default now()
+);
+alter table public.kevbox_audit enable row level security;
+revoke all on public.kevbox_audit from anon, authenticated;
+grant select, insert on public.kevbox_audit to kevbox_admin;
+
 -- Defense in depth: these sidecar tables hold encrypted keys + allowlist names. Even though
 -- kevbox_admin is BYPASSRLS, enable RLS and strip the Supabase default-grants to anon/authenticated
 -- so a public view or a stray PostgREST request can never read them (mirrors member_access).

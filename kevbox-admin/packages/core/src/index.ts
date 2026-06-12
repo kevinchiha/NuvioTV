@@ -12,3 +12,4 @@ export * from "./kevboxAllowlist.js";
 export * from "./kevboxMember.js";
 export * from "./kevboxWrite.js";
 export * from "./migrate261.js";
+export * from "./kevboxAudit.js";
