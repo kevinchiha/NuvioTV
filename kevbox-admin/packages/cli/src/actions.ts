@@ -10,7 +10,6 @@ import {
   setEnabled,
   reorder,
   resetToDefaults,
-  onboardDebrid,
   bulkAddAddon,
   bulkSwapUrl,
   snapshotAllAddons,
@@ -192,24 +191,6 @@ export async function actionReset(
   await resetToDefaults(db, member.userId);
   const updated = await getMember(db, member.userId);
   sink.log("Reset complete.");
-  sink.log(formatMember(updated!));
-}
-
-/** kevbox-admin onboard-debrid <ref> --premiumize <key> --aiostreams <url> */
-export async function actionOnboardDebrid(
-  db: Db,
-  ref: string,
-  opts: { premiumize: string; aiostreams: string },
-  sink: Sink = consoleSink,
-): Promise<void> {
-  const member = await requireMember(db, ref, sink);
-  if (!member) return;
-  await onboardDebrid(db, member.userId, {
-    premiumizeKey: opts.premiumize,
-    aiostreamsUrl: opts.aiostreams,
-  });
-  const updated = await getMember(db, member.userId);
-  sink.log(`Debrid onboarded for ${member.email ?? member.userId}.`);
   sink.log(formatMember(updated!));
 }
 

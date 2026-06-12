@@ -8,7 +8,6 @@ import type {
 } from "../lib/api.js";
 import type { KevboxState } from "../lib/api.js";
 import { AddonRow } from "./AddonRow.js";
-import { DebridForm } from "./DebridForm.js";
 import { AccessTab } from "./AccessTab.js";
 import { ActivityTab } from "./ActivityTab.js";
 import { KevboxTab } from "./KevboxTab.js";
@@ -26,7 +25,6 @@ export interface MemberDetailProps {
   onMove: (addon: AddonRowType, dir: -1 | 1) => void;
   onAdd: (url: string) => void;
   onReset: () => void;
-  onOnboardDebrid: (premiumizeKey: string, aiostreamsUrl: string) => void;
   onSetActive: (active: boolean) => void;
   onSetMaxDevices: (max: number) => void;
   onRemoveDevice: (device: DeviceRow) => void;
@@ -48,7 +46,6 @@ export function MemberDetail({
   onMove,
   onAdd,
   onReset,
-  onOnboardDebrid,
   onSetActive,
   onSetMaxDevices,
   onRemoveDevice,
@@ -149,9 +146,6 @@ export function MemberDetail({
               Reset to defaults
             </button>
           </div>
-
-          <hr style={{ margin: "20px 0", borderColor: "var(--border)" }} />
-          <DebridForm busy={busy} onSubmit={onOnboardDebrid} />
         </>
       )}
     </div>

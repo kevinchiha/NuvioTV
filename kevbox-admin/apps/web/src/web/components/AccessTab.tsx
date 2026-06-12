@@ -30,7 +30,7 @@ function relative(iso: string): string {
 }
 
 /**
- * Presentational Access tab (split out like DebridForm). Reflects operator INTENT (the member_access
+ * Presentational Access tab (split into its own component). Reflects operator INTENT (the member_access
  * flag + member_device rows) — NOT live enforcement: if a panic-button RPC rollback is engaged the
  * toggles here have no effect on the TV. All state comes from the parent; this component only renders.
  */

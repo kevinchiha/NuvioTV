@@ -163,10 +163,6 @@ export function App() {
     });
   const onAdd = (url: string) =>
     withBusy(async () => { if (selected) { await api.addAddon(selected.userId, { url }); await afterMutate(); } });
-  const onOnboardDebrid = (premiumizeKey: string, aiostreamsUrl: string) =>
-    withBusy(async () => {
-      if (selected) { await api.onboardDebrid(selected.userId, { premiumizeKey, aiostreamsUrl }); await afterMutate(); }
-    });
 
   // ---- kevbox enrollment callbacks ----
   const onSaveKevbox = (body: { name?: string; premiumizeKey?: string }) =>
@@ -327,7 +323,6 @@ export function App() {
             onMove={onMove}
             onAdd={onAdd}
             onReset={onReset}
-            onOnboardDebrid={onOnboardDebrid}
             onSetActive={onSetActive}
             onSetMaxDevices={onSetMaxDevices}
             onRemoveDevice={onRemoveDevice}

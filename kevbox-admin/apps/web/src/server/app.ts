@@ -81,7 +81,7 @@ export function buildApp(opts: BuildAppOptions): FastifyInstance {
     registerMemberRoutes(api, opts.db, opts.kevbox);
     registerAddonRoutes(api, opts.db);
     registerAccessRoutes(api, opts.db);
-    registerActionRoutes(api, opts.db);
+    registerActionRoutes(api, opts.db, opts.kevbox);
     registerBulkRoutes(api, opts.db);
     registerActivityRoutes(api, opts.db);
     if (opts.kevbox) registerKevboxRoutes(api, opts.db, opts.kevbox);

@@ -8,7 +8,6 @@ import {
   actionToggle,
   actionReorder,
   actionReset,
-  actionOnboardDebrid,
   actionBulkAdd,
   actionBulkSwap,
   actionAccess,
@@ -154,25 +153,6 @@ test("actionReset aborts when the prompt is not confirmed", async () => {
     [id],
   );
   expect(rows[0].n).toBe(1);
-});
-
-test("actionOnboardDebrid inserts Torrentio (sort 4) and AIOStreams (sort 5)", async () => {
-  const id = await seedMember(`deb${SUFFIX}`);
-  const { sink } = makeSink();
-  await actionOnboardDebrid(
-    pool,
-    `deb${SUFFIX}`,
-    { premiumize: "KEY9", aiostreams: "https://aio.example/m.json" },
-    sink,
-  );
-  const { rows } = await pool.query<{ url: string; sort_order: number }>(
-    "select url, sort_order from public.member_addon where user_id = $1 order by sort_order",
-    [id],
-  );
-  const t = rows.find((r) => r.sort_order === 4)!;
-  const a = rows.find((r) => r.sort_order === 5)!;
-  expect(t.url).toContain("premiumize=KEY9");
-  expect(a.url).toBe("https://aio.example/m.json");
 });
 
 test("actionBulkAdd requires --yes (refuses without it)", async () => {

@@ -12,7 +12,6 @@ import {
   actionToggle,
   actionReorder,
   actionReset,
-  actionOnboardDebrid,
   actionBulkAdd,
   actionBulkSwap,
   actionAccess,
@@ -115,16 +114,6 @@ program
   .description("Reset a member to the universal defaults (confirm prompt).")
   .action(async (ref: string) => {
     await withPool((pool) => actionReset(pool, ref, ask, consoleSink));
-  });
-
-program
-  .command("onboard-debrid")
-  .argument("<ref>", "member email or userId")
-  .requiredOption("--premiumize <key>", "the member's Premiumize API key")
-  .requiredOption("--aiostreams <url>", "the member's full AIOStreams manifest URL")
-  .description("Add the member's Torrentio (Premiumize) + AIOStreams debrid sources.")
-  .action(async (ref: string, opts: { premiumize: string; aiostreams: string }) => {
-    await withPool((pool) => actionOnboardDebrid(pool, ref, opts, consoleSink));
   });
 
 program

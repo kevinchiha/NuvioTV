@@ -68,9 +68,6 @@ export class Api {
   reset(userId: string): Promise<{ ok: true }> {
     return this.request("POST", `/members/${encodeURIComponent(userId)}/reset`);
   }
-  onboardDebrid(userId: string, body: { premiumizeKey: string; aiostreamsUrl: string }): Promise<{ ok: true }> {
-    return this.request("POST", `/members/${encodeURIComponent(userId)}/debrid`, body);
-  }
   // Bulk responses include `snapshot` — the pre-change pre-image (spec §4.6) the SPA offers as a download.
   bulkAdd(body: { url: string; sortOrder: number; confirm: boolean }): Promise<{ inserted: number; snapshot: unknown[] }> {
     return this.request("POST", "/bulk/add", body);
