@@ -75,10 +75,12 @@ Create `run_sync_tests.sh`:
 # *_setup.sql / *_teardown.sql are applied for real; *_test.sql is wrapped in a rolled-back
 # transaction so its fixtures (auth.users rows, the member_addon seed trigger) never leak.
 #
-# Connection: export SYNC_TEST_DB_URL to the branch DIRECT endpoint (port 5432, NOT the 6543
-# pooler — avoids pooler-SSL friction and session-pinning), e.g.:
-#   export SYNC_TEST_DB_URL='postgresql://postgres:<pw>@db.<branch-ref>.supabase.co:5432/postgres?sslmode=require'
-# (Mirror the repo's untracked .supabase_db.env convention; never commit the password.)
+# Connection: export SYNC_TEST_DB_URL to the branch's SESSION-mode pooler endpoint:
+#   host aws-0-<region>.pooler.supabase.com, PORT 5432 (session mode), user postgres.<branch-ref>.
+#   - NOT the 6543 transaction pooler — it breaks SET ROLE / session GUCs / multi-statement txns the tests use.
+#   - NOT the direct db.<branch-ref>.supabase.co endpoint — it is IPv6-only and unreachable on IPv4-only hosts.
+#   e.g. postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+# Stored in the untracked .supabase_db.env (gitignored); never commit the password.
 #
 # Usage:
 #   ./run_sync_tests.sh get_sync_owner_setup.sql watch_progress_setup.sql watch_progress_test.sql
