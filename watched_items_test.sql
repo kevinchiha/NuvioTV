@@ -319,3 +319,30 @@ begin
 
   raise notice 'watched_items NULL-owner OK';
 end $$;
+
+-- ============ watched_items: idempotent re-apply preserves data ============
+do $$
+declare s uuid := 'ffffffff-aaaa-ffff-ffff-ffffffffffff';
+begin
+  insert into auth.users(id) values (s) on conflict do nothing;
+  perform public.test_login(s);
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','idemp','content_type','movie','title','SENT','season',null,'episode',null,'watched_at',7)), 1);
+end $$;
+
+-- re-apply the whole setup mid-test (create-if-not-exists / or-replace).
+-- NOTE: keep the comment off the \i line — psql parses a trailing inline comment as extra
+-- \i arguments and emits noisy "extra argument ignored" warnings.
+\i watched_items_setup.sql
+
+do $$
+declare s uuid := 'ffffffff-aaaa-ffff-ffff-ffffffffffff';
+begin
+  perform public.test_login(s);
+  assert to_regclass('public.watched_items') is not null, 're-apply dropped the table';
+  assert (select count(*) from public.watched_items where user_id=s and content_id='idemp') = 1,
+    're-applying setup must PRESERVE existing rows (no drop-then-create)';
+  assert (select count(*) from public.watched_items_events where user_id=s and content_id='idemp') = 1,
+    're-applying setup must preserve existing events';
+  raise notice 'watched_items idempotency OK';
+end $$;
