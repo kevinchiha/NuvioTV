@@ -93,3 +93,26 @@ $$;
 revoke all on function public.sync_push_watched_items_for(uuid, int, jsonb) from public, anon, authenticated;
 revoke all     on function public.sync_push_watched_items(jsonb, int) from public, anon;
 grant  execute on function public.sync_push_watched_items(jsonb, int) to authenticated;
+
+-- 4. Pull snapshot. SECURITY DEFINER + explicit owner predicate (R1). Exact SupabaseWatchedItem
+--    shape (R7): user_id::text + the 7 other emitted model keys (id omitted — optional). 1-based
+--    paging: offset = (p_page-1)*p_page_size. R8 total order with a unique tiebreaker.
+create or replace function public.sync_pull_watched_items(
+  p_profile_id int, p_page int, p_page_size int
+) returns table(
+  user_id text, content_id text, content_type text, title text,
+  season int, episode int, watched_at bigint, profile_id int
+) language sql security definer set search_path = '' as $$
+  select wi.user_id::text, wi.content_id, wi.content_type, wi.title,
+         wi.season, wi.episode, wi.watched_at, wi.profile_id
+  from public.watched_items wi
+  where wi.user_id = nullif(public.get_sync_owner(),'')::uuid       -- R1
+    and wi.profile_id = p_profile_id
+  order by wi.watched_at asc, wi.content_id asc,
+           wi.season asc nulls first, wi.episode asc nulls first    -- R8 total order: NULL-safe,
+                                                                    -- avoids coalesce(-1) aliasing a real -1
+  limit  greatest(p_page_size, 0)
+  offset greatest((p_page - 1) * p_page_size, 0)                    -- 1-based page
+$$;
+revoke all     on function public.sync_pull_watched_items(int, int, int) from public, anon;
+grant  execute on function public.sync_pull_watched_items(int, int, int) to authenticated;

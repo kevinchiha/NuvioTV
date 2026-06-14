@@ -84,3 +84,60 @@ begin
 
   raise notice 'watched_items push OK';
 end $$;
+
+-- ============ watched_items: pull (R1 isolation, R7 exact shape, R8 1-based paging) ============
+do $$
+declare a uuid := '33333333-aaaa-3333-3333-333333333333';
+        b uuid := '44444444-aaaa-4444-4444-444444444444';
+        v_count int; v_shape text; v_keys text;
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+
+  perform public.test_login(a);
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','wa','content_type','movie','title','A','season',null,'episode',null,'watched_at',1000)), 1);
+  perform public.test_login(b);
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','wb','content_type','movie','title','B','season',null,'episode',null,'watched_at',1000)), 1);
+
+  -- R1: member B pulls only B's rows, never A's. (page 1, page_size 900)
+  select count(*), string_agg(content_id, ',' order by content_id) into v_count, v_keys
+    from public.sync_pull_watched_items(1, 1, 900);
+  assert v_count = 1, format('B should pull 1 row, got %s', v_count);
+  assert v_keys = 'wb', format('B must not see A''s rows; got %s', v_keys);
+
+  -- R7 wire-shape guard: pulled row JSON keys must EXACTLY match SupabaseWatchedItem's emitted set
+  -- (no id, no updated_at). LIMIT the ROW first, THEN expand keys.
+  select string_agg(k, ',' order by k) into v_shape
+  from ( select jsonb_object_keys(to_jsonb(t)) as k
+         from ( select * from public.sync_pull_watched_items(1, 1, 900) limit 1 ) t ) s;
+  assert v_shape = 'content_id,content_type,episode,profile_id,season,title,user_id,watched_at',
+    format('pull row JSON keys must match SupabaseWatchedItem exactly; got: %s', v_shape);
+end $$;
+
+-- R8 1-based paging: page 2 continues where page 1 stopped, deterministic order, no dup/drop.
+do $$
+declare d uuid := '55555555-aaaa-5555-5555-555555555555';
+        p1 text; p2 text; tot int;
+begin
+  insert into auth.users(id) values (d) on conflict do nothing;
+  perform public.test_login(d);
+  for i in 1..5 loop
+    perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+      'content_id','p'||i,'content_type','series','title','P','season',1,'episode',i,'watched_at',i)), 1);
+  end loop;
+  -- page_size 2: page 1 = 2 rows, page 2 = next 2 rows, disjoint, ordered.
+  select string_agg(content_id||':'||episode, ',' order by watched_at, content_id) into p1
+    from public.sync_pull_watched_items(1, 1, 2);
+  select string_agg(content_id||':'||episode, ',' order by watched_at, content_id) into p2
+    from public.sync_pull_watched_items(1, 2, 2);
+  assert (select count(*) from public.sync_pull_watched_items(1, 1, 2)) = 2, 'page 1 must have 2 rows';
+  assert (select count(*) from public.sync_pull_watched_items(1, 2, 2)) = 2, 'page 2 must have 2 rows';
+  assert p1 <> p2, 'pages must be disjoint';
+  assert not exists (
+    select content_id from public.sync_pull_watched_items(1, 1, 2)
+    intersect
+    select content_id from public.sync_pull_watched_items(1, 2, 2)
+  ), 'paging must not overlap (R8 stable order)';
+  raise notice 'watched_items pull OK';
+end $$;
