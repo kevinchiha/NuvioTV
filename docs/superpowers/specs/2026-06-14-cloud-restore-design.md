@@ -191,7 +191,7 @@ content_id, content_type, position, duration, last_watched`; `video_id` defaults
 |---|---|---|---|
 | `sync_push_watch_progress` | `p_entries jsonb`, `p_profile_id int` | (ignored) | `p_entries` = array of `{content_id, content_type, video_id, season?, episode?, position, duration, last_watched, progress_key}` (season/episode **omitted** when null). Upsert per R2/R3; append event only on change. |
 | `sync_pull_watch_progress` | `p_profile_id int`, `p_since_last_watched int8 DEFAULT null`, `p_limit int DEFAULT null` | `SETOF` → `decodeList<SupabaseWatchProgress>` | All 8 required columns non-null (R7). |
-| `sync_get_watch_progress_delta_cursor` | `p_profile_id int` | scalar `bigint` → `decodeAs<Long>` | `coalesce(max(event_id),0)` (R5). |
+| `sync_get_watch_progress_delta_cursor` | `p_profile_id int` | scalar `bigint` → `decodeAs<Long>` | `coalesce(max(event_id),0)` (R5). Defense-in-depth here — the client wraps this call with a snapshot fallback (`WatchProgressSyncService.kt:340-345`); the §5.2 watched-items cursor is the **unwrapped, must-never-error** case. |
 | `sync_pull_watch_progress_delta` | `p_profile_id int`, `p_since_event_id int8`, `p_limit int` | `SETOF` → `decodeList<SupabaseWatchProgressEvent>` | `where user_id=get_sync_owner() and event_id>p_since_event_id order by event_id asc limit p_limit` (R1/R7/R8). |
 | `sync_delete_watch_progress` | `p_keys jsonb`, `p_profile_id int` | (ignored) | `p_keys` = **array of plain `progress_key` strings**. Append delete events. |
 

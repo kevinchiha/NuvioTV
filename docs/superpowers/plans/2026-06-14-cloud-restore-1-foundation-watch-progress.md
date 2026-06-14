@@ -257,6 +257,9 @@ begin
   assert not has_table_privilege('authenticated', 'public.watch_progress', 'INSERT'), 'authenticated can INSERT watch_progress';
   assert not has_table_privilege('authenticated', 'public.watch_progress', 'UPDATE'), 'authenticated can UPDATE watch_progress';
   assert not has_table_privilege('authenticated', 'public.watch_progress', 'DELETE'), 'authenticated can DELETE watch_progress';
+  -- SELECT is granted to authenticated (RLS scopes it to own rows); anon has none.
+  assert has_table_privilege('authenticated', 'public.watch_progress', 'SELECT'), 'authenticated needs RLS-scoped SELECT';
+  assert not has_table_privilege('anon', 'public.watch_progress', 'SELECT'), 'anon must not SELECT watch_progress';
 
   raise notice 'watch_progress schema OK';
 end $$;
@@ -325,6 +328,11 @@ create policy "read own watch_progress_events" on public.watch_progress_events
 -- 2b. Revoke default DML grants (mirrors member_addon_setup.sql). Writes are RPC-only.
 revoke insert, update, delete, truncate, references, trigger
   on public.watch_progress, public.watch_progress_events from anon, authenticated;
+-- 2c. SELECT stays for authenticated but is RLS-scoped to own rows (defense-in-depth alongside the
+--     owner-scoped pull RPC); anon gets nothing. Matches the member_addon read-own posture and makes
+--     the read-own policy testable (Task 9, D).
+revoke select on public.watch_progress, public.watch_progress_events from anon;
+grant  select on public.watch_progress, public.watch_progress_events to authenticated;
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -402,6 +410,26 @@ begin
     'progress_key must dedup to one row';
 
   raise notice 'watch_progress push OK';
+end $$;
+
+-- TV-07: a mixed batch (one stale + one fresh) appends EXACTLY one event.
+do $$
+declare a uuid := '22222222-2222-2222-2222-222222222222';
+        v_before int; v_after int;
+begin
+  perform public.test_login(a);
+  select count(*) into v_before from public.watch_progress_events where user_id=a;
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(
+      -- stale: tt1 is already at last_watched 2000, this one is older => guard rejects, no event
+      jsonb_build_object('content_id','tt1','content_type','movie','video_id','tt1',
+        'position',1,'duration',100,'last_watched',1,'progress_key','tt1'),
+      -- fresh: brand-new key => inserted, one event
+      jsonb_build_object('content_id','mix','content_type','movie','video_id','mix',
+        'position',3,'duration',30,'last_watched',5000,'progress_key','mix_fresh')), 1);
+  select count(*) into v_after from public.watch_progress_events where user_id=a;
+  assert v_after = v_before + 1, format('mixed batch must append exactly 1 event, got %s', v_after - v_before);
+  raise notice 'watch_progress mixed-batch OK';
 end $$;
 ```
 
@@ -532,6 +560,15 @@ begin
   assert v_shape = 'content_id,content_type,duration,episode,last_watched,position,profile_id,progress_key,season,user_id,video_id',
     format('pull row JSON keys must match SupabaseWatchProgress exactly; got: %s', v_shape);
 
+  -- F3: p_since_last_watched is INCLUSIVE (>=). Add a newer row for B and pin the boundary.
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(jsonb_build_object('content_id','m3','content_type','movie','video_id','m3',
+      'position',1,'duration',10,'last_watched',3000,'progress_key','m3')), 1);
+  assert (select count(*) from public.sync_pull_watch_progress(1, 3000, null)) = 1,
+    'since=3000 (inclusive) must return exactly the m3 row';
+  assert (select count(*) from public.sync_pull_watch_progress(1, 3001, null)) = 0,
+    'since=3001 must exclude m3 (boundary is >=)';
+
   raise notice 'watch_progress pull OK';
 end $$;
 ```
@@ -539,7 +576,7 @@ end $$;
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `./run_sync_tests.sh get_sync_owner_setup.sql watch_progress_setup.sql watch_progress_test.sql`
-Expected: FAIL with `ERROR: function public.sync_pull_watch_progress(...) does not exist`.
+Expected: FAIL with `ERROR: function public.sync_pull_watch_progress(integer, unknown, unknown) does not exist`.
 
 - [ ] **Step 3: Append the pull function (+ grant)**
 
@@ -849,7 +886,7 @@ git commit -m "feat(sync): sync_delete_watch_progress (string keys + delete even
 
 ---
 
-## Task 9: Function-ACL + NULL-owner safety (R1 side-door + R4)
+## Task 9: Function-ACL + NULL-owner + RLS read-own (R1 side-door + R4 + D)
 
 **Files:**
 - Modify: `watch_progress_test.sql`
@@ -886,6 +923,37 @@ begin
 
   raise notice 'watch_progress ACLs OK';
 end $$;
+
+-- ============ watch_progress: RLS read-own (D — defense-in-depth) ============
+-- Seed two members' rows via the RPCs (run as the connection role = postgres), then drop to the
+-- non-privileged authenticated role and confirm a DIRECT table read is RLS-scoped to auth.uid().
+do $$
+declare a uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+        b uuid := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+  perform public.test_login(a);
+  perform public.sync_push_watch_progress(jsonb_build_array(jsonb_build_object(
+    'content_id','ra','content_type','movie','video_id','ra',
+    'position',1,'duration',9,'last_watched',1,'progress_key','rls_a')), 1);
+  perform public.test_login(b);
+  perform public.sync_push_watch_progress(jsonb_build_array(jsonb_build_object(
+    'content_id','rb','content_type','movie','video_id','rb',
+    'position',1,'duration',9,'last_watched',1,'progress_key','rls_b')), 1);
+  perform public.test_login(a);   -- read as A
+end $$;
+
+set local role authenticated;     -- non-BYPASSRLS role => the read-own policy is enforced
+do $$
+declare foreign_n int; own_n int;
+begin
+  select count(*) into foreign_n from public.watch_progress where progress_key = 'rls_b';
+  assert foreign_n = 0, 'RLS must hide member B''s rows from A on a direct table read';
+  select count(*) into own_n from public.watch_progress where progress_key = 'rls_a';
+  assert own_n >= 1, 'A must see its OWN row under RLS';
+  raise notice 'watch_progress RLS read-own OK';
+end $$;
+reset role;                        -- back to postgres for the remaining blocks
 
 -- ============ watch_progress: NULL-owner safety (R4) ============
 do $$
@@ -1055,11 +1123,12 @@ This plan delivers and validates `watch_progress` **on a branch**. Per spec §12
 - §3 `get_sync_owner` collapse → Task 2 (+ self-guarding teardown). ✓
 - §5.1 tables + 5 RPCs → Tasks 3–8. ✓
 - R1 owner predicate on every read + write/delete → Tasks 5/6/7/8 (+ T-ISO in 5 & 7). ✓
-- R2 last_watched guard incl. equal-timestamp boundary → Task 4. ✓ · R3 PK/upsert target → Task 3 + Task 4. ✓
+- R2 last_watched guard incl. equal-timestamp boundary + mixed fresh/stale batch (TV-07) → Task 4. ✓ · R3 PK/upsert target → Task 3 + Task 4. ✓
 - R4 NULL-owner → Task 9. ✓ · R5 coalesce cursor + exact-max → Task 6. ✓
 - R7 exact wire-shape (LIMIT-before-expand) + event non-null defaults → Tasks 5 & 3. ✓
 - R8 delta asc+limit AND snapshot total-order tiebreaker → Tasks 7 & 5. ✓ · R9 idempotent (data-preserving) setup / scoped teardown → Task 10. ✓
 - **Function ACLs (MF-2/MF-3):** inner `_for` revoked, wrappers granted to `authenticated`, asserted → Tasks 4/5/6/7/8 + Task 9. ✓
+- **RLS read-own (D) + direct-SELECT grant + since-boundary (F3):** Task 3 grants RLS-scoped SELECT; Task 9 proves a member's direct read can't see another's rows; Task 5 pins the `p_since_last_watched >=` boundary. ✓
 - R6 (two delete shapes) — watch_progress half (string keys) → Task 8. *Watched-items object-key half is Plan 2.*
 - R10 retention (`prune_sync_events`) — **deferred to Plan 3** (shared across all `*_events` tables). Noted.
 - §8 gating / §9 cross-cutting tests (T-TRAKT, T-REG, T-E2E, probe, runbook, canary) — **Plan 3**; go-live gate recorded in Task 11.
