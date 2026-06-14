@@ -14,6 +14,8 @@
 
 **Scope note:** This is **Plan 1** (import core + CLI). The §9.4 merge-safety blocker is handled here by **corrected option A** (operational sequencing + CLI guards, no client code) — Tasks 11/13. **Option B (the Kotlin client union patch) is its own plan** and is mandated before fleet-wide C1. Plan 2 (creds vault + C1 poller for the ~320 tail) is a later follow-up that depends on both this plan and Option B.
 
+> **⚠️ POST-EXECUTION FIX (abdallahboudzin canary, 2026-06-14, `trakt-stremio-import@a1f3b31`).** The Task 3/4 converter code below shows `if (o.removed) { skippedRemoved++; continue; }` and skips series whose `state.season/episode` are 0 — **both were wrong against real data and have been fixed in code** (this plan text is left as the historical build sequence; the spec §6 is the corrected source of truth). The fix: (1) do NOT skip `removed` items — Stremio stores continue-watching/watched as `removed+temp` WITH watch state; process watch_progress + watched_items for all items, only the saved LIBRARY filters `!removed && !temp`; (2) `buildWatchedEpisodeIndex` (Task 8) must drop its `!o.removed` filter; (3) `seriesWatchProgress` (Task 4) derives S/E from `state.video_id` when `state.season/episode` are 0. Result on the canary: `wp 0→16, wi 0→87, lib 1` (was `0/0/1`). See spec §6.
+
 ---
 
 ## File Structure
