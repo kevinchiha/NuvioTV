@@ -157,3 +157,86 @@ begin
 
   raise notice 'sync_delete_profile_data OK';
 end $$;
+
+-- ============ profiles: function ACLs ============
+do $$
+begin
+  assert not has_function_privilege('authenticated', 'public.sync_push_profiles_for(uuid,int,jsonb)', 'EXECUTE'),
+    'push _for must NOT be executable by authenticated';
+  assert not has_function_privilege('authenticated', 'public.sync_delete_profile_data_for(uuid,int)', 'EXECUTE'),
+    'delete _for must NOT be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_pull_profiles()', 'EXECUTE'),
+    'pull profiles wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_pull_profile_locks()', 'EXECUTE'),
+    'pull locks wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_push_profiles(int,jsonb)', 'EXECUTE'),
+    'push profiles wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_delete_profile_data(int)', 'EXECUTE'),
+    'delete wrapper must be executable by authenticated';
+  raise notice 'profiles ACLs OK';
+end $$;
+
+-- RLS read-own (profiles).
+do $$
+declare a uuid := 'aaaaaaaa-1111-aaaa-aaaa-aaaaaaaaaaaa';
+        b uuid := 'bbbbbbbb-1111-aaaa-bbbb-bbbbbbbbbbbb';
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+  perform public.test_login(a);
+  perform public.sync_push_profiles(5, jsonb_build_array(jsonb_build_object('profile_index',2,'name','rls_a','avatar_color_hex','#1','uses_primary_addons',false,'uses_primary_plugins',false)));
+  perform public.test_login(b);
+  perform public.sync_push_profiles(5, jsonb_build_array(jsonb_build_object('profile_index',2,'name','rls_b','avatar_color_hex','#2','uses_primary_addons',false,'uses_primary_plugins',false)));
+  perform public.test_login(a);
+end $$;
+set local role authenticated;
+do $$
+begin
+  assert (select count(*) from public.profiles where name='rls_b') = 0, 'RLS must hide member B''s profiles from A';
+  assert (select count(*) from public.profiles where name='rls_a') >= 1, 'A must see its own profiles';
+  raise notice 'profiles RLS read-own OK';
+end $$;
+reset role;
+
+-- NULL-owner safety (R4). NOTE: sync_pull_profiles() intentionally returns a synthesized default row
+-- even for an anon caller (it must NEVER error); it must NOT leak any stored member's data.
+do $$
+declare before_p int; after_p int; n int; v_idx int;
+begin
+  perform public.test_logout();
+  select count(*) into before_p from public.profiles;
+  perform public.sync_push_profiles(5, jsonb_build_array(jsonb_build_object('profile_index',2,'name','anon','avatar_color_hex','#1','uses_primary_addons',false,'uses_primary_plugins',false)));
+  perform public.sync_delete_profile_data(2);
+  select count(*) into after_p from public.profiles;
+  assert after_p = before_p, 'anon push/delete must not change profiles row count';
+  assert not exists (select 1 from public.profiles where user_id is null), 'no NULL-user_id profile rows';
+
+  -- anon pull never errors and returns only the synthesized default (no stored member data).
+  select count(*) into n from public.sync_pull_profiles();
+  assert n = 1, format('anon sync_pull_profiles must return exactly the synth default, got %s', n);
+  select profile_index into v_idx from public.sync_pull_profiles();
+  assert v_idx = 1, 'anon synth default profile_index must be 1';
+  assert not exists (select 1 from public.sync_pull_profiles() where name <> ''), 'anon pull must not leak any stored profile';
+  assert (select count(*) from public.sync_pull_profile_locks()) = 0, 'anon profile_locks pull must be empty';
+  raise notice 'profiles NULL-owner OK';
+end $$;
+
+-- ============ profiles: idempotent re-apply preserves data ============
+do $$
+declare s uuid := 'ffffffff-1111-aaaa-ffff-ffffffffffff';
+begin
+  insert into auth.users(id) values (s) on conflict do nothing;
+  perform public.test_login(s);
+  perform public.sync_push_profiles(5, jsonb_build_array(jsonb_build_object('profile_index',3,'name','idemp','avatar_color_hex','#3','uses_primary_addons',false,'uses_primary_plugins',false)));
+end $$;
+
+-- re-apply the whole setup mid-test (comment kept off the \i line).
+\i profiles_setup.sql
+
+do $$
+declare s uuid := 'ffffffff-1111-aaaa-ffff-ffffffffffff';
+begin
+  perform public.test_login(s);
+  assert (select count(*) from public.profiles where user_id=s and profile_index=3 and name='idemp') = 1,
+    're-applying setup must PRESERVE existing profiles';
+  raise notice 'profiles idempotency OK';
+end $$;
