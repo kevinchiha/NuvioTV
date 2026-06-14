@@ -1,9 +1,0 @@
-node_modules/
-dist/
-*.log
-.env
-.env.*
-!.env.example
-
-# Generated graphify knowledge graph (mirrors the root .gitignore convention)
-graphify-out/
