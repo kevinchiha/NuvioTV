@@ -325,3 +325,29 @@ begin
 
   raise notice 'watch_progress NULL-owner OK';
 end $$;
+
+-- ============ watch_progress: idempotent re-apply preserves data ============
+do $$
+declare s uuid := '99999999-9999-9999-9999-999999999999';
+        v_rows int; v_events int;
+begin
+  insert into auth.users(id) values (s) on conflict do nothing;
+  perform public.test_login(s);
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(jsonb_build_object('content_id','sent','content_type','movie',
+      'video_id','sent','position',7,'duration',70,'last_watched',7,'progress_key','idemp_sentinel')), 1);
+end $$;
+
+\i watch_progress_setup.sql   -- re-apply the whole setup mid-test (create-if-not-exists / or-replace)
+
+do $$
+declare s uuid := '99999999-9999-9999-9999-999999999999';
+begin
+  perform public.test_login(s);   -- re-establish session (set_config is txn-local; new block)
+  assert to_regclass('public.watch_progress') is not null, 're-apply dropped the table';
+  assert (select count(*) from public.watch_progress where user_id=s and progress_key='idemp_sentinel') = 1,
+    're-applying setup must PRESERVE existing rows (no drop-then-create)';
+  assert (select count(*) from public.watch_progress_events where user_id=s and progress_key='idemp_sentinel') = 1,
+    're-applying setup must preserve existing events';
+  raise notice 'watch_progress idempotency OK';
+end $$;
