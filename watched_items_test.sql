@@ -201,3 +201,48 @@ begin
 
   raise notice 'watched_items delta pull OK';
 end $$;
+
+-- ============ watched_items: delete (R6 object keys + IS NOT DISTINCT FROM; delete events) ============
+do $$
+declare g uuid := '99999999-aaaa-9999-9999-999999999999';
+        n int; del_ct text; del_at bigint; del_events int;
+begin
+  insert into auth.users(id) values (g) on conflict do nothing;
+  perform public.test_login(g);
+
+  -- one movie (NULL season/episode) + two episodes of a series.
+  perform public.sync_push_watched_items(jsonb_build_array(
+    jsonb_build_object('content_id','dm','content_type','movie','title','DM','season',null,'episode',null,'watched_at',1),
+    jsonb_build_object('content_id','ds','content_type','series','title','DS','season',1,'episode',1,'watched_at',1),
+    jsonb_build_object('content_id','ds','content_type','series','title','DS','season',1,'episode',2,'watched_at',1)), 1);
+
+  -- R6: delete the MOVIE with a content_id-ONLY key (season/episode omitted => NULL =>
+  --     IS NOT DISTINCT FROM matches the NULL-season movie row). p_profile_id is FIRST.
+  perform public.sync_delete_watched_items(1, jsonb_build_array(jsonb_build_object('content_id','dm')));
+  assert not exists (select 1 from public.watched_items where user_id=g and content_id='dm'),
+    'movie must be deleted via content_id-only key (IS NOT DISTINCT FROM NULL)';
+
+  -- The delete event carries the deleted row's real content_type and zeroed watched_at (R7).
+  select content_type, watched_at into del_ct, del_at
+    from public.watched_items_events
+    where user_id=g and operation='delete' and content_id='dm' order by event_id desc limit 1;
+  assert del_ct = 'movie', format('delete event content_type must be the deleted row''s; got %s', del_ct);
+  assert del_at = 0, format('delete event watched_at must be zeroed; got %s', del_at);
+
+  -- R6: delete ONE episode by {content_id, season, episode}; the other episode survives.
+  perform public.sync_delete_watched_items(1,
+    jsonb_build_array(jsonb_build_object('content_id','ds','season',1,'episode',1)));
+  select count(*) into n from public.watched_items where user_id=g and content_id='ds';
+  assert n = 1, format('only s1e1 deleted; expected 1 episode left, got %s', n);
+  assert exists (select 1 from public.watched_items where user_id=g and content_id='ds' and episode=2),
+    's1e2 must survive';
+
+  -- A pull must not resurrect the deleted rows.
+  assert not exists (select 1 from public.sync_pull_watched_items(1,1,900) where content_id='dm'),
+    'deleted movie must not reappear in a pull';
+
+  select count(*) into del_events from public.watched_items_events where user_id=g and operation='delete';
+  assert del_events = 2, format('expected 2 delete events (movie + s1e1), got %s', del_events);
+
+  raise notice 'watched_items delete OK';
+end $$;

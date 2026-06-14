@@ -148,3 +148,41 @@ create or replace function public.sync_pull_watched_items_delta(
 $$;
 revoke all     on function public.sync_pull_watched_items_delta(int, bigint, int) from public, anon;
 grant  execute on function public.sync_pull_watched_items_delta(int, bigint, int) to authenticated;
+
+-- 7. Delete: p_profile_id is FIRST (client arg order). p_keys = array of OBJECTS
+--    {content_id, season?, episode?} (season/episode OMITTED => SQL NULL => matches movie rows).
+--    Match with IS NOT DISTINCT FROM (R6). Append a delete event per removed row with the deleted
+--    row's real content_type and zeroed watched_at (R7).
+create or replace function public.sync_delete_watched_items_for(
+  p_owner uuid, p_profile_id int, p_keys jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare e jsonb; r record;
+begin
+  if p_owner is null or p_keys is null then return; end if;     -- R4
+  for e in select value from jsonb_array_elements(p_keys) as t(value) loop
+    for r in
+      delete from public.watched_items wi
+      where wi.user_id = p_owner and wi.profile_id = p_profile_id
+        and wi.content_id = e->>'content_id'
+        and wi.season  is not distinct from nullif(e->>'season','')::int
+        and wi.episode is not distinct from nullif(e->>'episode','')::int
+      returning wi.content_id, wi.content_type, wi.season, wi.episode
+    loop
+      insert into public.watched_items_events(
+        user_id, profile_id, operation, content_id, content_type, title, season, episode, watched_at)
+      values (p_owner, p_profile_id, 'delete', r.content_id, r.content_type, '', r.season, r.episode, 0);
+    end loop;
+  end loop;
+end $$;
+
+create or replace function public.sync_delete_watched_items(
+  p_profile_id int, p_keys jsonb
+) returns void language sql security definer set search_path = '' as $$
+  select public.sync_delete_watched_items_for(
+    nullif(public.get_sync_owner(),'')::uuid, p_profile_id, p_keys)
+$$;
+
+-- 7b. Function ACLs: lock the inner _for fn, expose only the wrapper to members.
+revoke all on function public.sync_delete_watched_items_for(uuid, int, jsonb) from public, anon, authenticated;
+revoke all     on function public.sync_delete_watched_items(int, jsonb) from public, anon;
+grant  execute on function public.sync_delete_watched_items(int, jsonb) to authenticated;
