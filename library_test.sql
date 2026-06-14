@@ -132,3 +132,80 @@ begin
   ), 'offset paging must not overlap (R8 stable order)';
   raise notice 'library paging OK';
 end $$;
+
+-- ============ library: function ACLs + NULL-owner + RLS read-own ============
+do $$
+begin
+  assert not has_function_privilege('authenticated', 'public.sync_push_library_for(uuid,int,jsonb)', 'EXECUTE'),
+    'push _for must NOT be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_push_library(jsonb,int)', 'EXECUTE'),
+    'push wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_pull_library(int,int,int)', 'EXECUTE'),
+    'pull wrapper must be executable by authenticated';
+  raise notice 'library ACLs OK';
+end $$;
+
+-- RLS read-own.
+do $$
+declare a uuid := 'aaaaaaaa-cccc-aaaa-aaaa-aaaaaaaaaaaa';
+        b uuid := 'bbbbbbbb-cccc-bbbb-bbbb-bbbbbbbbbbbb';
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+  perform public.test_login(a);
+  perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+    'content_id','rls_la','content_type','movie','name','A','poster_shape','POSTER',
+    'genres', jsonb_build_array(), 'added_at', 1)), 1);
+  perform public.test_login(b);
+  perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+    'content_id','rls_lb','content_type','movie','name','B','poster_shape','POSTER',
+    'genres', jsonb_build_array(), 'added_at', 1)), 1);
+  perform public.test_login(a);
+end $$;
+set local role authenticated;
+do $$
+begin
+  assert (select count(*) from public.library where content_id='rls_lb') = 0,
+    'RLS must hide member B''s library from A';
+  assert (select count(*) from public.library where content_id='rls_la') >= 1, 'A must see its own library';
+  raise notice 'library RLS read-own OK';
+end $$;
+reset role;
+
+-- NULL-owner safety (R4).
+do $$
+declare before_rows int; after_rows int;
+begin
+  perform public.test_logout();
+  select count(*) into before_rows from public.library;
+  perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+    'content_id','n','content_type','movie','name','N','poster_shape','POSTER',
+    'genres', jsonb_build_array(), 'added_at', 1)), 1);
+  select count(*) into after_rows from public.library;
+  assert after_rows = before_rows, 'anon push must not change row count';
+  assert not exists (select 1 from public.library where user_id is null), 'no NULL-user_id rows';
+  assert (select count(*) from public.sync_pull_library(1, 500, 0)) = 0, 'anon pull must be empty';
+  raise notice 'library NULL-owner OK';
+end $$;
+
+-- ============ library: idempotent re-apply preserves data ============
+do $$
+declare s uuid := 'ffffffff-cccc-ffff-ffff-ffffffffffff';
+begin
+  insert into auth.users(id) values (s) on conflict do nothing;
+  perform public.test_login(s);
+  perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+    'content_id','idemp','content_type','movie','name','SENT','poster_shape','POSTER',
+    'genres', jsonb_build_array('G'), 'added_at', 9)), 1);
+end $$;
+
+-- re-apply the whole setup mid-test (comment kept off the \i line — see Task 8 note).
+\i library_setup.sql
+
+do $$
+declare s uuid := 'ffffffff-cccc-ffff-ffff-ffffffffffff';
+begin
+  perform public.test_login(s);
+  assert (select count(*) from public.library where user_id=s and content_id='idemp') = 1,
+    're-applying setup must PRESERVE existing rows';
+  raise notice 'library idempotency OK';
+end $$;
