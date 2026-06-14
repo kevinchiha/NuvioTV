@@ -166,3 +166,32 @@ create or replace function public.sync_pull_watch_progress_delta(
 $$;
 revoke all     on function public.sync_pull_watch_progress_delta(int, bigint, int) from public, anon;
 grant  execute on function public.sync_pull_watch_progress_delta(int, bigint, int) to authenticated;
+
+-- 7. Delete: p_keys = array of plain progress_key strings (R6). Append a delete event per removed row.
+create or replace function public.sync_delete_watch_progress_for(
+  p_owner uuid, p_profile_id int, p_keys jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare k text;
+begin
+  if p_owner is null or p_keys is null then return; end if;     -- R4
+  for k in select value from jsonb_array_elements_text(p_keys) as t(value) loop
+    delete from public.watch_progress
+      where user_id = p_owner and profile_id = p_profile_id and progress_key = k;
+    if found then
+      insert into public.watch_progress_events(user_id, profile_id, operation, progress_key)
+        values (p_owner, p_profile_id, 'delete', k);
+    end if;
+  end loop;
+end $$;
+
+create or replace function public.sync_delete_watch_progress(
+  p_keys jsonb, p_profile_id int
+) returns void language sql security definer set search_path = '' as $$
+  select public.sync_delete_watch_progress_for(
+    nullif(public.get_sync_owner(),'')::uuid, p_profile_id, p_keys)
+$$;
+
+-- 7b. Function ACLs: lock the inner _for fn, expose only the wrapper to members.
+revoke all on function public.sync_delete_watch_progress_for(uuid, int, jsonb) from public, anon, authenticated;
+revoke all     on function public.sync_delete_watch_progress(jsonb, int) from public, anon;
+grant  execute on function public.sync_delete_watch_progress(jsonb, int) to authenticated;

@@ -207,3 +207,37 @@ begin
 
   raise notice 'watch_progress delta pull OK';
 end $$;
+
+-- ============ watch_progress: delete (R6 string-key array; delete events; no resurrection) ============
+do $$
+declare g uuid := '88888888-8888-8888-8888-888888888888';
+        n int; del_events int;
+begin
+  insert into auth.users(id) values (g) on conflict do nothing;
+  perform public.test_login(g);
+
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(
+      jsonb_build_object('content_id','d1','content_type','movie','video_id','d1',
+        'position',1,'duration',9,'last_watched',1,'progress_key','d1'),
+      jsonb_build_object('content_id','d2','content_type','movie','video_id','d2',
+        'position',1,'duration',9,'last_watched',1,'progress_key','d2')), 1);
+
+  -- p_keys is an array of PLAIN STRINGS (not objects) for watch_progress (R6).
+  perform public.sync_delete_watch_progress(jsonb_build_array('d1'), 1);
+
+  select count(*) into n from public.watch_progress where user_id=g;
+  assert n = 1, format('after delete, expected 1 row, got %s', n);
+  assert not exists (select 1 from public.watch_progress where user_id=g and progress_key='d1'),
+    'deleted key must be gone';
+
+  -- A delete event is appended so other devices converge (and the row does not resurrect on pull).
+  select count(*) into del_events
+    from public.watch_progress_events where user_id=g and operation='delete' and progress_key='d1';
+  assert del_events = 1, format('expected 1 delete event, got %s', del_events);
+  assert not exists (
+    select 1 from public.sync_pull_watch_progress(1, null, null) where progress_key='d1'
+  ), 'deleted key must not reappear in a pull';
+
+  raise notice 'watch_progress delete OK';
+end $$;
