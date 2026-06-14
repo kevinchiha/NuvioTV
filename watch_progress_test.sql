@@ -150,3 +150,27 @@ begin
 
   raise notice 'watch_progress pull OK';
 end $$;
+
+-- ============ watch_progress: delta cursor (R5 coalesce, never NULL) ============
+do $$
+declare z uuid := '55555555-5555-5555-5555-555555555555';
+        c1 bigint; c2 bigint; v_max bigint;
+begin
+  insert into auth.users(id) values (z) on conflict do nothing;
+  perform public.test_login(z);
+
+  -- Brand-new member, zero events: MUST return 0 (not NULL — client decodes a non-null Long).
+  select public.sync_get_watch_progress_delta_cursor(1) into c1;
+  assert c1 = 0, format('empty cursor must be 0, got %s', c1);
+
+  -- After a push, the cursor equals this owner's own max event_id (not a global/foreign value).
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(jsonb_build_object(
+      'content_id','c','content_type','movie','video_id','c',
+      'position',1,'duration',10,'last_watched',1,'progress_key','c')), 1);
+  select public.sync_get_watch_progress_delta_cursor(1) into c2;
+  select max(event_id) into v_max from public.watch_progress_events where user_id=z;
+  assert c2 = v_max, format('cursor must equal owner max event_id %s, got %s', v_max, c2);
+
+  raise notice 'watch_progress delta cursor OK';
+end $$;

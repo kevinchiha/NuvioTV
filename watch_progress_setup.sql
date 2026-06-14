@@ -134,3 +134,15 @@ create or replace function public.sync_pull_watch_progress(
 $$;
 revoke all     on function public.sync_pull_watch_progress(int, bigint, int) from public, anon;
 grant  execute on function public.sync_pull_watch_progress(int, bigint, int) to authenticated;
+
+-- 5. Delta cursor: latest event_id for THIS owner, COALESCE'd to 0 (R5) — the client decodes a
+--    non-null Long, and watched-items (plan 2) has no client-side fallback, so a NULL would crash.
+create or replace function public.sync_get_watch_progress_delta_cursor(p_profile_id int)
+  returns bigint language sql security definer set search_path = '' as $$
+  select coalesce(max(event_id), 0)
+  from public.watch_progress_events
+  where user_id = nullif(public.get_sync_owner(),'')::uuid          -- R1
+    and profile_id = p_profile_id
+$$;
+revoke all     on function public.sync_get_watch_progress_delta_cursor(int) from public, anon;
+grant  execute on function public.sync_get_watch_progress_delta_cursor(int) to authenticated;
