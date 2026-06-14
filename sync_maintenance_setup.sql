@@ -21,3 +21,31 @@ end $$;
 revoke all on function public.prune_sync_events(int) from public, anon, authenticated;
 -- Suggested schedule (run manually on prod once pg_cron is available):
 --   select cron.schedule('prune_sync_events_daily', '30 4 * * *', $$ select public.prune_sync_events(180) $$);
+
+-- 2. get_sync_overview (§7). Owner-scoped per-profile row counts as a single jsonb object decoded by
+--    SyncOverviewResponse (addons/plugins/library_items/watch_progress/watched_items: {profileId->count};
+--    profiles: {profileIndex->{name,color}}). addons/plugins are empty ({}) — member_addon owns addons,
+--    plugins are global. Member-facing + doubles as a §8 detection probe. NULL owner => all-empty object.
+--    `language sql` => all referenced tables must exist at CREATE time (apply after Plan-1/2/3 data setups).
+create or replace function public.get_sync_overview()
+  returns jsonb language sql security definer set search_path = '' as $$
+  with o as (select nullif(public.get_sync_owner(),'')::uuid as uid)
+  select jsonb_build_object(
+    'addons',  '{}'::jsonb,
+    'plugins', '{}'::jsonb,
+    'library_items', coalesce((
+      select jsonb_object_agg(profile_id::text, n) from (
+        select l.profile_id, count(*) n from public.library l, o where l.user_id = o.uid group by l.profile_id) s), '{}'::jsonb),
+    'watch_progress', coalesce((
+      select jsonb_object_agg(profile_id::text, n) from (
+        select w.profile_id, count(*) n from public.watch_progress w, o where w.user_id = o.uid group by w.profile_id) s), '{}'::jsonb),
+    'watched_items', coalesce((
+      select jsonb_object_agg(profile_id::text, n) from (
+        select wi.profile_id, count(*) n from public.watched_items wi, o where wi.user_id = o.uid group by wi.profile_id) s), '{}'::jsonb),
+    'profiles', coalesce((
+      select jsonb_object_agg(profile_index::text, jsonb_build_object('name', name, 'color', avatar_color_hex)) from (
+        select p.profile_index, p.name, p.avatar_color_hex from public.profiles p, o where p.user_id = o.uid) s), '{}'::jsonb)
+  )
+$$;
+revoke all     on function public.get_sync_overview() from public, anon;
+grant  execute on function public.get_sync_overview() to authenticated;
