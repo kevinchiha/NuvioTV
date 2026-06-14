@@ -51,3 +51,45 @@ revoke insert, update, delete, truncate, references, trigger
   on public.watched_items, public.watched_items_events from anon, authenticated;
 revoke select on public.watched_items, public.watched_items_events from anon;
 grant  select on public.watched_items, public.watched_items_events to authenticated;
+
+-- 3. Push: explicit-owner inner fn + thin JWT-resolving wrapper. R2 watched_at-guarded upsert;
+--    append an event ONLY when the row changed. R4 NULL-owner no-op.
+create or replace function public.sync_push_watched_items_for(
+  p_owner uuid, p_profile_id int, p_items jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare e jsonb; v_changed boolean;
+begin
+  if p_owner is null or p_items is null then return; end if;
+  for e in select value from jsonb_array_elements(p_items) as t(value) loop
+    insert into public.watched_items as wi(
+      user_id, profile_id, content_id, content_type, title, season, episode, watched_at)
+    values (
+      p_owner, p_profile_id, e->>'content_id', e->>'content_type', coalesce(e->>'title',''),
+      nullif(e->>'season','')::int, nullif(e->>'episode','')::int, (e->>'watched_at')::bigint)
+    on conflict (user_id, profile_id, content_id, season, episode) do update
+      set content_type=excluded.content_type, title=excluded.title,
+          watched_at=excluded.watched_at, updated_at=now()
+      where excluded.watched_at > wi.watched_at                  -- R2 guard ("strictly newer")
+    returning true into v_changed;
+
+    if v_changed then                                            -- NULL (no row) => not changed
+      insert into public.watched_items_events(
+        user_id, profile_id, operation, content_id, content_type, title, season, episode, watched_at)
+      values (p_owner, p_profile_id, 'upsert', e->>'content_id', e->>'content_type',
+        coalesce(e->>'title',''), nullif(e->>'season','')::int, nullif(e->>'episode','')::int,
+        (e->>'watched_at')::bigint);
+    end if;
+  end loop;
+end $$;
+
+create or replace function public.sync_push_watched_items(
+  p_items jsonb, p_profile_id int
+) returns void language sql security definer set search_path = '' as $$
+  select public.sync_push_watched_items_for(
+    nullif(public.get_sync_owner(),'')::uuid, p_profile_id, p_items)
+$$;
+
+-- 3b. Function ACLs (inner _for revoked from members; wrapper is the only member-facing entry).
+revoke all on function public.sync_push_watched_items_for(uuid, int, jsonb) from public, anon, authenticated;
+revoke all     on function public.sync_push_watched_items(jsonb, int) from public, anon;
+grant  execute on function public.sync_push_watched_items(jsonb, int) to authenticated;
