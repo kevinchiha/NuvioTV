@@ -246,3 +246,76 @@ begin
 
   raise notice 'watched_items delete OK';
 end $$;
+
+-- ============ watched_items: function ACLs ============
+do $$
+begin
+  assert not has_function_privilege('authenticated',
+    'public.sync_push_watched_items_for(uuid,int,jsonb)', 'EXECUTE'),
+    'push _for must NOT be executable by authenticated';
+  assert not has_function_privilege('authenticated',
+    'public.sync_delete_watched_items_for(uuid,int,jsonb)', 'EXECUTE'),
+    'delete _for must NOT be executable by authenticated';
+
+  assert has_function_privilege('authenticated', 'public.sync_push_watched_items(jsonb,int)', 'EXECUTE'),
+    'push wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_pull_watched_items(int,int,int)', 'EXECUTE'),
+    'pull wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_get_watched_items_delta_cursor(int)', 'EXECUTE'),
+    'cursor wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_pull_watched_items_delta(int,bigint,int)', 'EXECUTE'),
+    'delta wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_delete_watched_items(int,jsonb)', 'EXECUTE'),
+    'delete wrapper must be executable by authenticated';
+
+  raise notice 'watched_items ACLs OK';
+end $$;
+
+-- ============ watched_items: RLS read-own (D — defense-in-depth) ============
+do $$
+declare a uuid := 'aaaaaaaa-bbbb-aaaa-aaaa-aaaaaaaaaaaa';
+        b uuid := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+  perform public.test_login(a);
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','rls_a','content_type','movie','title','A','season',null,'episode',null,'watched_at',1)), 1);
+  perform public.test_login(b);
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','rls_b','content_type','movie','title','B','season',null,'episode',null,'watched_at',1)), 1);
+  perform public.test_login(a);
+end $$;
+
+set local role authenticated;
+do $$
+declare foreign_n int; own_n int;
+begin
+  select count(*) into foreign_n from public.watched_items where content_id='rls_b';
+  assert foreign_n = 0, 'RLS must hide member B''s rows from A on a direct table read';
+  select count(*) into own_n from public.watched_items where content_id='rls_a';
+  assert own_n >= 1, 'A must see its OWN row under RLS';
+  raise notice 'watched_items RLS read-own OK';
+end $$;
+reset role;
+
+-- ============ watched_items: NULL-owner safety (R4) ============
+do $$
+declare before_rows int; after_rows int; cur bigint;
+begin
+  perform public.test_logout();   -- no JWT => get_sync_owner() is NULL
+  select count(*) into before_rows from public.watched_items;
+
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','n','content_type','movie','title','N','season',null,'episode',null,'watched_at',1)), 1);
+  perform public.sync_delete_watched_items(1, jsonb_build_array(jsonb_build_object('content_id','n')));
+
+  select count(*) into after_rows from public.watched_items;
+  assert after_rows = before_rows, 'anon push/delete must not change row count';
+  assert not exists (select 1 from public.watched_items where user_id is null), 'no NULL-user_id rows';
+
+  assert (select count(*) from public.sync_pull_watched_items(1, 1, 900)) = 0, 'anon pull must be empty';
+  select public.sync_get_watched_items_delta_cursor(1) into cur;
+  assert cur = 0, format('anon cursor must be 0, got %s', cur);
+
+  raise notice 'watched_items NULL-owner OK';
+end $$;
