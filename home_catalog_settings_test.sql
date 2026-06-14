@@ -68,3 +68,73 @@ begin
 
   raise notice 'home_catalog_settings push/pull OK';
 end $$;
+
+-- ============ home_catalog_settings: function ACLs + NULL-owner + RLS read-own ============
+do $$
+begin
+  assert not has_function_privilege('authenticated', 'public.sync_push_home_catalog_settings_for(uuid,int,jsonb,text)', 'EXECUTE'),
+    'push _for must NOT be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_push_home_catalog_settings(int,jsonb,text)', 'EXECUTE'),
+    'push wrapper must be executable by authenticated';
+  assert has_function_privilege('authenticated', 'public.sync_pull_home_catalog_settings(int,text)', 'EXECUTE'),
+    'pull wrapper must be executable by authenticated';
+  raise notice 'home_catalog_settings ACLs OK';
+end $$;
+
+-- RLS read-own.
+do $$
+declare a uuid := 'aaaaaaaa-1111-dddd-aaaa-aaaaaaaaaaaa';
+        b uuid := 'bbbbbbbb-1111-dddd-bbbb-bbbbbbbbbbbb';
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+  perform public.test_login(a);
+  perform public.sync_push_home_catalog_settings(1, jsonb_build_object('k','rls_a'), 'tv');
+  perform public.test_login(b);
+  perform public.sync_push_home_catalog_settings(1, jsonb_build_object('k','rls_b'), 'tv');
+  perform public.test_login(a);
+end $$;
+set local role authenticated;
+do $$
+begin
+  assert (select count(*) from public.home_catalog_settings where settings_json->>'k'='rls_b') = 0,
+    'RLS must hide member B''s settings from A';
+  assert (select count(*) from public.home_catalog_settings where settings_json->>'k'='rls_a') >= 1,
+    'A must see its own settings';
+  raise notice 'home_catalog_settings RLS read-own OK';
+end $$;
+reset role;
+
+-- NULL-owner safety (R4).
+do $$
+declare before_rows int; after_rows int;
+begin
+  perform public.test_logout();
+  select count(*) into before_rows from public.home_catalog_settings;
+  perform public.sync_push_home_catalog_settings(1, jsonb_build_object('k','n'), 'tv');
+  select count(*) into after_rows from public.home_catalog_settings;
+  assert after_rows = before_rows, 'anon push must not change row count';
+  assert not exists (select 1 from public.home_catalog_settings where user_id is null), 'no NULL-user_id rows';
+  assert (select count(*) from public.sync_pull_home_catalog_settings(1,'tv')) = 0, 'anon pull must be empty';
+  raise notice 'home_catalog_settings NULL-owner OK';
+end $$;
+
+-- ============ home_catalog_settings: idempotent re-apply preserves data ============
+do $$
+declare s uuid := 'ffffffff-1111-dddd-ffff-ffffffffffff';
+begin
+  insert into auth.users(id) values (s) on conflict do nothing;
+  perform public.test_login(s);
+  perform public.sync_push_home_catalog_settings(1, jsonb_build_object('k','idemp'), 'tv');
+end $$;
+
+-- re-apply the whole setup mid-test (comment kept off the \i line).
+\i home_catalog_settings_setup.sql
+
+do $$
+declare s uuid := 'ffffffff-1111-dddd-ffff-ffffffffffff';
+begin
+  perform public.test_login(s);
+  assert (select count(*) from public.home_catalog_settings where user_id=s and platform='tv') = 1,
+    're-applying setup must PRESERVE existing rows';
+  raise notice 'home_catalog_settings idempotency OK';
+end $$;
