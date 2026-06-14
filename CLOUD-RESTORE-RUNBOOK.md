@@ -6,7 +6,7 @@ covers deploying the server schema (Plans 1–3) to the live KevBox Supabase pro
 
 ## Objects deployed (all bare upstream names; disjoint from `member_*`/`kevbox_*`)
 
-- Foundation: `get_sync_owner()`
+- Foundation: `get_sync_owner()` (**canary-gated**, closed by default) + `sync_canary_members` allowlist table
 - Plan 1: `watch_progress`, `watch_progress_events` + 5 RPCs
 - Plan 2: `watched_items`, `watched_items_events` + 5 RPCs; `library` + 2 RPCs
 - Plan 3: `collections` + 2 RPCs; `home_catalog_settings` + 2 RPCs; `profile_settings_blob` + 2 RPCs;
@@ -16,7 +16,7 @@ covers deploying the server schema (Plans 1–3) to the live KevBox Supabase pro
 
 Apply `*_setup.sql` in this order against the **live** project (e.g. `psql "$LIVE_DB_URL" -f <file>`):
 
-1. `get_sync_owner_setup.sql`
+1. `get_sync_owner_setup.sql`  ← also creates `sync_canary_members`; the gate is **closed by default** (empty allowlist ⇒ no member syncs ⇒ zero blast radius)
 2. `watch_progress_setup.sql`
 3. `watched_items_setup.sql`
 4. `library_setup.sql`
@@ -28,15 +28,47 @@ Apply `*_setup.sql` in this order against the **live** project (e.g. `psql "$LIV
 
 > All setups are idempotent (`create … if not exists` / `create or replace`). Re-running is safe.
 
-## Canary path (mitigates fleet-wide blast radius)
+## Canary path (single-member rollout via the allowlist gate)
 
-Applying the setups flips restore **on** fleet-wide at each member's next `FullAccount` emission; there
-is **no** per-member flag. Before fleet-wide enable:
+`get_sync_owner()` is **closed by default**: it returns a member's real owner id **only** if that
+member's `auth.uid()` is in `public.sync_canary_members`, else `NULL`. Every sync RPC derives its owner
+from `nullif(get_sync_owner(),'')::uuid`, so a `NULL` owner makes every pull empty, every push a no-op,
+and `sync_pull_profiles()` **empty** (no synth default → the client skips `replaceAllProfiles` → local
+profiles preserved). A non-allowlisted member therefore behaves **exactly like today** (RPCs effectively
+off). The allowlist is `NULL`-returning, never `''` — the client's `getEffectiveUserId` does
+`decodeAs<String>()` into a non-nullable String, so `NULL` throws there and falls back identically to
+today's RPC-absent path; `''` would decode to a bogus non-null owner.
 
-1. Deploy to the **branch DB** and run the full SQL suite green (see Verification).
-2. Build a **single canary** full-flavor APK pointed at the live project, sideload to ONE test TV,
-   and run T-E2E (play → clear data → re-login → confirm restore).
-3. Only then apply the setups to the live project for the fleet.
+`sync_canary_members` has RLS on and **no grants** to `anon`/`authenticated` — a member cannot read it or
+self-allowlist. Only an operator with DB access (or the `SECURITY DEFINER` resolver itself) touches it.
+
+**Procedure:**
+
+1. **Apply all `*_setup.sql` to live prod in the deploy order above.** With the allowlist empty this has
+   **zero blast radius** — nobody syncs, every member is unchanged at next app start.
+2. **Allowlist only the canary TV's member** (the operator's own Supabase auth user id — find it in
+   `auth.users` or the JWT `sub`):
+   ```
+   insert into public.sync_canary_members(user_id) values ('<YOUR_AUTH_UID>') on conflict do nothing;
+   ```
+3. **On the canary TV:** play something → clear app data → re-login → confirm continue-watching, history,
+   library, collections, settings, and profiles all restore. **Only the allowlisted member syncs**; the
+   rest of the fleet is untouched.
+4. **PANIC / ABORT** (instantly inert, no client action):
+   ```
+   truncate public.sync_canary_members;
+   ```
+   Only the canary member was ever affected, and the `sync_pull_profiles` empty-when-none fix means even
+   they are not wiped. (You can also `delete from public.sync_canary_members where user_id = '<UID>'`.)
+5. **FLEET-WIDE ENABLE** — only after the canary T-E2E passes. Either:
+   - **Cleanest:** replace the resolver with the ungated form and reload:
+     ```
+     create or replace function public.get_sync_owner() returns text
+       language sql security definer set search_path = '' as $$ select auth.uid()::text $$;
+     ```
+     (then `sync_canary_members` becomes dormant — it can be left in place or dropped), **or**
+   - insert every member's `user_id` into `sync_canary_members` (keeps the gate as a live kill-switch:
+     `truncate` to disable sync fleet-wide again).
 
 ## Verification (after any deploy — branch or live)
 
@@ -47,11 +79,15 @@ is **no** per-member flag. Before fleet-wide enable:
      get_sync_owner_setup.sql watch_progress_setup.sql watched_items_setup.sql library_setup.sql \
      collections_setup.sql home_catalog_settings_setup.sql profile_settings_blob_setup.sql profiles_setup.sql \
      sync_maintenance_setup.sql \
+     get_sync_owner_test.sql sync_canary_test.sql \
      watch_progress_test.sql watched_items_test.sql library_test.sql \
      collections_test.sql home_catalog_settings_test.sql profile_settings_blob_test.sql profiles_test.sql \
      sync_maintenance_test.sql
    ```
-   Expect `ALL SYNC SQL TESTS PASSED`. Do NOT run the `*_test.sql` files via raw `psql -f` in autocommit —
+   Expect `ALL SYNC SQL TESTS PASSED`. `sync_canary_test.sql` proves the gate: a logged-in but
+   non-allowlisted member resolves `owner=NULL`, gets empty pulls / no-op pushes / **empty
+   `sync_pull_profiles`** (no wipe), while an allowlisted member round-trips. (`test_login` allowlists
+   its member, so the rest of the suite exercises the gate-open path.) Do NOT run the `*_test.sql` files via raw `psql -f` in autocommit —
    they rely on the runner's per-file transaction rollback (their `test_login` GUC is transaction-local and
    their first push would otherwise commit seed rows to the branch).
 2. **RPC probe (detection signal — branch OR live):**
@@ -80,8 +116,14 @@ Run the matching `*_teardown.sql` in REVERSE dependency order:
 `sync_maintenance_teardown.sql`, `profiles_teardown.sql`, `profile_settings_blob_teardown.sql`,
 `home_catalog_settings_teardown.sql`, `collections_teardown.sql`, `library_teardown.sql`,
 `watched_items_teardown.sql`, `watch_progress_teardown.sql` (leave `get_sync_owner` unless fully
-reverting). **Teardown DROPS the stored rows** — any data written during the canary/live window is lost.
+reverting; `get_sync_owner_teardown.sql` drops `sync_canary_members` **together with** the resolver, and
+only when no `sync_*` dependents remain — dropping the table while the resolver survived would make it
+raise `42P01`). **Teardown DROPS the stored rows** — any data written during the canary/live window is lost.
 Dropping the RPCs reverts every member to local-only at next start, no client update needed.
+
+> **Reach for `truncate public.sync_canary_members` first** — it disables sync instantly with no DDL and
+> no data loss, and (unlike teardown) cannot break the resolver. Teardown is the heavier, data-destructive
+> revert; the allowlist truncate is the fast kill-switch.
 
 > **Panic note:** because restore failures are silent and fail-soft per-subsystem (except the un-guarded
 > `sync_pull_profiles`, which must never error — it returns empty when the member has no cloud profiles),
