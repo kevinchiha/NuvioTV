@@ -40,16 +40,30 @@ is **no** per-member flag. Before fleet-wide enable:
 
 ## Verification (after any deploy — branch or live)
 
-1. **RPC probe (detection signal):**
+1. **Correctness suite (branch only — the strongest signal):** run the full Plan 1+2+3 ASSERT suite via
+   the runner (it wraps each `*_test.sql` in its own `begin … rollback`, so fixtures never persist):
+   ```
+   ./run_sync_tests.sh \
+     get_sync_owner_setup.sql watch_progress_setup.sql watched_items_setup.sql library_setup.sql \
+     collections_setup.sql home_catalog_settings_setup.sql profile_settings_blob_setup.sql profiles_setup.sql \
+     sync_maintenance_setup.sql \
+     watch_progress_test.sql watched_items_test.sql library_test.sql \
+     collections_test.sql home_catalog_settings_test.sql profile_settings_blob_test.sql profiles_test.sql \
+     sync_maintenance_test.sql
+   ```
+   Expect `ALL SYNC SQL TESTS PASSED`. Do NOT run the `*_test.sql` files via raw `psql -f` in autocommit —
+   they rely on the runner's per-file transaction rollback (their `test_login` GUC is transaction-local and
+   their first push would otherwise commit seed rows to the branch).
+2. **RPC probe (detection signal — branch OR live):**
    - Branch: `psql "$SYNC_TEST_DB_URL" -v ON_ERROR_STOP=1 -f sync_test_helpers.sql -f probe_sync_rpcs.sql`
    - Live: edit `probe_sync_rpcs.sql` — remove the `insert into auth.users` line and replace
      `test_login(m)` with a real test member's claims, e.g.
      `select set_config('request.jwt.claims', '{"sub":"<REAL_MEMBER_UUID>"}', true);` — then run it.
      It is wrapped in `begin … rollback`, so nothing commits.
    Expect `PROBE OK …`.
-2. **Contract drift check (per §11):** on every upstream merge, diff `core/sync/*SyncService.kt` +
+3. **Contract drift check (per §11):** on every upstream merge, diff `core/sync/*SyncService.kt` +
    `SupabaseModels.kt` against the deployed `*_setup.sql` and re-run the probe. Add this to `UPSTREAM-SYNC.md`.
-3. **Live regression (T-REG):** confirm `get_access_verdict` / `claim_device` / `member_addon` apply /
+4. **Live regression (T-REG):** confirm `get_access_verdict` / `claim_device` / `member_addon` apply /
    `record_heartbeat` still behave, and that `get_sync_owner` did not pre-exist before deploy.
 
 ## Retention (R10)
@@ -72,3 +86,14 @@ Dropping the RPCs reverts every member to local-only at next start, no client up
 > **Panic note:** because restore failures are silent and fail-soft per-subsystem (except the un-guarded
 > `sync_pull_profiles`, which must never error — it auto-synthesizes a default), dropping a single
 > subsystem's RPCs cleanly disables just that subsystem.
+
+## Known gaps (out of cloud-restore scope — not drift)
+
+- **Profile-PIN write RPCs are unimplemented server-side.** `ProfileSyncService` calls
+  `set_profile_pin` / `verify_profile_pin` / `clear_profile_pin`, which do not exist in any `*_setup.sql`
+  and are intentionally outside this effort's contract — cloud-restore delivers only the read-side
+  `sync_pull_profile_locks` (so it can RESTORE pin state, not write it). The client fail-soft catches their
+  absence. Consequence: until those RPCs are built, `profile_locks` is never populated and
+  `sync_pull_profile_locks` always restores empty (no PIN). This is expected — do NOT treat the missing
+  RPCs as a probe/contract failure (the probe correctly does not call them). Implementing the PIN write
+  path is a separate workstream.
