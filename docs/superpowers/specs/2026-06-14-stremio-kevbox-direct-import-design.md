@@ -1,9 +1,20 @@
 # Stremio → KevBox Direct Import (Trakt-free) — Design Spec
 
-**Date:** 2026-06-14 (**rev 3** — same day; revised after a multi-agent gap analysis verified every load-bearing claim against ground truth)
-**Status:** Design approved → ready for implementation **planning**, **BUT** two merge-safety blockers (§9) and one write-path preflight (§7.3) must clear before the canary commit.
+**Date:** 2026-06-14 (**rev 4** — same day; revised after a SECOND multi-agent gap analysis (34 confirmed findings) verified Plan 1's code + the merge-safety runbook against ground truth)
+**Status:** Design approved → Plan 1 in implementation. **rev-4 CRITICAL:** §9.4 Option A as written in rev 3 is **mechanically broken** — a passive "open the app once" does NOT push watched_items/library, so the canary's safety sequence was void. Corrected Option A (forced push via Account "sync now" + survival-verify; library handled with `--no-library`) is the interim canary path; **Option B (the client union patch) is now a hard prerequisite before fleet-wide C1** (decided 2026-06-14: do BOTH — A for the canary now, B before the ~320). The §7.3 EXECUTE preflight remains a hard go/no-go.
 **Depends on:** [`2026-06-14-cloud-restore-design.md`](./2026-06-14-cloud-restore-design.md) — **now DEPLOYED to live prod** (`scmqdptagksltnwiveyh`) with the canary allowlist gate. Its §4/§5 RPC contract, §8 gating, and the `get_sync_owner` **canary gate** are all load-bearing here. (Note: "proven end-to-end on the operator's TV" is **pending** per operator memory — on-device E2E is a gating step, not done; §13.)
 **Code lives in:** `~/projects/trakt-stremio-import` (a patched fork of `aliyss/trakt-stremio-import`).
+
+> **rev 4 — what changed and why.** A second multi-agent gap analysis (49 agents; 34 confirmed findings, 6 refuted) audited **Plan 1's actual code + the canary runbook** against ground truth. The converter / SQL write-contract / TS layers came back **sound** (decode, `_for` arg order, idempotency, kill-switch, PII all confirmed). The danger was concentrated in the merge-safety mechanism. Changes:
+> 1. **§9.4 Option A was mechanically broken (CRITICAL).** rev 3 claimed "open the app once → device pushes watch_progress + watched_items + library → `lastSuccessfulPushMs > 0` for each." Ground truth: the watched_items startup push fires only inside `if (lastSuccessfulPushMs > 0L)` (`WatchedItemsPreferences.kt:242`), so on a never-synced device it self-blocks and the flag stays `0`; **library has no `lastSuccessfulPushMs` concept at all** (`LibraryPreferences.kt:109-124`) and no startup push — it is structurally REPLACE-not-union and **cannot be protected by sequencing, ever.** Corrected Option A uses an **explicit forced push** (Account "sync now" → `AccountViewModel.kt:579-580`, which DOES set the flag for watched_items) + a survival-verify, and mandates **`--no-library`** for any member with a local library. Option B (client union patch) elevated to a fleet prerequisite. (§9.4)
+> 2. **`--commit` self-allowlists then imports in one shot (HIGH)** — no code enforcement of the push-first ordering, so one bare `--commit` re-opens the silent-loss path. CLI now splits allowlisting out of import and refuses to seed a merge-sensitive member without proof the device already pushed. (§9.4, §11, §12)
+> 3. **Movie watched signal too narrow (MEDIUM)** — `flaggedWatched===1` only drops finished movies that the legacy importer counts via `flaggedWatched || (lastWatched && timesWatched>0)` (`sync.ts:133-138`). Broadened. (§6.2)
+> 4. **Cinemeta episode-set drift silently blanks a whole show (MEDIUM)** — `constructAndResize` returns an all-zero bitfield (no throw) when the serialized `lastVideoId` is absent from the rebuilt episode list; indistinguishable from genuinely-0-watched. Add a `lastVideoId`-presence check + loud per-show warning + `bitfieldDriftIds`. (§6.2)
+> 5. **§13 source-vs-dest reconciliation was never actually computed (MEDIUM)** — the CLI printed source `library.length` and converter-echo stats and dest counts in separate modes; none reconcile. Now computed per-subsystem. (§13)
+> 6. **Trakt-exclusion + §12 fail-fast handlers were prose-only (MEDIUM)** — added a programmatic Trakt-connected precheck and PG error-code branching (42501 → §7.3 GRANT, 42883 → not-deployed). (§10/§14, §12)
+> 7. **Running `--commit` on Kevin (the live cloud-restore canary) is hazardous** — he is already allowlisted with `deltaInitialized=true`, so the preserve-path doesn't apply and his delta event log/cursor would be polluted. Do NOT use Kevin as the import canary. (§10)
+>
+> Full rev-4 ledger folded into the sections below; rev-3 ledger (A1–A18) retained in Appendix A.
 
 > **rev 3 — what changed and why.** A 26-agent gap analysis read the actual SQL / Kotlin / TS and adversarially re-checked each finding. The mechanical contract (§5 RPC names/arg-order, `_for(owner, profile_id, payload)`, `progress_key` format, ms/epoch-ms units, the canary gate, client gating) is **CONFIRMED** — implementation-ready. The danger is concentrated in §9. Changes:
 > 1. **§9 merge corrected — rev 2's central safety claim was wrong for two of three subsystems.** `watch_progress` restore IS non-destructive (the rev-2 trace holds). But **`watched_items` and `library` client restore are wholesale REPLACE, not a union**, and their local-preservation is gated behind `lastSuccessfulPushMs > 0` — which is exactly `0` for the never-synced backfill cohort. So importing silently wipes a member's KevBox-only watched items / saved titles on first pull, reported as success. This is a **hard blocker** with required fixes (§9). The active-17 merge-sensitive members are precisely the exposed cohort.
@@ -144,11 +155,12 @@ Emit when `state.timeOffset > 0 && state.duration > 0` and not the junk case (`p
 > Stremio **source** count, not just the echoed server count, so this under-import is visible.
 
 ### 6.2 watched_items — every watched movie + episode
-- movie: emit iff `state.flaggedWatched === 1` → `{content_id:_id, content_type:"movie", title:name, season:null, episode:null, watched_at}`
+- movie: emit iff **`state.flaggedWatched === 1` OR (`state.lastWatched` present AND `state.timesWatched > 0`)** (**rev 4** — match the legacy two-signal rule `sync.ts:133-138`; `timesWatched` exists at `stremio.ts:227`. A finished movie with `timesWatched>0` but `flaggedWatched!==1` would otherwise be dropped from BOTH watched_items here AND continue-watching, since §6.1's `timeOffset>0` gate also excludes it — total silent omission) → `{content_id:_id, content_type:"movie", title:name, season:null, episode:null, watched_at}`
 - series: decode `state.watched` via `stremio-watched-bitfield`. **rev 3 — NOT a verbatim reuse of `convert.ts:116-137`** (that function is `async` + fetches Cinemeta, and returns Trakt-shaped season objects). Instead:
   1. `kevbox.ts` fetches the Cinemeta meta and builds `episodeList` (id`:`season`:`number triples, cf. `convert.ts:102-114`) and the bitfield `wb` (`watchedBitfield.constructAndResize`, `convert.ts:129-135`), then **passes them into the converter** (keeps it network-free).
   2. The converter **iterates the Cinemeta `episodeList` directly** and emits a row for every `wb.getVideo(\`${_id}:${season}:${number}\`)` that is truthy → `{content_id:_id, content_type:"series", title:name, season, episode:number, watched_at}`.
   3. **Do NOT bound the season loop by `parseInt(state.watched.split(':')[1])`** (the legacy `convert.ts:161-167` pattern) — for non-numeric id namespaces (`kitsu:…`, `mal:…`) that is `NaN`, the loop runs zero times, and **the entire show's watched episodes are silently dropped.** Iterating `episodeList` avoids this entirely.
+  4. **rev 4 — Cinemeta episode-set drift silently blanks a whole show (MEDIUM, must detect).** `watchedBitfield.constructAndResize(serialized, episodeList)` returns a **totally blank** bitfield (no throw) when the serialized `lastVideoId` is **absent** from the rebuilt `episodeList` (`watchedBitfield.js:34` indexOf → `:41` `lastVideoIdx === -1` → `:48-51` returns a fresh all-zero buffer). This happens whenever Cinemeta's current episode list has drifted from the one Stremio serialized against (old/long-running/anime-renumbered shows) → **every watched mark for that show is silently dropped, indistinguishable from genuinely-0-watched.** `kevbox.ts` MUST parse the serialized `lastVideoId` and check `episodeList.indexOf(lastVideoId) !== -1`; if absent, **log a loud per-show warning and surface `bitfieldDriftIds: string[]`** in `ConvertStats` so the operator audits it (do NOT silently emit `[]`).
 - `watched_at` = parsed `state.lastWatched`, fallback `Date.now()`. (Fallback OK here: the merge is a union and `watched_at` is benign metadata; the server `where excluded.watched_at > wi.watched_at` guard prevents a stale value regressing a fresher one and never un-watches.)
 
 ### 6.3 library — saved titles *(toggleable, default on)*
@@ -271,22 +283,42 @@ No `lastSuccessfulPushMs` protection. So a local-only saved KevBox title not in 
 on the next pull. Less severe than 9.2 only because the **cloud** keeps the union (server push is upsert with
 no delete, `library_setup.sql:33,56`), so a later pull re-hydrates — but on-device it is lost in between.
 
-### 9.4 Required fix (decide in planning — gates the canary)
+### 9.4 Required fix — **rev 4: Option A corrected + Option B mandated (decided: do BOTH)**
 The exposed cohort is exactly the **never-synced backfill members** (the active-17, especially the 6
-merge-sensitive). Two viable fixes:
+merge-sensitive). rev 3 offered two fixes; rev 4's audit found **Option A as written does not work** and corrects it.
 
-- **(A) Operational sequencing — no client change.** Per merge-sensitive member: **allowlist → have them open
-  the app once** (the device pushes its existing watched_items + library to cloud, setting
-  `lastSuccessfulPushMs > 0`; the empty-remote pull is harmless) → **then run the import** (additive on top via
-  `_for`) → next app start unions correctly. A per-member two-touch sequence; fine for ~6 members; the C1
-  ~320 are clean (no local history) so unaffected.
-- **(B) Scoped client patch — robust, revises the no-client-changes non-goal.** Make `replaceWithRemoteItems`
-  and `LibraryPreferences.mergeRemoteItems` **union when `lastSuccessfulPushMs == 0`** (the exact guard
-  `watch_progress` already has). Removes the sequencing fragility fleet-wide. Requires a client release.
+- **(A) Operational sequencing — CORRECTED, no client change (interim canary path).**
+  rev-3's "open the app once → device pushes everything → `lastSuccessfulPushMs > 0` for each subsystem" is **FALSE**:
+  - *watched_items:* the startup push fires only when `preservedLocalItems==true`, set **only inside**
+    `if (lastSuccessfulPushMs > 0L)` (`WatchedItemsPreferences.kt:242`; gated push at `StartupSyncService.kt:505-511`)
+    — a chicken-and-egg: a never-synced device (`==0`) skips the block, never pushes, `markPushSucceeded()` is
+    never reached (`WatchedItemsSyncService.kt:162-163`), and the flag **stays `0`.** A passive open is a **no-op.**
+  - *library:* there is **no `lastSuccessfulPushMs` concept and no startup push at all** (`LibraryPreferences.kt:109-124`;
+    the only library push is `LibraryRepositoryImpl.pushToRemote()` via `triggerRemoteSync()` on a local mutation,
+    gated on `hasCompletedInitialPull`) — **library cannot be protected by sequencing, period.**
 
-**Recommendation:** (A) for the canary now (no release needed), and adopt (B) before fleet-wide C1 if any
-non-trivial fraction of the ~320 turn out to have pre-existing local history. Either way, the §10 canary
-on-device check **must explicitly verify watched_items + library survival**, not just continue-watching.
+  **Corrected Option A, per merge-sensitive member:**
+  1. **Force a push from the device** via the Account screen's **"sync now"** action
+     (`AccountViewModel.kt:579-580` → `watchedItemsSyncService.pushToRemote()`, which DOES set the flag,
+     `WatchedItemsSyncService.kt:121-125,162-163`). A passive app-open is insufficient.
+  2. **Verify survival:** confirm a known local watched mark is still present after one pull (`--verify-only`
+     shows non-zero watched_items) — proof `lastSuccessfulPushMs > 0` took **before** any import seeds the cloud.
+  3. **Import with `--no-library`** for any member with local saved titles (library is unprotectable; with
+     `--no-library` the empty-remote pull keeps local intact, `LibraryPreferences.kt:112-114`). Stremio saved
+     titles are simply not backfilled for these members (acceptable interim cost; Option B fixes it properly).
+  4. Then run the import (additive watch_progress + watched_items via `_for`); next app start unions correctly.
+
+  Fine for ~6 members; the C1 ~320 are clean (no local history) so unaffected.
+
+- **(B) Scoped client UNION patch — robust, MANDATED before fleet-wide C1.** Make `WatchedItemsPreferences.replaceWithRemoteItems`
+  **and** `LibraryPreferences.mergeRemoteItems` **UNION local with remote when the device is never-synced**
+  (watched_items: `lastSuccessfulPushMs == 0`; library: add an equivalent first-pull guard — **none exists today**).
+  Removes the sequencing fragility fleet-wide and is the **only** thing that protects library. Requires a KevBox
+  client release (rebuild + sideload to TVs). Built as a separate Kotlin plan (see §16/§17).
+
+**Decision (2026-06-14): do BOTH** — corrected Option A for the immediate canary (no release), Option B shipped
+before enabling C1 for the ~320. Either way, the §10 canary on-device check **must explicitly verify
+watched_items + library survival**, not just continue-watching.
 
 ## 10. Already-active backfill cohort (the 17)
 
@@ -322,16 +354,30 @@ were Trakt-migrated (live `trakt_accesstoken`), and `karimassad` is in the activ
 connected, §2 gating keeps `shouldUseSupabaseWatchProgressSync()` **false**, so the import will **not** restore
 → a misleading canary that reads back as "didn't work." Either exclude them, or make **Trakt-disconnect a hard
 prerequisite step before their backfill** (and verify the flag flips, `TraktAuthDataStore.clearAuth()` →
-`:39-40,92,165-180`).
+`:39-40,92,165-180`). **rev 4: this is now a programmatic precheck** — the CLI reads the vaulted `accounts/*.json`
+`trakt_accesstoken` and **refuses to commit** a Trakt-connected member unless `--allow-trakt-connected` is passed
+(prose-only enforcement was a one-slip hazard for `karimassad`, who is in the active-17).
 
-**Canary-first sequencing:**
+**⚠️ rev 4 — do NOT use Kevin (the operator) as the import canary.** Kevin is the already-deployed cloud-restore
+canary: allowlisted, with `deltaInitialized=true`. The §9.2 preserve-path lives only in the `!deltaInitialized`
+snapshot branch (`WatchedItemsSyncService.kt:244-265`), so it does **not** apply to him — a `--commit` on Kevin
+would not exercise the merge-safety path the canary is meant to validate, and would inject a burst of import-dated
+upserts into his live delta event log / cursor (`watched_items_setup.sql:75-81`), with any older `watched_at`
+silently no-op'd by the R2 guard. Pick a *different* merge-sensitive member. (Row 1 of the §10 snapshot is Kevin.)
+
+**Canary-first sequencing (rev 4 — corrected for Option A):**
 1. **Preflight (§7.3 EXECUTE query) — go/no-go.**
-2. Build the import core + CLI (§4); resolve the §9.4 merge fix (A or B).
-3. **Allowlist + `--dry-run` then `--commit`** ONE merge-sensitive member (most-watched, **not** Trakt-connected) →
-   verify on the real TV: continue-watching/history/**watched-marks**/**saved library** restored, **no lost
-   local history (watch_progress, watched_items AND library), no regressed positions.**
-4. Backfill the remaining 15 (the other 5 merge-sensitive, then the 10 clean).
-5. **Only then** build/enable the C1 poller for the ~320 future switchers.
+2. Build the import core + CLI (§4) with the §9.4 corrected-Option-A guards (forced-push precondition,
+   `--no-library` for library-bearing members, allowlist split out of `--commit`, Trakt precheck).
+3. Pick ONE merge-sensitive, **non-Trakt**, **non-Kevin** member (most-watched). **Force a device push** (Account
+   "sync now") → `--verify-only` shows their CURRENT watched_items non-zero (proof the device pushed before any seed).
+4. **Allowlist** them, then **`--dry-run` → `--commit --no-library`** (drop `--no-library` only if they have no local
+   saved titles) → verify on the real TV: continue-watching/history/**watched-marks** restored AND **all prior local
+   watch_progress + watched_items survived**, no regressed positions. (Library survival is only guaranteed once
+   Option B ships — until then library-bearing members run `--no-library`.)
+5. Backfill the remaining 15 (the other 5 merge-sensitive, then the 10 clean).
+6. **Ship Option B** (client union patch) and confirm library survival on-device.
+7. **Only then** build/enable the C1 poller for the ~320 future switchers.
 
 ## 11. Operator workflow, dry-run & idempotency
 
@@ -348,9 +394,12 @@ prerequisite step before their backfill** (and verify the flag flips, `TraktAuth
 
 ## 12. Error handling
 
-- **RPC not deployed:** `404`/`PGRST202` → fail-fast "cloud-restore schema not deployed" → exit non-zero.
-- **`_for` EXECUTE denied (new):** permission-denied on the first `_for` call → fail-fast "poller role lacks
-  EXECUTE on `_for` (run §7.3 preflight / add GRANT)" → exit non-zero. (Loud, not silent.)
+- **RPC not deployed:** over the admin `pg` connection a missing function raises **SQLSTATE `42883`** (NOT a
+  PostgREST `404`/`PGRST202` — the importer writes via node-`pg`, §7.3, not REST). rev 4: `pushBatched` MUST branch
+  on `(e as any).code === '42883'` → fail-fast "cloud-restore schema not deployed / wrong `_for` signature" → exit non-zero.
+- **`_for` EXECUTE denied (new):** **SQLSTATE `42501`** on the first `_for` call → fail-fast "poller role lacks
+  EXECUTE on `_for` (run §7.3 preflight / add GRANT)" → exit non-zero. (rev 4: the generic batch-error wrapper MUST
+  branch on the SQLSTATE — a raw "permission denied for function …" string would otherwise be misdiagnosed. Loud, not silent.)
 - **Member not allowlisted (new, gate-aware):** because the `_for` write is gate-independent, do **not** infer
   this from a push no-op. Check membership explicitly **before verify**:
   `select exists(select 1 from public.sync_canary_members where user_id = :owner)`. The runner allowlists
@@ -361,6 +410,9 @@ prerequisite step before their backfill** (and verify the flag flips, `TraktAuth
   email+pass, §7.1.)
 - **0-item library for a known-active account (new):** `datastoreGet` returning `[]` is a *successful* empty —
   do NOT mark `done`. If the member is known-active (has watch_seconds), treat 0 items as `failed` + alert.
+  (rev 4: the **manual CLI** blanket-throws on ANY 0-item library — loud and fine for an attended run. The
+  *activity-aware* distinction, `watch_seconds>0 ⇒ failed` else successful-empty, is a **Plan-2 poller** concern;
+  Plan 2 must NOT inherit the manual blanket-throw verbatim.)
 - **Auth failure:** distinguish Stremio login vs KevBox auth failure.
 - **Cinemeta lookup blip:** failed episode-list fetch logs a warning, skips that show's *episodes*
   (continue-watching + movie rows still go); re-run later to fill.
@@ -372,13 +424,20 @@ prerequisite step before their backfill** (and verify the flag flips, `TraktAuth
 ## 13. Verification
 
 After `--commit`, read back the three subsystems (via `sync_pull_*` if the member is allowlisted, else the
-**base tables** over the admin connection) and report counts. **Also compare against the Stremio SOURCE
-counts** — the converter legitimately drops some rows (finished titles §6.1, Cinemeta blips), so source-vs-dest
-reconciliation is the only way under-import is visible; server counts alone would just echo the converter's own
-output. **Server read = ground truth — never claim success from the push log.** A `--verify-only` mode runs
-just this. For MERGE-SENSITIVE members, verification is **on-device** (the TV): confirm existing KevBox
-continue-watching, **watched-marks, and saved library all survived** and nothing regressed (§10 step 3).
-**On-device E2E of the cloud-restore canary is still pending per operator memory — it gates fleet-wide.**
+**base tables** over the admin connection) and report counts. **rev 4 — reconciliation must be COMPUTED, not
+eyeballed.** rev 3 said "compare against the Stremio SOURCE counts," but the CLI never produced a comparable
+source denominator (it printed raw `library.length` = movies+series+removed+temp, converter-echo stats, and a
+dest count in separate modes — none reconcile). The converter MUST emit **per-subsystem source counts** in
+`ConvertStats` (`sourceMidPlay`, `sourceWatchedMovies`, `sourceSaved`, plus `bitfieldDriftIds` §6.2) and the CLI
+MUST print an explicit reconciliation line per subsystem — `wp: source=N converted=M dest=K (Δ)`. The converter
+legitimately drops rows (finished titles §6.1, Cinemeta blips/drift §6.2), so a **large negative Δ is a warning**
+(mirror §12's 0-item rule), not silent success. For `--verify-only` to reconcile it must accept `--authkey`/
+`--email` to fetch the source side (it currently returns before any Stremio fetch). **Server read = ground truth
+— never claim success from the push log.** For MERGE-SENSITIVE members, verification is **on-device** (the TV):
+confirm existing KevBox continue-watching, **watched-marks, and saved library all survived** and nothing regressed
+(§10). Note `verifyCounts` counts the whole owner partition and R2 strictly-newer guards mean a successful merge
+may not raise counts by the pushed amount — capture **pre/post** counts and assert `after >= before` rather than
+"counts increased." **On-device E2E of the cloud-restore canary is still pending per operator memory — it gates fleet-wide.**
 
 ## 14. Trakt deprecation & the existing Trakt users
 
@@ -401,8 +460,13 @@ continue-watching, **watched-marks, and saved library all survived** and nothing
   whole show is NOT dropped (episodeList iteration, not `split(':')[1]`); (c) item with **empty/absent
   `state.lastWatched` and missing `_ctime`** → assert no `NaN` reaches any payload (drop for watch_progress,
   fallback for watched_items/library); (d) finished title (`timeOffset` cleared) → assert it yields a
-  watched_items row but no watch_progress row. Assert exact `progress_key` strings, ms units, "season/episode
-  resolves to NULL" (not a specific encoding).
+  watched_items row but no watch_progress row. **rev 4 additions:** (e) movie with `flaggedWatched=0` but
+  `timesWatched>0` + non-empty `lastWatched` → assert a watched_items row IS emitted (the §6.2 OR-rule); (f)
+  series whose injected episode list has **drifted** (serialized `lastVideoId` absent from the rebuilt list) →
+  assert the show's id appears in `bitfieldDriftIds` and is NOT silently emitted as 0-watched; (g)
+  **season-0/specials** decode → assert the season>0-then-season==0 ordering yields correct watched ids. Assert
+  exact `progress_key` strings, ms units, "season/episode resolves to NULL" (not a specific encoding), and the
+  per-subsystem source counts in `ConvertStats`.
 - **Integration (dry-run):** `--dry-run` against a real member's library; verify counts/shapes + source-vs-dest.
 - **End-to-end:** allowlist + `--commit` + on-device restore against a real prod **merge-sensitive** member
   (not Trakt-connected). The branch DB remains available for converter integration tests that don't need a device.
@@ -412,30 +476,37 @@ continue-watching, **watched-marks, and saved library all survived** and nothing
 
 ## 16. Deliverables
 
-- `src/utils/convert-kevbox.ts` (pure, episodeList injected), `src/utils/kevbox.ts` (gate-aware, Cinemeta
-  fetch, base-table verify), `src/kevbox-import.ts` (CLI), `src/kevbox-poller.ts` + `scripts/kevbox_poller.sh`.
+- `src/utils/watched-decode.ts` (pure bitfield decoder, isolated), `src/utils/convert-kevbox.ts` (pure,
+  episodeList injected; emits per-subsystem source counts + `bitfieldDriftIds` §6.2/§13), `src/utils/kevbox.ts`
+  (gate-aware, Cinemeta fetch with drift detection, base-table verify, PG error-code branching §12), `src/kevbox-import.ts`
+  (CLI: source-vs-dest reconciliation, `--no-library`, Trakt precheck, allowlist split from `--commit`),
+  `src/kevbox-poller.ts` + `scripts/kevbox_poller.sh`.
 - `member_stremio_creds` vault table (RLS, no app grants, **encrypted email+password**) + a loader to populate creds.
 - **Poller ops (rev 3):** journal with `attempts` + dead-letter; **monitoring/alert on `status='failed'`** and on
   members with a `member_device` row but no `done` import; a **re-snapshot sweep at poller launch** (cohort drift).
 - `scripts/kevbox_import.sh` wrapper + `~/.config/stremio-kevbox-migration/app.env` convention.
 - `/stremio-kevbox-migration` skill (SKILL.md + scripts + references), replacing the Trakt skill; deprecation note.
-- Converter unit tests + fixtures (incl. the §15 rev-3 cases).
-- **(Pending §9.4 decision)** the scoped client merge-safety patch (option B) if chosen.
+  (rev 4: this is a **Plan-2** deliverable — Plan 1 ships `KEVBOX-IMPORT.md` + the canary runbook instead.)
+- Converter unit tests + fixtures (incl. the §15 rev-3 + rev-4 cases: movie OR-rule, season-0/specials decode, bitfield drift).
+- **(rev 4 — DECIDED, no longer pending §9.4)** the scoped **client UNION patch (Option B)** is a committed
+  deliverable — a separate Kotlin plan against `~/projects/NuvioTV`, **required before fleet-wide C1**; ships via `./release.sh` + sideload.
 - Pointer note in the `trakt-stremio-import` repo linking to this spec; the §10 backfill-cohort operational file.
 
 ## 17. Build & rollout order
 
 0. **Preflight (§7.3): prove `_for` EXECUTE on the poller connection — hard go/no-go.**
-1. **Import core + CLI** (`convert-kevbox.ts` pure + injected episodeList, `kevbox.ts`, `kevbox-import.ts`) +
-   converter unit tests (§15).
-2. **Resolve §9.4** (merge-safety fix A or B) — required before any merge-sensitive commit.
-3. **Canary:** allowlist + `--commit` ONE merge-sensitive, non-Trakt member → on-device verify all three
-   subsystems survive (§10 step 3).
-4. **Backfill the other 15** active members (manual CLI; Trakt-disconnect first for `karimassad`).
-5. **Creds vault** (encrypted email+pass) + loader; pre-load for the ~320 not-yet-active members.
-6. **C1 poller** on persovps (journal + alerts + re-snapshot sweep) → enable for the first-login tail; adopt
-   §9.4 option B before fleet-wide if pre-existing local history is common.
-7. **Deprecate** the Trakt skill once the KevBox path is proven on the fleet.
+1. **Import core + CLI** (`watched-decode.ts`, `convert-kevbox.ts` pure + injected episodeList + source counts,
+   `kevbox.ts` with drift detection + PG error-code branching, `kevbox-import.ts` with reconciliation + `--no-library`
+   + Trakt precheck + allowlist-split) + converter unit tests (§15).
+2. **§9.4 corrected Option A guards in the CLI** (forced-push precondition, library handling) — required before any
+   merge-sensitive commit. (Option A is the interim; Option B is step 6.)
+3. **Canary:** force a device push → allowlist + `--commit --no-library` ONE merge-sensitive, **non-Trakt, non-Kevin**
+   member → on-device verify watch_progress + watched_items survive (§10).
+4. **Backfill the other 15** active members (manual CLI; `--no-library` for library-bearing; Trakt-disconnect first for `karimassad`).
+5. **Option B client union patch** (separate Kotlin plan) → `./release.sh` + sideload → confirm library survival on-device. **Required before C1.**
+6. **Creds vault** (encrypted email+pass) + loader; pre-load for the ~320 not-yet-active members. (Plan 2)
+7. **C1 poller** on persovps (journal + alerts + re-snapshot sweep) → enable for the first-login tail **only after Option B is live**. (Plan 2)
+8. **Deprecate** the Trakt skill once the KevBox path is proven on the fleet.
 
 ## 18. Locked decisions
 
@@ -452,14 +523,19 @@ continue-watching, **watched-marks, and saved library all survived** and nothing
 - **Sequencing: manually backfill the 17 FIRST (canary on a merge-sensitive, non-Trakt member, §10), THEN
   enable C1 for the ~320 tail.**
 - **Vault stores encrypted email+password** (not authKey-only) — enables unattended re-login (rev 3).
-- **Merge-safety (rev 3):** `watch_progress` restore is non-destructive; **`watched_items` + `library` are
-  REPLACE-not-union** and MUST be made safe (§9.4 option A or B) before backfilling any member with local
-  history. The canary on-device check validates all three subsystems.
+- **Merge-safety (rev 4):** `watch_progress` restore is non-destructive; **`watched_items` + `library` are
+  REPLACE-not-union**. **rev-3 Option A as written was mechanically broken** (a passive "open the app" never
+  pushes → `lastSuccessfulPushMs` stays 0). Corrected Option A = **forced push (Account "sync now") +
+  survival-verify**, with **`--no-library`** for members with local saved titles (library is unprotectable by
+  sequencing). **DECISION (2026-06-14): do BOTH** — corrected Option A for the canary now, **Option B (client
+  union patch) before fleet-wide C1.** The canary on-device check validates watch_progress + watched_items
+  (library survival once Option B ships).
 
 ## 19. Open decisions for planning
 
-- **§9.4 merge fix:** option (A) operational sequencing (no client change) vs (B) scoped client union patch.
-  Recommend A for canary, B before fleet-wide if pre-existing local history is common.
+- ~~**§9.4 merge fix:** option A vs B~~ **RESOLVED (rev 4): do BOTH** — corrected Option A (forced push +
+  survival-verify, `--no-library`) for the canary; Option B (client union patch) mandated before fleet-wide C1.
+  rev-3 Option A was found mechanically broken (passive open never pushes); see §9.4.
 - **Vault encryption mechanics** — column-level pgcrypto vs app-side encrypt with `KEVBOX_ENC_KEY` before insert.
   (The store-email+pass-vs-authKey question is now DECIDED: store encrypted email+pass, §18.)
 - **Poller cadence + first-login detection** — delta-since-last-tick vs "all pending with a row"; confirm the
@@ -501,3 +577,29 @@ re-checked. Severities are post-adversarial.
 - **A18 (false positive, killed) — "claim_device never fires for capped members"**: a slot-consumed member already HAS a row from their genuine first login. Residual (poller-delta / cohort drift) folded into §7.1.
 
 **CONFIRMED solid (no change needed):** public + `_for` RPC arg names/order (`p_profile_id` second); all payload keys read by the bodies; `progress_key` `_sNeM` matches the client; ms/epoch-ms units; `content_type` strings; library column defaults; `get_sync_owner` closed-by-default + `sync_canary_members` location; every wrapper owner-gates push/pull; `_for` gate-independent; client gating + Trakt-disconnect flip; cohort SQL columns (`watch_seconds`); exactly seven `sync_push_*_for`.
+
+---
+
+## Appendix B — rev-4 gap-analysis ledger (49 agents; 34 confirmed, 6 refuted)
+
+Second audit, targeting **Plan 1's code + the canary runbook** against ground truth. Severities post-adversarial.
+
+**CRITICAL (silent data loss)**
+- **B1 — Option A "open the app once" never pushes watched_items/library** → `lastSuccessfulPushMs` stays 0 → first pull REPLACEs local → silent loss reported as success. `WatchedItemsPreferences.kt:242` (preserve gated), `StartupSyncService.kt:505-511` (push gated on `preservedLocalItems`), `LibraryPreferences.kt:109-124` (no flag, no startup push). Folded into §9.4/§10/§13/§18.
+
+**HIGH**
+- **B2 — library unprotectable by sequencing** (no `lastSuccessfulPushMs` concept at all); needs `--no-library` or Option B. Folded into §9.4/§6.3/§10.
+- **B3 — `--commit` self-allowlists + imports in one shot**, no push-first enforcement → re-opens B1 from the CLI. Folded into §9.4/§11/§12/§18.
+
+**MEDIUM**
+- **B4 — movie watched_items dropped unless `flaggedWatched===1`** (ignores legacy `flaggedWatched || (lastWatched && timesWatched>0)`, `sync.ts:133-138`; `timesWatched` at `stremio.ts:227`). Folded into §6.2/§15.
+- **B5 — Cinemeta episode-set drift silently blanks a whole show** (`constructAndResize` returns all-zero when serialized `lastVideoId` absent, `watchedBitfield.js:34,41,48-51`). Folded into §6.2/§13/§15.
+- **B6 — §13 source-vs-dest reconciliation never computed** (no comparable source denominator; modes don't reconcile). Folded into §13/§6.1.
+- **B7 — Trakt-connected exclusion prose-only** (no precheck); `karimassad` in active-17. Folded into §10/§14.
+- **B8 — §12 fail-fast handlers prose-only** (`pushBatched` wraps all errors generically; must branch SQLSTATE 42501/42883). Folded into §12.
+
+**LOW / INFO (folded into Plan 1, not spec-level):** B9 known-active 0-item nuance → Plan-2; B10 converter `Date.now()` purity; B11 `meta?.meta?.videos` guard; B12 season-0 decode test; B13 `verifyCounts` pre/post snapshot + `after>=before`; B14 library `name` guard; B15 `/stremio-kevbox-migration` skill is Plan-2 (Plan 1 ships `KEVBOX-IMPORT.md`); B16 archive path contained.
+
+**Completeness-critic angles (carried to Plan 2 / ops):** import-vs-device snapshot race (operator-paced, non-atomic window); `deltaInitialized=true` defeats the preserve-path for already-synced members (incl. **Kevin**); `--commit` on Kevin pollutes his delta cursor; watched_items volume × serial Cinemeta fetch (no rate-limit/timeout budget for a heavy series watcher); no transaction around the three `_for` pushes (partial-batch leaves half-merged state); `getLibrary` single unbounded `all:true` fetch (no truncation guard).
+
+**Refuted (6, not folded):** movie-wp omits season/episode keys (correct — NULL-collapses, no `0` ever emitted); commit-no-prepush-snapshot (server path is upsert-only/no-delete, the §9.2 loss is client-side on-device by design and caught by step-6 on-device verify); series colon-split (correct for tt + kitsu); `auth.users` readable by the importer's `postgres` role (the documented constraint is on the downstream `kevbox_admin`, not the importer); Task 0 `:5432` port pinned (no real bug; node-`pg` uses unnamed extended-protocol queries).
