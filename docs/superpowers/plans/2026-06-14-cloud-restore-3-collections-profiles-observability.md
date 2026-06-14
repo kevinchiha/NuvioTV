@@ -4,7 +4,7 @@
 
 **Goal:** Deploy the remaining cloud-restore subsystems — `collections`, `home_catalog_settings`, `profile_settings_blob`, `profiles`/`profile_locks` (spec §5.4/§5.5) — plus the observability/maintenance layer (`prune_sync_events` retention R10, `get_sync_overview` row-count probe §7, a post-deploy RPC-probe script §9, and a deployment runbook §10) so a reinstalled/fresh KevBox TV fully restores its collections, settings, and profiles **with zero client changes**, and so fleet-wide go-live is gated by a detection signal + canary path + runbook.
 
-**Architecture:** Identical owner-scoped pattern to Plans 1 & 2 — every data RPC resolves the caller via the shared `get_sync_owner()` (deployed in Plan 1), is `SECURITY DEFINER set search_path = ''` with an explicit `user_id = nullif(get_sync_owner(),'')::uuid` predicate, and mutating RPCs are thin JWT-resolving wrappers over EXECUTE-revoked explicit-owner inner `*_for(p_owner uuid, …)` functions. Plan-3-specific twists: (1) **collections/home-catalog/profile-settings are snapshot JSON-blob tables** — `*_json` columns are `jsonb` stored **verbatim** (a stringified blob breaks the kotlinx `JsonObject`/`JsonElement` decode); pulls return a `SETOF` the client takes `firstOrNull()` of, and an **empty set is valid**. (2) **`profiles` is the single highest-risk object** — `sync_pull_profiles()` is **no-arg** and called **un-guarded** as the first statement of the startup restore (`StartupSyncService.kt:369`); ANY error it raises aborts the entire broad restore, so it must **never error** and always return a decodable row with a non-null `profile_index` (auto-synthesizing a default `profile_index = 1` row when the member has none). (3) The profile registry keys on **`profile_index`** (not `profile_id`); data-table `profile_id` columns are plain ints, **not** FK'd to `profiles`.
+**Architecture:** Identical owner-scoped pattern to Plans 1 & 2 — every data RPC resolves the caller via the shared `get_sync_owner()` (deployed in Plan 1), is `SECURITY DEFINER set search_path = ''` with an explicit `user_id = nullif(get_sync_owner(),'')::uuid` predicate, and mutating RPCs are thin JWT-resolving wrappers over EXECUTE-revoked explicit-owner inner `*_for(p_owner uuid, …)` functions. Plan-3-specific twists: (1) **collections/home-catalog/profile-settings are snapshot JSON-blob tables** — `*_json` columns are `jsonb` stored **verbatim** (a stringified blob breaks the kotlinx `JsonObject`/`JsonElement` decode); pulls return a `SETOF` the client takes `firstOrNull()` of, and an **empty set is valid**. (2) **`profiles` is the single highest-risk object** — `sync_pull_profiles()` is **no-arg** and called **un-guarded** as the first statement of the startup restore (`StartupSyncService.kt:369`); ANY error it raises aborts the entire broad restore, so it must **never error** — but it returns an **empty** set when the member has no stored profiles, **not** a synthesized default: the client calls `replaceAllProfiles(...)` on any non-empty pull, so a synth default would WIPE local profiles on the first sync. Empty decodes to an empty list (never raises), so the un-guarded pull still does not abort. (3) The profile registry keys on **`profile_index`** (not `profile_id`); data-table `profile_id` columns are plain ints, **not** FK'd to `profiles`.
 
 **Tech Stack:** PostgreSQL 15+ (Supabase; branch + prod are PG17), PostgREST RPC. Tests are `psql` assertion scripts run against the **disposable Supabase branch DB** already provisioned for Plans 1–2 (`SYNC_TEST_DB_URL` in the gitignored `.supabase_db.env`, session-mode pooler). Reuses the Plan-1/2 harness verbatim: `run_sync_tests.sh` + `sync_test_helpers.sql` (`test_login`/`test_logout`), each `*_test.sql` wrapped in `begin … rollback`.
 
@@ -993,7 +993,8 @@ Create `profiles_setup.sql`:
 -- KevBox TV — profiles + profile_locks cloud restore. Run ONCE AFTER get_sync_owner_setup.sql AND the
 -- Plan-1/2 setups (sync_delete_profile_data, added later in this file, references those tables). Idempotent.
 -- Spec §5.5. KEY COLUMN IS profile_index (NOT profile_id). Highest-risk: sync_pull_profiles() is the
--- un-guarded startup pull — it must never error and always return a non-null profile_index row.
+-- un-guarded startup pull — it must never error (empty is fine; it must not RAISE). Returns stored
+-- profiles, EMPTY when none — must NOT synth a default (client replaceAllProfiles-on-non-empty wipes local).
 
 -- 1. Tables.
 create table if not exists public.profiles (
@@ -1044,7 +1045,7 @@ git commit -m "feat(sync): profiles + profile_locks schema (profile_index key, R
 
 ---
 
-## Task 8: `sync_pull_profiles` (no-arg, auto-default, never-error) + `sync_pull_profile_locks`
+## Task 8: `sync_pull_profiles` (no-arg, empty-when-none, never-error) + `sync_pull_profile_locks`
 
 **Files:**
 - Modify: `profiles_setup.sql`
@@ -1055,42 +1056,45 @@ git commit -m "feat(sync): profiles + profile_locks schema (profile_index key, R
 Append to `profiles_test.sql`:
 
 ```sql
--- ============ profiles: pull (no-arg, auto-default, never-error; R1; R7 non-null profile_index) ============
--- T-PROFILE (§5.5): a brand-new member with ZERO profiles rows must still get a decodable row with a
--- non-null profile_index, or the un-guarded startup pull aborts the entire broad restore.
+-- ============ profiles: pull (no-arg, EMPTY-when-none, never-error; R1; R7 shape) ============
+-- T-PROFILE (§5.5): the un-guarded startup pull must NEVER error (empty is allowed). It returns the
+-- member's STORED profiles, or EMPTY when they have none — it must NOT synth a default row, because the
+-- client (ProfileSyncService.pullFromRemote) calls profileDataStore.replaceAllProfiles(...) on ANY
+-- non-empty pull, REPLACING the whole local profile set; a synth default would WIPE a member's local
+-- profiles down to one blank profile on the first post-deploy sync (which pulls BEFORE any push). Empty
+-- decodes to an empty list (never raises), so the broad restore does not abort.
 do $$
 declare nw uuid := '11111111-1111-aaaa-aaaa-111111111111';
         a  uuid := '22222222-2222-aaaa-aaaa-222222222222';
         b  uuid := '33333333-3333-aaaa-aaaa-333333333333';
-        n int; v_idx int; v_shape text;
+        n int; v_shape text;
 begin
   insert into auth.users(id) values (nw),(a),(b) on conflict do nothing;
 
-  -- brand-new member: no stored rows => exactly ONE synthesized default profile_index=1.
+  -- brand-new member (no stored rows) => EMPTY (NOT a synth default). A non-empty pull here would make
+  -- the client replaceAllProfiles() and wipe the member's local profiles; empty preserves them.
   perform public.test_login(nw);
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 1, format('brand-new member must get 1 synthesized default profile, got %s', n);
-  select profile_index into v_idx from public.sync_pull_profiles();
-  assert v_idx = 1, format('synthesized default profile_index must be 1, got %s', v_idx);
+  assert n = 0, format('brand-new member must get 0 rows (a synth default would wipe local profiles via replaceAllProfiles), got %s', n);
 
-  -- with stored rows present, returns them (no synthesized default). Seed via direct INSERT (the
-  -- *_test.sql runs as the connection owner, which bypasses the authenticated-only DML revoke) so this
-  -- task is independently red->green without depending on sync_push_profiles (added in Task 9).
+  -- with stored rows present, returns exactly them. Seed via direct INSERT (the *_test.sql runs as the
+  -- connection owner, which bypasses the authenticated-only DML revoke) so this task is independently
+  -- red->green without depending on sync_push_profiles (added in Task 9).
   insert into public.profiles(user_id, profile_index, name, avatar_color_hex, uses_primary_addons, uses_primary_plugins)
   values (nw, 1, 'Main', '#111111', true, false),
          (nw, 2, 'Kids', '#222222', false, false);
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 2, format('with stored rows, must return 2 profiles (no synth default), got %s', n);
+  assert n = 2, format('with stored rows, must return exactly the 2 stored profiles, got %s', n);
   assert exists (select 1 from public.sync_pull_profiles() where profile_index=2 and name='Kids'), 'stored profile must round-trip';
 
-  -- R1: member B (no profiles) gets only its own synthesized default, never A's rows.
+  -- R1: member B (no profiles) gets ZERO rows, never A's rows (and no synth default to wipe B's local).
   perform public.test_login(b);
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 1, format('B must see only its own synth default, got %s', n);
+  assert n = 0, format('B with no stored profiles must get 0 rows, got %s', n);
   assert not exists (select 1 from public.sync_pull_profiles() where name='Kids'), 'B must not see A''s profiles';
 
-  -- R7 wire-shape: exact SupabaseProfile emitted set (11 keys).
-  perform public.test_login(a);
+  -- R7 wire-shape: exact SupabaseProfile emitted set (11 keys). Checked against nw, who HAS stored rows.
+  perform public.test_login(nw);
   select string_agg(k, ',' order by k) into v_shape
   from ( select jsonb_object_keys(to_jsonb(t)) as k
          from ( select * from public.sync_pull_profiles() limit 1 ) t ) s;
@@ -1124,30 +1128,27 @@ Append to `profiles_setup.sql`:
 
 ```sql
 -- 3. Pull profiles. NO ARGS. SECURITY DEFINER + owner predicate (R1). Exact SupabaseProfile shape (R7,
---    11 keys). CRITICAL (§5.5): the un-guarded startup pull must NEVER error and must always return a
---    row with a non-null profile_index — synthesize a default profile_index=1 row when the owner has none.
+--    11 keys). CRITICAL (§5.5): the un-guarded startup pull must NEVER error (empty is fine — it must not
+--    RAISE, or the broad restore aborts). Returns stored profiles, EMPTY when none — must NOT synth a
+--    default (the client replaceAllProfiles-on-non-empty would wipe local profiles; see body comment).
 create or replace function public.sync_pull_profiles()
 returns table(
   id text, user_id text, profile_index int, name text, avatar_color_hex text,
   uses_primary_addons boolean, uses_primary_plugins boolean,
   avatar_id text, avatar_url text, created_at timestamptz, updated_at timestamptz
 ) language sql security definer set search_path = '' as $$
-  with o as (select nullif(public.get_sync_owner(),'')::uuid as uid),
-  stored as (
-    select null::text as id, p.user_id::text as user_id, p.profile_index, p.name, p.avatar_color_hex,
-           p.uses_primary_addons, p.uses_primary_plugins, p.avatar_id, p.avatar_url,
-           p.created_at, p.updated_at
-    from public.profiles p, o
-    where p.user_id = o.uid
-  )
-  select * from stored
-  union all
-  -- synthesized default ONLY when the owner has no stored profiles (keeps the un-guarded pull non-empty
-  -- and decodable; profile_index=1 is the client's default). Works even for a null owner (returns a
-  -- harmless default row) so the call never raises.
-  select null::text, (select uid::text from o), 1, ''::text, '#1E88E5'::text,
-         false, false, null::text, null::text, now(), now()
-  where not exists (select 1 from stored)
+  -- Stored profiles only; EMPTY when the owner has none (spec §9 T-PROFILE allows "empty OR default row").
+  -- Do NOT synthesize a default row: the client (ProfileSyncService.pullFromRemote) calls
+  -- profileDataStore.replaceAllProfiles(...) on ANY non-empty pull, which REPLACES the entire local
+  -- profile set — a synth default would WIPE a member's local profiles down to one blank profile on the
+  -- first post-deploy sync (which pulls BEFORE any push has populated the cloud). Empty is still
+  -- never-error (decodeList -> empty list, no throw), so the un-guarded broad-restore pull does not
+  -- abort; a NULL owner also yields empty.
+  select null::text as id, p.user_id::text as user_id, p.profile_index, p.name, p.avatar_color_hex,
+         p.uses_primary_addons, p.uses_primary_plugins, p.avatar_id, p.avatar_url,
+         p.created_at, p.updated_at
+  from public.profiles p
+  where p.user_id = nullif(public.get_sync_owner(),'')::uuid
 $$;
 revoke all     on function public.sync_pull_profiles() from public, anon;
 grant  execute on function public.sync_pull_profiles() to authenticated;
@@ -1416,10 +1417,10 @@ begin
 end $$;
 reset role;
 
--- NULL-owner safety (R4). NOTE: sync_pull_profiles() intentionally returns a synthesized default row
--- even for an anon caller (it must NEVER error); it must NOT leak any stored member's data.
+-- NULL-owner safety (R4). NOTE: sync_pull_profiles() must NEVER error for an anon caller (or it aborts
+-- the un-guarded broad restore), but it must return EMPTY — not a synth default and no stored member data.
 do $$
-declare before_p int; after_p int; n int; v_idx int;
+declare before_p int; after_p int; n int;
 begin
   perform public.test_logout();
   select count(*) into before_p from public.profiles;
@@ -1429,12 +1430,9 @@ begin
   assert after_p = before_p, 'anon push/delete must not change profiles row count';
   assert not exists (select 1 from public.profiles where user_id is null), 'no NULL-user_id profile rows';
 
-  -- anon pull never errors and returns only the synthesized default (no stored member data).
+  -- anon pull never errors and returns EMPTY (no synth default, no stored member data leak).
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 1, format('anon sync_pull_profiles must return exactly the synth default, got %s', n);
-  select profile_index into v_idx from public.sync_pull_profiles();
-  assert v_idx = 1, 'anon synth default profile_index must be 1';
-  assert not exists (select 1 from public.sync_pull_profiles() where name <> ''), 'anon pull must not leak any stored profile';
+  assert n = 0, format('anon sync_pull_profiles must return 0 rows (empty, never errors), got %s', n);
   assert (select count(*) from public.sync_pull_profile_locks()) = 0, 'anon profile_locks pull must be empty';
   raise notice 'profiles NULL-owner OK';
 end $$;
@@ -1821,8 +1819,10 @@ begin
   perform count(*) from public.sync_pull_profile_settings_blob(1, 'tv');
 
   -- profiles (4)
+  -- sync_pull_profiles must RESOLVE without error (it may be EMPTY — empty is correct for a member with
+  -- no stored profiles, and it must NOT synth a default, which the client would replaceAll-wipe).
   select count(*) into sink_n from public.sync_pull_profiles();
-  assert sink_n >= 1, 'sync_pull_profiles must return >=1 row (the un-guarded startup pull)';
+  assert sink_n >= 0, 'sync_pull_profiles must resolve without error (empty is valid for a no-profile member)';
   perform count(*) from public.sync_pull_profile_locks();
   perform public.sync_push_profiles(5, jsonb_build_array(jsonb_build_object(
     'profile_index',2,'name','probe','avatar_color_hex','#1','uses_primary_addons',false,'uses_primary_plugins',false)));
@@ -1936,8 +1936,8 @@ reverting). **Teardown DROPS the stored rows** — any data written during the c
 Dropping the RPCs reverts every member to local-only at next start, no client update needed.
 
 > **Panic note:** because restore failures are silent and fail-soft per-subsystem (except the un-guarded
-> `sync_pull_profiles`, which must never error — it auto-synthesizes a default), dropping a single
-> subsystem's RPCs cleanly disables just that subsystem.
+> `sync_pull_profiles`, which must never error — it returns empty when the member has no cloud profiles),
+> dropping a single subsystem's RPCs cleanly disables just that subsystem.
 ```
 
 - [ ] **Step 2: Record the go-live gate (no commit needed beyond the doc)**
@@ -2004,7 +2004,7 @@ All three go-live artifacts (probe, canary path, runbook) plus R10 retention now
 
 **1. Spec coverage (Plan 3 scope = §5.4 + §5.5 + §7 + §8 + §9 + §10 + R10):**
 - §5.4 collections (table + 2 RPCs) → Tasks 1–2. ✓ · home_catalog_settings (table + 2 RPCs, multi-platform, empty-set) → Tasks 3–4. ✓ · profile_settings_blob (table + 2 RPCs, verbatim features) → Tasks 5–6. ✓
-- §5.5 profiles + profile_locks (2 tables + 4 RPCs; no-arg pulls; auto-default; never-error; profile_index key; non-FK profile_id) → Tasks 7–10. ✓
+- §5.5 profiles + profile_locks (2 tables + 4 RPCs; no-arg pulls; empty-when-none (NOT synth-default — client replaceAllProfiles would wipe local); never-error; profile_index key; non-FK profile_id) → Tasks 7–10. ✓
 - §7 `get_sync_overview` (owner-scoped counts; addons/plugins empty) → Task 12. ✓
 - §8 canary path + blast-radius caveat → Task 14 runbook. ✓
 - §9 detection probe (`probe_sync_rpcs.sql`, all RPCs) + rollback note → Tasks 13, 14. ✓

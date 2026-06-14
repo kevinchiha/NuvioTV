@@ -84,8 +84,8 @@ reverting). **Teardown DROPS the stored rows** — any data written during the c
 Dropping the RPCs reverts every member to local-only at next start, no client update needed.
 
 > **Panic note:** because restore failures are silent and fail-soft per-subsystem (except the un-guarded
-> `sync_pull_profiles`, which must never error — it auto-synthesizes a default), dropping a single
-> subsystem's RPCs cleanly disables just that subsystem.
+> `sync_pull_profiles`, which must never error — it returns empty when the member has no cloud profiles),
+> dropping a single subsystem's RPCs cleanly disables just that subsystem.
 
 ## Known gaps (out of cloud-restore scope — not drift)
 
