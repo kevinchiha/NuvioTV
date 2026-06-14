@@ -174,3 +174,36 @@ begin
 
   raise notice 'watch_progress delta cursor OK';
 end $$;
+
+-- ============ watch_progress: delta pull (R1 owner, R8 asc+limit) ============
+do $$
+declare d uuid := '66666666-6666-6666-6666-666666666666';
+        e uuid := '77777777-7777-7777-7777-777777777777';
+        n int; first_id bigint; last_id bigint;
+begin
+  insert into auth.users(id) values (d),(e) on conflict do nothing;
+
+  perform public.test_login(e);   -- noise from another member must never appear in d's delta
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(jsonb_build_object('content_id','x','content_type','movie',
+      'video_id','x','position',1,'duration',9,'last_watched',1,'progress_key','x')), 1);
+
+  perform public.test_login(d);
+  for i in 1..3 loop
+    perform public.sync_push_watch_progress(
+      jsonb_build_array(jsonb_build_object('content_id','k'||i,'content_type','movie',
+        'video_id','k'||i,'position',i,'duration',99,'last_watched',i,'progress_key','k'||i)), 1);
+  end loop;
+
+  -- From cursor 0, limit 2: exactly 2 of d's events, ascending, none of e's.
+  select count(*), min(event_id), max(event_id)
+    into n, first_id, last_id
+    from public.sync_pull_watch_progress_delta(1, 0, 2);
+  assert n = 2, format('expected 2 delta rows, got %s', n);
+  assert first_id < last_id, 'delta rows must be ascending by event_id';
+  assert not exists (
+    select 1 from public.sync_pull_watch_progress_delta(1, 0, 100) where progress_key = 'x'
+  ), 'd must never see member e''s events';
+
+  raise notice 'watch_progress delta pull OK';
+end $$;

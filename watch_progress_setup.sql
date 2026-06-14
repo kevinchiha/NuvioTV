@@ -146,3 +146,23 @@ create or replace function public.sync_get_watch_progress_delta_cursor(p_profile
 $$;
 revoke all     on function public.sync_get_watch_progress_delta_cursor(int) from public, anon;
 grant  execute on function public.sync_get_watch_progress_delta_cursor(int) to authenticated;
+
+-- 6. Delta pull: owner-scoped (R1), event_id > cursor, ASC, limited (R8). Exact event shape (R7);
+--    "position" quoted (reserved word) — output JSON key stays "position".
+create or replace function public.sync_pull_watch_progress_delta(
+  p_profile_id int, p_since_event_id bigint, p_limit int
+) returns table(
+  event_id bigint, operation text, progress_key text, content_id text, content_type text,
+  video_id text, season int, episode int, "position" bigint, duration bigint, last_watched bigint
+) language sql security definer set search_path = '' as $$
+  select ev.event_id, ev.operation, ev.progress_key, ev.content_id, ev.content_type,
+         ev.video_id, ev.season, ev.episode, ev.position, ev.duration, ev.last_watched
+  from public.watch_progress_events ev
+  where ev.user_id = nullif(public.get_sync_owner(),'')::uuid       -- R1
+    and ev.profile_id = p_profile_id
+    and ev.event_id > p_since_event_id
+  order by ev.event_id asc                                          -- R8
+  limit p_limit
+$$;
+revoke all     on function public.sync_pull_watch_progress_delta(int, bigint, int) from public, anon;
+grant  execute on function public.sync_pull_watch_progress_delta(int, bigint, int) to authenticated;
