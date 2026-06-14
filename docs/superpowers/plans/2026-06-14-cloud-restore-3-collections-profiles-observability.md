@@ -1234,6 +1234,12 @@ begin
   perform public.sync_push_home_catalog_settings(2, jsonb_build_object('k','v'), 'tv');
   perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
     'content_id','x','content_type','movie','name','X','poster_shape','POSTER','genres', jsonb_build_array(),'added_at',1)), 2);
+  perform public.sync_push_watch_progress(jsonb_build_array(jsonb_build_object(
+    'content_id','wp','content_type','movie','video_id','v','position',1,'duration',10,'last_watched',1,'progress_key','wp:1')), 2);
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','wi','content_type','movie','title','W','season',null,'episode',null,'watched_at',1)), 2);
+  perform public.sync_push_profile_settings_blob(2, jsonb_build_object('version',1,'features',jsonb_build_object()), 'tv');
+  insert into public.profile_locks(user_id, profile_index, pin_enabled) values (a, 2, true) on conflict do nothing;
 
   -- delete everything for profile 2.
   perform public.sync_delete_profile_data(2);
@@ -1241,6 +1247,10 @@ begin
   assert not exists (select 1 from public.collections where user_id=a and profile_id=2), 'collections must be deleted';
   assert not exists (select 1 from public.home_catalog_settings where user_id=a and profile_id=2), 'home_catalog must be deleted';
   assert not exists (select 1 from public.library where user_id=a and profile_id=2), 'library must be deleted';
+  assert not exists (select 1 from public.watch_progress where user_id=a and profile_id=2), 'watch_progress must be deleted';
+  assert not exists (select 1 from public.watched_items where user_id=a and profile_id=2), 'watched_items must be deleted';
+  assert not exists (select 1 from public.profile_settings_blob where user_id=a and profile_id=2), 'profile_settings_blob must be deleted';
+  assert not exists (select 1 from public.profile_locks where user_id=a and profile_index=2), 'profile_locks must be deleted';
 
   -- default profile (1) is server-guarded (matches the client guard) — deleting it is a no-op.
   perform public.sync_push_collections(1, jsonb_build_array(jsonb_build_object('id','keep')));
