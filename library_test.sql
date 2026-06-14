@@ -69,3 +69,66 @@ begin
 
   raise notice 'library push OK';
 end $$;
+
+-- ============ library: pull (R1 isolation, R7 exact 14-key shape, genres JSON array, R8 offset) ============
+do $$
+declare a uuid := '22222222-bbbb-2222-2222-222222222222';
+        b uuid := '33333333-bbbb-3333-3333-333333333333';
+        v_count int; v_keys text; v_shape text; v_genres_json text; v_rating_json jsonb;
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+
+  perform public.test_login(a);
+  perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+    'content_id','la','content_type','movie','name','LA','poster_shape','POSTER',
+    'imdb_rating', 8.1, 'genres', jsonb_build_array('Sci-Fi','Thriller'), 'added_at', 10)), 1);
+  perform public.test_login(b);
+  perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+    'content_id','lb','content_type','movie','name','LB','poster_shape','POSTER',
+    'genres', jsonb_build_array(), 'added_at', 10)), 1);
+
+  -- R1: member B pulls only B's rows.
+  select count(*), string_agg(content_id, ',') into v_count, v_keys
+    from public.sync_pull_library(1, 500, 0);
+  assert v_count = 1, format('B should pull 1 row, got %s', v_count);
+  assert v_keys = 'lb', format('B must not see A''s rows; got %s', v_keys);
+
+  -- R7 wire-shape guard: exact 14-key SupabaseLibraryItem emitted set (id omitted).
+  perform public.test_login(a);
+  select string_agg(k, ',' order by k) into v_shape
+  from ( select jsonb_object_keys(to_jsonb(t)) as k
+         from ( select * from public.sync_pull_library(1, 500, 0) limit 1 ) t ) s;
+  assert v_shape = 'added_at,addon_base_url,background,content_id,content_type,description,genres,imdb_rating,name,poster,poster_shape,profile_id,release_info,user_id',
+    format('pull row JSON keys must match SupabaseLibraryItem exactly; got: %s', v_shape);
+
+  -- genres must serialize as a JSON ARRAY of strings (decodes to List<String>), not a Postgres
+  -- array literal string; imdb_rating must serialize as a JSON number (decodes to Float?).
+  select to_jsonb(t)->>'genres', to_jsonb(t)->'imdb_rating' into v_genres_json, v_rating_json
+  from ( select * from public.sync_pull_library(1, 500, 0) where content_id='la' limit 1 ) t;
+  assert v_genres_json = '["Sci-Fi", "Thriller"]',
+    format('genres must be a JSON array; got: %s', v_genres_json);
+  assert v_rating_json = '8.1'::jsonb, format('imdb_rating must be a JSON number; got: %s', v_rating_json);
+
+  raise notice 'library pull OK';
+end $$;
+
+-- R8 offset paging: two pages of size 1 are disjoint, deterministic.
+do $$
+declare d uuid := '44444444-bbbb-4444-4444-444444444444';
+begin
+  insert into auth.users(id) values (d) on conflict do nothing;
+  perform public.test_login(d);
+  for i in 1..3 loop
+    perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+      'content_id','pg'||i,'content_type','movie','name','PG','poster_shape','POSTER',
+      'genres', jsonb_build_array(), 'added_at', i)), 1);
+  end loop;
+  assert (select count(*) from public.sync_pull_library(1, 2, 0)) = 2, 'limit 2 offset 0 => 2 rows';
+  assert (select count(*) from public.sync_pull_library(1, 2, 2)) = 1, 'limit 2 offset 2 => 1 row';
+  assert not exists (
+    select content_id from public.sync_pull_library(1, 2, 0)
+    intersect
+    select content_id from public.sync_pull_library(1, 2, 2)
+  ), 'offset paging must not overlap (R8 stable order)';
+  raise notice 'library paging OK';
+end $$;

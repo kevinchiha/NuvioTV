@@ -73,3 +73,26 @@ $$;
 revoke all on function public.sync_push_library_for(uuid, int, jsonb) from public, anon, authenticated;
 revoke all     on function public.sync_push_library(jsonb, int) from public, anon;
 grant  execute on function public.sync_push_library(jsonb, int) to authenticated;
+
+-- 4. Pull snapshot. Owner-scoped (R1). Exact SupabaseLibraryItem shape (R7): 14 keys (id omitted).
+--    genres text[] serializes to a JSON array; imdb_rating real -> JSON number/null. R8 stable order;
+--    offset paging (client page size 500).
+create or replace function public.sync_pull_library(
+  p_profile_id int, p_limit int, p_offset int
+) returns table(
+  user_id text, content_id text, content_type text, name text, poster text,
+  poster_shape text, background text, description text, release_info text,
+  imdb_rating real, genres text[], addon_base_url text, added_at bigint, profile_id int
+) language sql security definer set search_path = '' as $$
+  select lib.user_id::text, lib.content_id, lib.content_type, lib.name, lib.poster,
+         lib.poster_shape, lib.background, lib.description, lib.release_info,
+         lib.imdb_rating, lib.genres, lib.addon_base_url, lib.added_at, lib.profile_id
+  from public.library lib
+  where lib.user_id = nullif(public.get_sync_owner(),'')::uuid      -- R1
+    and lib.profile_id = p_profile_id
+  order by lib.added_at desc, lib.content_id asc                    -- R8 total order (content_id unique per owner)
+  limit  greatest(p_limit, 0)
+  offset greatest(p_offset, 0)
+$$;
+revoke all     on function public.sync_pull_library(int, int, int) from public, anon;
+grant  execute on function public.sync_pull_library(int, int, int) to authenticated;
