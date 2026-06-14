@@ -178,7 +178,8 @@ exact names; optional args use `DEFAULT`. All tables are `auth.uid()`-scoped, ca
 (writes happen only through the `SECURITY DEFINER` RPCs).
 
 ### 5.1 Watch progress — event-sourced, delta sync
-Tables: `watch_progress` (state), `watch_progress_events` (append-only, `event_id bigserial`).
+Tables: `watch_progress` (state), `watch_progress_events` (append-only log; `event_id`
+`generated always as identity` — a monotonic non-null bigint).
 State model `SupabaseWatchProgress` — required non-null: `user_id, content_id,
 content_type, video_id, position(int8), duration(int8), last_watched(int8 epoch-ms),
 progress_key`; optional: `id, season, episode, profile_id`.
@@ -410,3 +411,11 @@ call sites and `SupabaseModels.kt` against the deployed `*_setup.sql`, and re-ru
 - Plugins out, PIN/avatar out, addons out (revisitable later; additive, no rework).
 - Collections/settings/profiles restore for all members incl. Trakt — accepted, with
   T-TRAKT coverage.
+- **SQL tests run against a disposable Supabase branch DB** (a faithful clone of prod) —
+  not the live project, not Docker. The branch already has the real `auth` schema, roles,
+  and the `member_*` triggers, so tests must self-isolate (per-file transaction rollback)
+  and must not recreate the auth surface.
+- **Go-live gating:** applying any `*_setup.sql` to the **live** project (not the branch)
+  must wait until the §9 detection probe, the §8 canary path, and the §10 runbook exist
+  (delivered in plan 3). A subsystem may be exercised on the branch + a single canary build
+  before then, but not fleet-wide — the only rollback is data-destructive teardown.
