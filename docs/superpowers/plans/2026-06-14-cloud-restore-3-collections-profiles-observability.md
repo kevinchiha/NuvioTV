@@ -1116,7 +1116,7 @@ end $$;
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `./run_sync_tests.sh get_sync_owner_setup.sql profiles_setup.sql profiles_test.sql`
-Expected: FAIL — `function public.sync_pull_profiles() does not exist` (or `sync_push_profiles` / `sync_pull_profile_locks`; whichever the test hits first — all are added here + Task 9).
+Expected: FAIL — `function public.sync_pull_profiles() does not exist` (the Step-1 test's first RPC call; `sync_pull_profile_locks()` is missing too — both are added in Step 3 of this task).
 
 - [ ] **Step 3: Append the pull functions (+ grants)**
 
@@ -1165,12 +1165,12 @@ revoke all     on function public.sync_pull_profile_locks() from public, anon;
 grant  execute on function public.sync_pull_profile_locks() to authenticated;
 ```
 
-> Note: the test in Step 1 calls `sync_push_profiles` (added in Task 9). If you are executing strictly task-by-task, Step 4 below will still report the push function missing until Task 9 lands. To keep this task self-contained and GREEN, **also append the Task-9 push/delete functions now** (they are listed in Task 9 Step 3) — or run the combined GREEN check at the end of Task 9. The recommended flow: implement Task 8 + Task 9 setup additions together, then run the full `profiles_test.sql` GREEN. The two tasks are split only for review granularity.
+> Note: Task 8 is self-contained and goes GREEN on its own. Its Step-1 test exercises only the no-arg pulls — `sync_pull_profiles()` / `sync_pull_profile_locks()`, both defined in Step 3 above — and seeds the "stored rows" case with a direct `insert into public.profiles` (the `*_test.sql` runs as the connection owner, which bypasses the authenticated-only DML revoke), so it does **not** depend on `sync_push_profiles` (that arrives in Task 9). Do **not** append the Task-9 push/delete functions early — keeping the split intact is what makes Task 9's red gate real.
 
-- [ ] **Step 4: Run test to verify it passes (after Task 9 functions are also appended)**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `./run_sync_tests.sh get_sync_owner_setup.sql profiles_setup.sql profiles_test.sql`
-Expected: PASS once Task 9's `sync_push_profiles` is present. If running Task 8 in isolation, expect the push-missing error and proceed to Task 9.
+Expected: PASS. Task 8 is self-contained — its test exercises only the two no-arg pulls (added in Step 3) and seeds the stored-rows case via a direct INSERT, so it goes green here without Task 9's `sync_push_profiles`.
 
 - [ ] **Step 5: Commit**
 
@@ -1839,7 +1839,7 @@ Expected: prints `PROBE OK — all sync RPCs resolved and returned without 42883
 
 ```bash
 git add probe_sync_rpcs.sql
-git commit -m "feat(sync): post-deploy RPC probe across all 23 cloud-restore RPCs (§9 detection)"
+git commit -m "feat(sync): post-deploy RPC probe across all 24 cloud-restore RPCs incl. get_sync_overview (§9 detection)"
 ```
 
 ---
