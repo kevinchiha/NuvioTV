@@ -222,7 +222,8 @@ class WatchedItemsPreferences @Inject constructor(
     suspend fun replaceWithRemoteItems(
         remoteItems: List<WatchedItem>,
         lastSuccessfulPushMs: Long = 0L,
-        profileId: Int = profileManager.activeProfileId.value
+        profileId: Int = profileManager.activeProfileId.value,
+        unionWhenNeverSynced: Boolean = false
     ): Boolean {
         var preservedLocalItems = false
         store(profileId).edit { preferences ->
@@ -232,30 +233,16 @@ class WatchedItemsPreferences @Inject constructor(
                 Log.w(TAG, "replaceWithRemoteItems: remote list empty while local has ${current.size} entries; preserving local watched items")
                 return@edit
             }
-            val deduped = linkedMapOf<Triple<String, Int?, Int?>, WatchedItem>()
-            remoteItems.forEach { item ->
-                deduped[Triple(item.contentId, item.season, item.episode)] = item
+            val localItems = current.mapNotNull { json ->
+                runCatching { gson.fromJson(json, WatchedItem::class.java) }.getOrNull()
             }
-            // Preserve local items that were marked as watched after the last
-            // successful push - they haven't reached remote yet, so their
-            // absence doesn't mean deletion on another device.
-            if (lastSuccessfulPushMs > 0L) {
-                val localItems = current.mapNotNull { json ->
-                    runCatching { gson.fromJson(json, WatchedItem::class.java) }.getOrNull()
-                }
-                localItems.forEach { localItem ->
-                    val key = Triple(localItem.contentId, localItem.season, localItem.episode)
-                    if (key !in deduped && localItem.watchedAt > lastSuccessfulPushMs) {
-                        deduped[key] = localItem
-                        preservedLocalItems = true
-                        Log.d(TAG, "replaceWithRemoteItems: preserved local item ${localItem.contentId} s${localItem.season}e${localItem.episode} (watchedAt=${localItem.watchedAt} > lastPush=$lastSuccessfulPushMs)")
-                    }
-                }
-            }
-            preferences[watchedItemsKey] = deduped.values
-                .map { gson.toJson(it) }
-                .toSet()
-            Log.d(TAG, "replaceWithRemoteItems: profile=$profileId stored=${deduped.size} preservedLocal=$preservedLocalItems")
+            // rev 4 Option B — union all local not in remote ONLY when never-synced AND the caller opted in
+            // (the restore snapshot path). Synced devices keep the newer-than-push rule; other callers (default
+            // unionWhenNeverSynced=false) keep today's pure replace.
+            val (merged, preserved) = unionWatchedSnapshot(localItems, remoteItems, lastSuccessfulPushMs, unionWhenNeverSynced)
+            preservedLocalItems = preserved
+            preferences[watchedItemsKey] = merged.map { gson.toJson(it) }.toSet()
+            Log.d(TAG, "replaceWithRemoteItems: profile=$profileId stored=${merged.size} preservedLocal=$preservedLocalItems (unionWhenNeverSynced=$unionWhenNeverSynced neverSynced=${lastSuccessfulPushMs <= 0L})")
         }
         return preservedLocalItems
     }

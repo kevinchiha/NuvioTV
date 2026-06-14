@@ -249,7 +249,8 @@ class WatchedItemsSyncService @Inject constructor(
                 val hadUnsyncedItems = watchedItemsPreferences.replaceWithRemoteItems(
                     remoteWatchedItems,
                     lastSuccessfulPushMs = lastSuccessfulPushMs,
-                    profileId = profileId
+                    profileId = profileId,
+                    unionWhenNeverSynced = true // rev 4 Option B — first restore pull unions local watched marks
                 )
                 watchedItemsPreferences.setDeltaState(cursorBeforeSnapshot, initialized = true, profileId = profileId)
                 val finalLocalCount = watchedItemsPreferences.getAllItems().size
