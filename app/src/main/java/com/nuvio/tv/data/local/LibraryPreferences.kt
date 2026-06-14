@@ -106,20 +106,25 @@ class LibraryPreferences @Inject constructor(
         }
     }
 
-    suspend fun mergeRemoteItems(remoteItems: List<SavedLibraryItem>) {
+    suspend fun mergeRemoteItems(
+        remoteItems: List<SavedLibraryItem>,
+        preserveLocal: Boolean = false
+    ): Boolean {
+        var preservedLocalItems = false
         store().edit { preferences ->
             val current = preferences[libraryItemsKey] ?: emptySet()
             if (remoteItems.isEmpty() && current.isNotEmpty()) {
                 Log.w(TAG, "mergeRemoteItems: remote list empty while local has ${current.size} entries; preserving local library")
                 return@edit
             }
-            val dedupedRemote = linkedMapOf<Pair<String, String>, SavedLibraryItem>()
-            remoteItems.forEach { item ->
-                dedupedRemote[item.id to item.type.lowercase()] = item
+            val localItems = current.mapNotNull { json ->
+                runCatching { gson.fromJson(json, SavedLibraryItem::class.java) }.getOrNull()
             }
-            preferences[libraryItemsKey] = dedupedRemote.values
-                .map { gson.toJson(it) }
-                .toSet()
+            val (merged, preserved) = unionLibrarySnapshot(localItems, remoteItems, preserveLocal)
+            preservedLocalItems = preserved
+            preferences[libraryItemsKey] = merged.map { gson.toJson(it) }.toSet()
+            Log.d(TAG, "mergeRemoteItems: stored=${merged.size} preserveLocal=$preserveLocal preserved=$preserved local=${localItems.size} remote=${remoteItems.size}")
         }
+        return preservedLocalItems
     }
 }

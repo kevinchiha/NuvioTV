@@ -626,7 +626,15 @@ class AccountViewModel @Inject constructor(
                 librarySyncService.pullFromRemote().fold(
                     onSuccess = { remoteLibraryItems ->
                         Log.d("AccountViewModel", "pullRemoteData: pulled ${remoteLibraryItems.size} library items")
-                        libraryPreferences.mergeRemoteItems(remoteLibraryItems)
+                        val preservedLocalLibrary = libraryPreferences.mergeRemoteItems(
+                            remoteLibraryItems,
+                            preserveLocal = true, // rev 4 Option B — sign-in/QR restore is a first pull; union, never replace
+                        )
+                        libraryRepository.hasCompletedInitialPull = true // align with StartupSyncService; enables later mutation pushes
+                        if (preservedLocalLibrary) {
+                            Log.d("AccountViewModel", "pullRemoteData: detected preserved local library items, pushing union to remote")
+                            librarySyncService.pushToRemote()
+                        }
                         Log.d("AccountViewModel", "pullRemoteData: reconciled local library with ${remoteLibraryItems.size} remote items")
                     },
                     onFailure = { e ->

@@ -389,8 +389,15 @@ class StartupSyncService @Inject constructor(
                     try {
                         val remoteLibraryItems = librarySyncService.pullFromRemote().getOrElse { throw it }
                         Log.d(TAG, "Pulled ${remoteLibraryItems.size} library items from remote")
-                        libraryPreferences.mergeRemoteItems(remoteLibraryItems)
+                        val preservedLocalLibrary = libraryPreferences.mergeRemoteItems(
+                            remoteLibraryItems,
+                            preserveLocal = true, // rev 4 Option B — union local-only saved titles (safe: cloud upsert is no-delete)
+                        )
                         libraryRepository.hasCompletedInitialPull = true
+                        if (preservedLocalLibrary) {
+                            Log.d(TAG, "Detected preserved local library items, pushing union to remote")
+                            librarySyncService.pushToRemote()
+                        }
                         Log.d(TAG, "Reconciled local library with ${remoteLibraryItems.size} remote items")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to pull library, continuing with other syncs", e)
