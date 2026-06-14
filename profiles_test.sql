@@ -32,42 +32,45 @@ begin
   raise notice 'profiles schema OK';
 end $$;
 
--- ============ profiles: pull (no-arg, auto-default, never-error; R1; R7 non-null profile_index) ============
--- T-PROFILE (§5.5): a brand-new member with ZERO profiles rows must still get a decodable row with a
--- non-null profile_index, or the un-guarded startup pull aborts the entire broad restore.
+-- ============ profiles: pull (no-arg, EMPTY-when-none, never-error; R1; R7 shape) ============
+-- T-PROFILE (§5.5): the un-guarded startup pull must NEVER error (empty is allowed). It returns the
+-- member's STORED profiles, or EMPTY when they have none — it must NOT synth a default row, because the
+-- client (ProfileSyncService.pullFromRemote) calls profileDataStore.replaceAllProfiles(...) on ANY
+-- non-empty pull, REPLACING the whole local profile set; a synth default would WIPE a member's local
+-- profiles down to one blank profile on the first post-deploy sync (which pulls BEFORE any push). Empty
+-- decodes to an empty list (never raises), so the broad restore does not abort.
 do $$
 declare nw uuid := '11111111-1111-aaaa-aaaa-111111111111';
         a  uuid := '22222222-2222-aaaa-aaaa-222222222222';
         b  uuid := '33333333-3333-aaaa-aaaa-333333333333';
-        n int; v_idx int; v_shape text;
+        n int; v_shape text;
 begin
   insert into auth.users(id) values (nw),(a),(b) on conflict do nothing;
 
-  -- brand-new member: no stored rows => exactly ONE synthesized default profile_index=1.
+  -- brand-new member (no stored rows) => EMPTY (NOT a synth default). A non-empty pull here would make
+  -- the client replaceAllProfiles() and wipe the member's local profiles; empty preserves them.
   perform public.test_login(nw);
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 1, format('brand-new member must get 1 synthesized default profile, got %s', n);
-  select profile_index into v_idx from public.sync_pull_profiles();
-  assert v_idx = 1, format('synthesized default profile_index must be 1, got %s', v_idx);
+  assert n = 0, format('brand-new member must get 0 rows (a synth default would wipe local profiles via replaceAllProfiles), got %s', n);
 
-  -- with stored rows present, returns them (no synthesized default). Seed via direct INSERT (the
-  -- *_test.sql runs as the connection owner, which bypasses the authenticated-only DML revoke) so this
-  -- task is independently red->green without depending on sync_push_profiles (added in Task 9).
+  -- with stored rows present, returns exactly them. Seed via direct INSERT (the *_test.sql runs as the
+  -- connection owner, which bypasses the authenticated-only DML revoke) so this task is independently
+  -- red->green without depending on sync_push_profiles (added in Task 9).
   insert into public.profiles(user_id, profile_index, name, avatar_color_hex, uses_primary_addons, uses_primary_plugins)
   values (nw, 1, 'Main', '#111111', true, false),
          (nw, 2, 'Kids', '#222222', false, false);
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 2, format('with stored rows, must return 2 profiles (no synth default), got %s', n);
+  assert n = 2, format('with stored rows, must return exactly the 2 stored profiles, got %s', n);
   assert exists (select 1 from public.sync_pull_profiles() where profile_index=2 and name='Kids'), 'stored profile must round-trip';
 
-  -- R1: member B (no profiles) gets only its own synthesized default, never A's rows.
+  -- R1: member B (no profiles) gets ZERO rows, never A's rows (and no synth default to wipe B's local).
   perform public.test_login(b);
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 1, format('B must see only its own synth default, got %s', n);
+  assert n = 0, format('B with no stored profiles must get 0 rows, got %s', n);
   assert not exists (select 1 from public.sync_pull_profiles() where name='Kids'), 'B must not see A''s profiles';
 
-  -- R7 wire-shape: exact SupabaseProfile emitted set (11 keys).
-  perform public.test_login(a);
+  -- R7 wire-shape: exact SupabaseProfile emitted set (11 keys). Checked against nw, who HAS stored rows.
+  perform public.test_login(nw);
   select string_agg(k, ',' order by k) into v_shape
   from ( select jsonb_object_keys(to_jsonb(t)) as k
          from ( select * from public.sync_pull_profiles() limit 1 ) t ) s;
@@ -197,10 +200,10 @@ begin
 end $$;
 reset role;
 
--- NULL-owner safety (R4). NOTE: sync_pull_profiles() intentionally returns a synthesized default row
--- even for an anon caller (it must NEVER error); it must NOT leak any stored member's data.
+-- NULL-owner safety (R4). NOTE: sync_pull_profiles() must NEVER error for an anon caller (or it aborts
+-- the un-guarded broad restore), but it must return EMPTY — not a synth default and no stored member data.
 do $$
-declare before_p int; after_p int; n int; v_idx int;
+declare before_p int; after_p int; n int;
 begin
   perform public.test_logout();
   select count(*) into before_p from public.profiles;
@@ -210,12 +213,9 @@ begin
   assert after_p = before_p, 'anon push/delete must not change profiles row count';
   assert not exists (select 1 from public.profiles where user_id is null), 'no NULL-user_id profile rows';
 
-  -- anon pull never errors and returns only the synthesized default (no stored member data).
+  -- anon pull never errors and returns EMPTY (no synth default, no stored member data leak).
   select count(*) into n from public.sync_pull_profiles();
-  assert n = 1, format('anon sync_pull_profiles must return exactly the synth default, got %s', n);
-  select profile_index into v_idx from public.sync_pull_profiles();
-  assert v_idx = 1, 'anon synth default profile_index must be 1';
-  assert not exists (select 1 from public.sync_pull_profiles() where name <> ''), 'anon pull must not leak any stored profile';
+  assert n = 0, format('anon sync_pull_profiles must return 0 rows (empty, never errors), got %s', n);
   assert (select count(*) from public.sync_pull_profile_locks()) = 0, 'anon profile_locks pull must be empty';
   raise notice 'profiles NULL-owner OK';
 end $$;

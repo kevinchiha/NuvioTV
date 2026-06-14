@@ -50,9 +50,10 @@ begin
   perform public.sync_push_profile_settings_blob(1, jsonb_build_object('version',1,'features',jsonb_build_object()), 'tv');
   perform count(*) from public.sync_pull_profile_settings_blob(1, 'tv');
 
-  -- profiles (4)
+  -- profiles (4). sync_pull_profiles must RESOLVE without error (it may be EMPTY — empty is correct for a
+  -- member with no stored profiles, and it must NOT synth a default, which the client would replaceAll-wipe).
   select count(*) into sink_n from public.sync_pull_profiles();
-  assert sink_n >= 1, 'sync_pull_profiles must return >=1 row (the un-guarded startup pull)';
+  assert sink_n >= 0, 'sync_pull_profiles must resolve without error (empty is valid for a no-profile member)';
   perform count(*) from public.sync_pull_profile_locks();
   perform public.sync_push_profiles(5, jsonb_build_array(jsonb_build_object(
     'profile_index',2,'name','probe','avatar_color_hex','#1','uses_primary_addons',false,'uses_primary_plugins',false)));

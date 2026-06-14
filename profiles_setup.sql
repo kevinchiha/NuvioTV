@@ -38,30 +38,27 @@ revoke select on public.profiles, public.profile_locks from anon;
 grant  select on public.profiles, public.profile_locks to authenticated;
 
 -- 3. Pull profiles. NO ARGS. SECURITY DEFINER + owner predicate (R1). Exact SupabaseProfile shape (R7,
---    11 keys). CRITICAL (§5.5): the un-guarded startup pull must NEVER error and must always return a
---    row with a non-null profile_index — synthesize a default profile_index=1 row when the owner has none.
+--    11 keys). CRITICAL (§5.5): the un-guarded startup pull must NEVER error (empty is fine — it must not
+--    RAISE, or the broad restore aborts). Returns stored profiles, EMPTY when none — must NOT synth a
+--    default (the client replaceAllProfiles-on-non-empty would wipe local profiles; see body comment).
 create or replace function public.sync_pull_profiles()
 returns table(
   id text, user_id text, profile_index int, name text, avatar_color_hex text,
   uses_primary_addons boolean, uses_primary_plugins boolean,
   avatar_id text, avatar_url text, created_at timestamptz, updated_at timestamptz
 ) language sql security definer set search_path = '' as $$
-  with o as (select nullif(public.get_sync_owner(),'')::uuid as uid),
-  stored as (
-    select null::text as id, p.user_id::text as user_id, p.profile_index, p.name, p.avatar_color_hex,
-           p.uses_primary_addons, p.uses_primary_plugins, p.avatar_id, p.avatar_url,
-           p.created_at, p.updated_at
-    from public.profiles p, o
-    where p.user_id = o.uid
-  )
-  select * from stored
-  union all
-  -- synthesized default ONLY when the owner has no stored profiles (keeps the un-guarded pull non-empty
-  -- and decodable; profile_index=1 is the client's default). Works even for a null owner (returns a
-  -- harmless default row) so the call never raises.
-  select null::text, (select uid::text from o), 1, ''::text, '#1E88E5'::text,
-         false, false, null::text, null::text, now(), now()
-  where not exists (select 1 from stored)
+  -- Stored profiles only; EMPTY when the owner has none (spec §9 T-PROFILE allows "empty OR default row").
+  -- Do NOT synthesize a default row: the client (ProfileSyncService.pullFromRemote) calls
+  -- profileDataStore.replaceAllProfiles(...) on ANY non-empty pull, which REPLACES the entire local
+  -- profile set — a synth default would WIPE a member's local profiles down to one blank profile on the
+  -- first post-deploy sync (which pulls BEFORE any push has populated the cloud). Empty is still
+  -- never-error (decodeList -> empty list, no throw), so the un-guarded broad-restore pull does not
+  -- abort; a NULL owner also yields empty.
+  select null::text as id, p.user_id::text as user_id, p.profile_index, p.name, p.avatar_color_hex,
+         p.uses_primary_addons, p.uses_primary_plugins, p.avatar_id, p.avatar_url,
+         p.created_at, p.updated_at
+  from public.profiles p
+  where p.user_id = nullif(public.get_sync_owner(),'')::uuid
 $$;
 revoke all     on function public.sync_pull_profiles() from public, anon;
 grant  execute on function public.sync_pull_profiles() to authenticated;
