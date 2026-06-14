@@ -56,3 +56,56 @@ revoke insert, update, delete, truncate, references, trigger
 --     the read-own policy testable (Task 9, D).
 revoke select on public.watch_progress, public.watch_progress_events from anon;
 grant  select on public.watch_progress, public.watch_progress_events to authenticated;
+
+-- 3. Push: explicit-owner inner fn (logic) + thin JWT-resolving wrapper.
+--    R2: ON CONFLICT guarded by last_watched; append an event ONLY when the row changed.
+--    R4: NULL-owner is a no-op.
+create or replace function public.sync_push_watch_progress_for(
+  p_owner uuid, p_profile_id int, p_entries jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare e jsonb; v_changed boolean;
+begin
+  if p_owner is null or p_entries is null then return; end if;
+  for e in select value from jsonb_array_elements(p_entries) as t(value) loop
+    insert into public.watch_progress as wp(
+      user_id, profile_id, progress_key, content_id, content_type, video_id,
+      season, episode, position, duration, last_watched)
+    values (
+      p_owner, p_profile_id, e->>'progress_key', e->>'content_id', e->>'content_type',
+      coalesce(e->>'video_id',''),
+      nullif(e->>'season','')::int, nullif(e->>'episode','')::int,
+      (e->>'position')::bigint, (e->>'duration')::bigint, (e->>'last_watched')::bigint)
+    on conflict (user_id, profile_id, progress_key) do update
+      set content_id=excluded.content_id, content_type=excluded.content_type,
+          video_id=excluded.video_id, season=excluded.season, episode=excluded.episode,
+          position=excluded.position, duration=excluded.duration,
+          last_watched=excluded.last_watched, updated_at=now()
+      where excluded.last_watched > wp.last_watched         -- R2 guard ("strictly newer")
+    returning true into v_changed;
+
+    if v_changed then                                        -- NULL (no row) => not changed
+      insert into public.watch_progress_events(
+        user_id, profile_id, operation, progress_key, content_id, content_type,
+        video_id, season, episode, position, duration, last_watched)
+      values (p_owner, p_profile_id, 'upsert', e->>'progress_key', e->>'content_id',
+        e->>'content_type', coalesce(e->>'video_id',''), nullif(e->>'season','')::int,
+        nullif(e->>'episode','')::int, (e->>'position')::bigint, (e->>'duration')::bigint,
+        (e->>'last_watched')::bigint);
+    end if;
+  end loop;
+end $$;
+
+create or replace function public.sync_push_watch_progress(
+  p_entries jsonb, p_profile_id int
+) returns void language sql security definer set search_path = '' as $$
+  select public.sync_push_watch_progress_for(
+    nullif(public.get_sync_owner(),'')::uuid, p_profile_id, p_entries)
+$$;
+
+-- 3b. Function ACLs (CRITICAL — mirrors member_telemetry_setup.sql lockdown).
+--     Inner _for fn takes the owner as an ARGUMENT → it must NOT be reachable by members
+--     (else a member POSTs /rpc/sync_push_watch_progress_for with a victim UUID, forging data).
+revoke all on function public.sync_push_watch_progress_for(uuid, int, jsonb) from public, anon, authenticated;
+--     Wrapper is the only member-facing entry point.
+revoke all     on function public.sync_push_watch_progress(jsonb, int) from public, anon;
+grant  execute on function public.sync_push_watch_progress(jsonb, int) to authenticated;
