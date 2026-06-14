@@ -109,3 +109,28 @@ revoke all on function public.sync_push_watch_progress_for(uuid, int, jsonb) fro
 --     Wrapper is the only member-facing entry point.
 revoke all     on function public.sync_push_watch_progress(jsonb, int) from public, anon;
 grant  execute on function public.sync_push_watch_progress(jsonb, int) to authenticated;
+
+-- 4. Pull snapshot. SECURITY DEFINER + explicit owner predicate (R1) — the client sends no owner id.
+--    Explicit RETURNS TABLE matching SupabaseWatchProgress EXACTLY (R7): no updated_at, no extra keys,
+--    so decode never hits an unknown column. "position" is a reserved word — quote it in the column
+--    list (the output JSON key is still literally "position", matching the Kotlin field). user_id cast
+--    to text to match the Kotlin String field. R8: total-order tiebreaker so any limited page is stable.
+create or replace function public.sync_pull_watch_progress(
+  p_profile_id int, p_since_last_watched bigint default null, p_limit int default null
+) returns table(
+  user_id text, content_id text, content_type text, video_id text,
+  season int, episode int, "position" bigint, duration bigint,
+  last_watched bigint, progress_key text, profile_id int
+) language sql security definer set search_path = '' as $$
+  select wp.user_id::text, wp.content_id, wp.content_type, wp.video_id,
+         wp.season, wp.episode, wp.position, wp.duration,
+         wp.last_watched, wp.progress_key, wp.profile_id
+  from public.watch_progress wp
+  where wp.user_id = nullif(public.get_sync_owner(),'')::uuid       -- R1
+    and wp.profile_id = p_profile_id
+    and (p_since_last_watched is null or wp.last_watched >= p_since_last_watched)
+  order by wp.last_watched desc, wp.progress_key asc                -- R8 total order
+  limit p_limit                                                     -- NULL => all rows
+$$;
+revoke all     on function public.sync_pull_watch_progress(int, bigint, int) from public, anon;
+grant  execute on function public.sync_pull_watch_progress(int, bigint, int) to authenticated;

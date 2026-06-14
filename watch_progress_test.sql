@@ -100,3 +100,53 @@ begin
   assert v_after = v_before + 1, format('mixed batch must append exactly 1 event, got %s', v_after - v_before);
   raise notice 'watch_progress mixed-batch OK';
 end $$;
+
+-- ============ watch_progress: pull (R1 isolation, R7 exact shape, R8 stable order) ============
+do $$
+declare a uuid := '33333333-3333-3333-3333-333333333333';
+        b uuid := '44444444-4444-4444-4444-444444444444';
+        v_count int; v_keys text; v_shape text;
+begin
+  insert into auth.users(id) values (a),(b) on conflict do nothing;
+
+  perform public.test_login(a);
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(jsonb_build_object(
+      'content_id','m1','content_type','movie','video_id','m1',
+      'position',5,'duration',50,'last_watched',1000,'progress_key','m1')), 1);
+
+  perform public.test_login(b);
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(jsonb_build_object(
+      'content_id','m2','content_type','movie','video_id','m2',
+      'position',5,'duration',50,'last_watched',1000,'progress_key','m2')), 1);
+
+  -- R1: member B (current session) pulls only B's rows, never A's.
+  select count(*), string_agg(progress_key, ',' order by progress_key)
+    into v_count, v_keys
+    from public.sync_pull_watch_progress(1, null, null);
+  assert v_count = 1, format('B should pull 1 row, got %s', v_count);
+  assert v_keys = 'm2', format('B must not see A''s rows; got keys %s', v_keys);
+
+  -- R7 wire-shape guard: a pulled row, as JSON, must have EXACTLY the 11 client-model keys —
+  -- no updated_at, no extra columns. LIMIT the ROW first, THEN expand keys (key-expansion is
+  -- set-returning, so limiting after it would truncate to a single key).
+  select string_agg(k, ',' order by k) into v_shape
+  from (
+    select jsonb_object_keys(to_jsonb(t)) as k
+    from ( select * from public.sync_pull_watch_progress(1, null, null) limit 1 ) t
+  ) s;
+  assert v_shape = 'content_id,content_type,duration,episode,last_watched,position,profile_id,progress_key,season,user_id,video_id',
+    format('pull row JSON keys must match SupabaseWatchProgress exactly; got: %s', v_shape);
+
+  -- F3: p_since_last_watched is INCLUSIVE (>=). Add a newer row for B and pin the boundary.
+  perform public.sync_push_watch_progress(
+    jsonb_build_array(jsonb_build_object('content_id','m3','content_type','movie','video_id','m3',
+      'position',1,'duration',10,'last_watched',3000,'progress_key','m3')), 1);
+  assert (select count(*) from public.sync_pull_watch_progress(1, 3000, null)) = 1,
+    'since=3000 (inclusive) must return exactly the m3 row';
+  assert (select count(*) from public.sync_pull_watch_progress(1, 3001, null)) = 0,
+    'since=3001 must exclude m3 (boundary is >=)';
+
+  raise notice 'watch_progress pull OK';
+end $$;
