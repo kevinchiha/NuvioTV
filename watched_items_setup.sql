@@ -116,3 +116,15 @@ create or replace function public.sync_pull_watched_items(
 $$;
 revoke all     on function public.sync_pull_watched_items(int, int, int) from public, anon;
 grant  execute on function public.sync_pull_watched_items(int, int, int) to authenticated;
+
+-- 5. Delta cursor: latest event_id for THIS owner, coalesced to 0 (R5). The client does NOT wrap
+--    this call (WatchedItemsSyncService.kt) — a bare max() NULL would crash watched-history restore.
+create or replace function public.sync_get_watched_items_delta_cursor(p_profile_id int)
+  returns bigint language sql security definer set search_path = '' as $$
+  select coalesce(max(event_id), 0)
+  from public.watched_items_events
+  where user_id = nullif(public.get_sync_owner(),'')::uuid          -- R1
+    and profile_id = p_profile_id
+$$;
+revoke all     on function public.sync_get_watched_items_delta_cursor(int) from public, anon;
+grant  execute on function public.sync_get_watched_items_delta_cursor(int) to authenticated;

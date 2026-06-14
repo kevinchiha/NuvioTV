@@ -141,3 +141,26 @@ begin
   ), 'paging must not overlap (R8 stable order)';
   raise notice 'watched_items pull OK';
 end $$;
+
+-- ============ watched_items: delta cursor (R5 coalesce, never NULL — client is UNWRAPPED) ============
+do $$
+declare z uuid := '66666666-aaaa-6666-6666-666666666666';
+        c1 bigint; c2 bigint; v_max bigint;
+begin
+  insert into auth.users(id) values (z) on conflict do nothing;
+  perform public.test_login(z);
+
+  -- Brand-new member, zero events: MUST return 0 (the client decodes a non-null Long and does NOT
+  -- wrap this call — a NULL breaks watched-history restore outright, spec §5.2/R5).
+  select public.sync_get_watched_items_delta_cursor(1) into c1;
+  assert c1 = 0, format('empty cursor must be 0, got %s', c1);
+
+  -- After a push, the cursor equals this owner's own max event_id.
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','cc','content_type','movie','title','C','season',null,'episode',null,'watched_at',5)), 1);
+  select public.sync_get_watched_items_delta_cursor(1) into c2;
+  select max(event_id) into v_max from public.watched_items_events where user_id=z;
+  assert c2 = v_max, format('cursor must equal owner max event_id %s, got %s', v_max, c2);
+
+  raise notice 'watched_items delta cursor OK';
+end $$;
