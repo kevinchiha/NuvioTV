@@ -157,22 +157,28 @@ Their first login is in the past, so C1's trigger never fires for them. Each get
 (§10). The CLI and the poller share the same import core, so the manual runs validate the exact code C1
 will later automate. See §10 for the cohort and the canary-first sequencing.
 
-### 7.3 Writes-as-member: OPEN DECISION for planning
-The runner must write owner-scoped rows. Three options (decide in planning):
-- **(a) Member JWT via GoTrue password grant** (rev 1's path) → call the public `sync_push_*`. Requires the
-  member's KevBox password (operator provisions these). Reuses `kevbox.ts` as-specced; gate applies
-  (member must be allowlisted).
-- **(b) Admin direct `sync_push_*_for(p_owner, …)`** via the prod admin DB connection the poller already
-  holds (for allowlist + vault). The inner `_for` functions take an explicit owner and enforce all
-  R2/R3 correctness; they are EXECUTE-revoked from app roles but callable by the owning/superuser role.
-  **No member password stored, gate-independent for the write.** Deviates from rev 1's "only public RPCs,
-  no elevated creds" stance.
-- **(c) Mint a member JWT** from the project JWT secret (admin context) → public `sync_push_*`. No password
-  stored, but JWT-signing infra.
+### 7.3 Writes-as-member: DECIDED — admin `_for` (option b), verified
+The runner writes owner-scoped rows by calling the inner `sync_push_*_for(p_owner, …)` functions directly
+over the **prod admin DB connection** the poller already holds (for allowlist + vault). **Verified
+2026-06-14:** the connection role is `postgres` and **can EXECUTE all seven `sync_push_*_for` functions**
+(they are EXECUTE-revoked from app roles, but the role owns them). The inner functions take an explicit
+owner and enforce all R2/R3 correctness — the importer shapes payloads only.
 
-**Recommendation:** **(b)** for the poller (smallest stored-secret surface — only the Stremio authKey is
-stored; no member passwords; reuses R2/R3), with **(a)** acceptable for the manual CLI since the operator
-has the member's KevBox creds at hand. Final call deferred to planning.
+There are two distinct credentials: **#1 Stremio** email+pass → authKey (READ the source; needed in every
+option; the operator has all of them; obtained via `POST api.strem.io/api/login`, cf. `stremio.ts:17` /
+`stremio_login.sh`), and **#2 KevBox** member password → member JWT (WRITE as the member). **Option (b)
+needs only #1** — it writes via the admin connection with an explicit owner uid, so **no KevBox member
+passwords (#2) are ever stored or used.** Rejected: (a) member-JWT-via-password-grant (would store ~330
+KevBox passwords) and (c) minted-JWT (would hold the project JWT secret, which can impersonate anyone).
+Both the manual CLI and the C1 poller use (b) — a single write path.
+
+**⚠️ Arg order differs from the public wrappers.** The `_for` signatures are `(p_owner, p_profile_id,
+payload)` — `sync_push_watch_progress_for(owner, 1, entries)`, `sync_push_watched_items_for(owner, 1,
+items)`, `sync_push_library_for(owner, 1, items)` — note `p_profile_id` is **second**, unlike the public
+`sync_push_watch_progress(p_entries, p_profile_id)`. The plan must use the `_for` order.
+
+The `_for` write is **gate-independent** (explicit owner), so import can run before allowlisting; but
+**restore still requires the member allowlisted**, so enabling a member is still allowlist + import.
 
 ## 8. Auth & write path
 
@@ -326,23 +332,25 @@ not just row counts — confirm existing KevBox continue-watching survived and n
 
 ## 18. Locked decisions
 
-- Write path target: the deployed `sync_push_*` RPCs (server enforces all correctness; zero new sync surface).
+- **Write path = admin `sync_push_*_for(owner, …)`** over the prod DB connection (§7.3, verified) — only
+  Stremio creds stored, no KevBox passwords; server enforces all R1–R10 correctness; zero new sync surface.
 - Scope: watch_progress + watched_items + saved library (library toggleable, default on).
 - Packaging: **replacement** — new KevBox path + new skill; Trakt deprecated.
 - `--dry-run` is the **default**; `--commit` performs the push.
 - `profile_id = 1` fleet-wide; no hardcoded secrets.
 - **Gate stays during rollout** — enable members by allowlisting (allowlist + import), not by ungating.
   The allowlist is the permanent kill-switch.
-- Trigger = `claim_device` (first-login) for the auto path; manual backfill for the already-logged-in 17.
+- Trigger = `claim_device` (first-login) for the C1 auto path.
+- **Sequencing: manually backfill the 17 already-logged-in members FIRST (canary on a merge-sensitive
+  member, §10), THEN enable C1 for the ~320-member tail.**
 - Merge is non-destructive and recency-based; already-active members use the same path (§9).
 - **Hard precondition:** cloud-restore deployed (DONE — on prod with the gate).
 
 ## 19. Open decisions for planning
 
-- **§7.3 writes-as-member** — (a) member JWT password-grant / (b) admin `_for` direct / (c) minted JWT.
-  Recommended (b) for the poller, (a) acceptable for the CLI.
-- **Vault encryption mechanics** — column-level pgcrypto vs app-side encrypt with `KEVBOX_ENC_KEY` before insert.
-- **Poller cadence + how it learns "first login"** — poll `member_device` for new claims since last tick vs
-  a `pending`+claim-exists query (the latter also sweeps the 17 if you'd rather automate them than do the
-  manual canary first — but the manual canary is recommended).
+- **Vault encryption mechanics** — column-level pgcrypto vs app-side encrypt with `KEVBOX_ENC_KEY` before
+  insert; and whether to store the Stremio **email+password** (lets the poller re-login for a fresh authKey
+  unattended — authKeys can go stale, cf. `loginWithToken`) or just the authKey.
+- **Poller cadence + first-login detection** — poll `member_device` for new claims since the last tick
+  (cron interval); confirm the few-minutes lag is acceptable (KevBox re-pull absorbs it).
 - **watched_items/library merge paths** — confirm union semantics in the client the same way §9 did for watch_progress.
