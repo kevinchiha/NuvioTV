@@ -88,3 +88,62 @@ begin
   assert (select count(*) from public.sync_pull_profile_locks()) = 0, 'empty profile_locks pull must be 0 rows';
   raise notice 'profile_locks pull OK';
 end $$;
+
+-- ============ profiles: push (upsert by profile_index; skip out-of-range) + delete_profile_data ============
+do $$
+declare a uuid := '55555555-5555-aaaa-aaaa-555555555555';
+        n int;
+begin
+  insert into auth.users(id) values (a) on conflict do nothing;
+  perform public.test_login(a);
+
+  -- push two profiles; re-push index 1 updates the SAME row (no dup).
+  perform public.sync_push_profiles(5, jsonb_build_array(
+    jsonb_build_object('profile_index',1,'name','One','avatar_color_hex','#1','uses_primary_addons',false,'uses_primary_plugins',false),
+    jsonb_build_object('profile_index',2,'name','Two','avatar_color_hex','#2','uses_primary_addons',false,'uses_primary_plugins',false)));
+  perform public.sync_push_profiles(5, jsonb_build_array(
+    jsonb_build_object('profile_index',1,'name','One v2','avatar_color_hex','#1','uses_primary_addons',true,'uses_primary_plugins',false)));
+  select count(*) into n from public.profiles where user_id=a;
+  assert n = 2, format('re-push must not duplicate; expected 2 profiles, got %s', n);
+  assert (select name from public.profiles where user_id=a and profile_index=1) = 'One v2', 're-push must overwrite name';
+  assert (select uses_primary_addons from public.profiles where user_id=a and profile_index=1) = true, 're-push must overwrite flag';
+
+  -- out-of-range / malformed indices are skipped (defensive use of p_client_max_profiles).
+  perform public.sync_push_profiles(5, jsonb_build_array(
+    jsonb_build_object('profile_index',99,'name','TooBig','avatar_color_hex','#9','uses_primary_addons',false,'uses_primary_plugins',false),
+    jsonb_build_object('profile_index',0,'name','Zero','avatar_color_hex','#0','uses_primary_addons',false,'uses_primary_plugins',false)));
+  assert not exists (select 1 from public.profiles where user_id=a and profile_index in (0,99)),
+    'out-of-range profile_index (>max or <1) must be skipped';
+
+  raise notice 'profiles push OK';
+end $$;
+
+-- sync_delete_profile_data: wipes the owner's rows for a profile across ALL subsystems; default (1) is guarded.
+do $$
+declare a uuid := '66666666-6666-aaaa-aaaa-666666666666';
+begin
+  insert into auth.users(id) values (a) on conflict do nothing;
+  perform public.test_login(a);
+  -- seed data for profile 2 across several subsystems.
+  perform public.sync_push_profiles(5, jsonb_build_array(
+    jsonb_build_object('profile_index',2,'name','P2','avatar_color_hex','#2','uses_primary_addons',false,'uses_primary_plugins',false)));
+  perform public.sync_push_collections(2, jsonb_build_array(jsonb_build_object('id','c')));
+  perform public.sync_push_home_catalog_settings(2, jsonb_build_object('k','v'), 'tv');
+  perform public.sync_push_library(jsonb_build_array(jsonb_build_object(
+    'content_id','x','content_type','movie','name','X','poster_shape','POSTER','genres', jsonb_build_array(),'added_at',1)), 2);
+
+  -- delete everything for profile 2.
+  perform public.sync_delete_profile_data(2);
+  assert not exists (select 1 from public.profiles where user_id=a and profile_index=2), 'profile row must be deleted';
+  assert not exists (select 1 from public.collections where user_id=a and profile_id=2), 'collections must be deleted';
+  assert not exists (select 1 from public.home_catalog_settings where user_id=a and profile_id=2), 'home_catalog must be deleted';
+  assert not exists (select 1 from public.library where user_id=a and profile_id=2), 'library must be deleted';
+
+  -- default profile (1) is server-guarded (matches the client guard) — deleting it is a no-op.
+  perform public.sync_push_collections(1, jsonb_build_array(jsonb_build_object('id','keep')));
+  perform public.sync_delete_profile_data(1);
+  assert exists (select 1 from public.collections where user_id=a and profile_id=1),
+    'default profile (1) data must survive delete (server-guarded)';
+
+  raise notice 'sync_delete_profile_data OK';
+end $$;

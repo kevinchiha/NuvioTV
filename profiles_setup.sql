@@ -77,3 +77,74 @@ language sql security definer set search_path = '' as $$
 $$;
 revoke all     on function public.sync_pull_profile_locks() from public, anon;
 grant  execute on function public.sync_pull_profile_locks() to authenticated;
+
+-- 5. Push profiles (UI-only; upsert by profile_index, last-write-wins). p_client_max_profiles bounds
+--    the accepted index range (skip <1 or >max — defensive; never stores out-of-range rows). R4 no-op.
+create or replace function public.sync_push_profiles_for(
+  p_owner uuid, p_client_max_profiles int, p_profiles jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare e jsonb; v_idx int;
+begin
+  if p_owner is null or p_profiles is null then return; end if;     -- R4
+  for e in select value from jsonb_array_elements(p_profiles) as t(value) loop
+    v_idx := nullif(e->>'profile_index','')::int;
+    if v_idx is null or v_idx < 1
+       or (p_client_max_profiles is not null and v_idx > p_client_max_profiles) then
+      continue;                                                     -- skip malformed / out-of-range
+    end if;
+    insert into public.profiles as p (
+      user_id, profile_index, name, avatar_color_hex,
+      uses_primary_addons, uses_primary_plugins, avatar_id, avatar_url)
+    values (
+      p_owner, v_idx, coalesce(e->>'name',''), coalesce(e->>'avatar_color_hex','#1E88E5'),
+      coalesce((e->>'uses_primary_addons')::boolean, false),
+      coalesce((e->>'uses_primary_plugins')::boolean, false),
+      e->>'avatar_id', e->>'avatar_url')
+    on conflict (user_id, profile_index) do update
+      set name=excluded.name, avatar_color_hex=excluded.avatar_color_hex,
+          uses_primary_addons=excluded.uses_primary_addons,
+          uses_primary_plugins=excluded.uses_primary_plugins,
+          avatar_id=excluded.avatar_id, avatar_url=excluded.avatar_url, updated_at=now();
+  end loop;
+end $$;
+
+create or replace function public.sync_push_profiles(
+  p_client_max_profiles int, p_profiles jsonb
+) returns void language sql security definer set search_path = '' as $$
+  select public.sync_push_profiles_for(
+    nullif(public.get_sync_owner(),'')::uuid, p_client_max_profiles, p_profiles)
+$$;
+
+-- 6. Delete all of the owner's synced data for one profile (UI-only; off the restore path). p_profile_id
+--    is the data-table int (== profile_index). The DEFAULT profile (1) is SERVER-GUARDED to a no-op,
+--    mirroring the client guard — a data-destructive RPC must not wipe the member's primary profile.
+--    plpgsql (late-bound) so it can reference Plan-1/2 tables even if applied before them; at runtime
+--    (deploy order: Plans 1-2 first) all tables exist.
+create or replace function public.sync_delete_profile_data_for(p_owner uuid, p_profile_id int)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if p_owner is null or p_profile_id = 1 then return; end if;       -- R4 + default-profile guard
+  delete from public.watch_progress         where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.watch_progress_events  where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.watched_items          where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.watched_items_events   where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.library                where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.collections            where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.home_catalog_settings  where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.profile_settings_blob  where user_id=p_owner and profile_id=p_profile_id;
+  delete from public.profile_locks          where user_id=p_owner and profile_index=p_profile_id;
+  delete from public.profiles               where user_id=p_owner and profile_index=p_profile_id;
+end $$;
+
+create or replace function public.sync_delete_profile_data(p_profile_id int)
+returns void language sql security definer set search_path = '' as $$
+  select public.sync_delete_profile_data_for(nullif(public.get_sync_owner(),'')::uuid, p_profile_id)
+$$;
+
+-- 7. Function ACLs.
+revoke all on function public.sync_push_profiles_for(uuid, int, jsonb) from public, anon, authenticated;
+revoke all     on function public.sync_push_profiles(int, jsonb) from public, anon;
+grant  execute on function public.sync_push_profiles(int, jsonb) to authenticated;
+revoke all on function public.sync_delete_profile_data_for(uuid, int) from public, anon, authenticated;
+revoke all     on function public.sync_delete_profile_data(int) from public, anon;
+grant  execute on function public.sync_delete_profile_data(int) to authenticated;
