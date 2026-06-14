@@ -164,3 +164,40 @@ begin
 
   raise notice 'watched_items delta cursor OK';
 end $$;
+
+-- ============ watched_items: delta pull (R1 owner, R7 shape, R8 asc+limit) ============
+do $$
+declare d uuid := '77777777-aaaa-7777-7777-777777777777';
+        e uuid := '88888888-aaaa-8888-8888-888888888888';
+        n int; first_id bigint; last_id bigint; v_shape text;
+begin
+  insert into auth.users(id) values (d),(e) on conflict do nothing;
+
+  perform public.test_login(e);   -- noise from another member must never appear in d's delta
+  perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+    'content_id','noise','content_type','movie','title','N','season',null,'episode',null,'watched_at',1)), 1);
+
+  perform public.test_login(d);
+  for i in 1..3 loop
+    perform public.sync_push_watched_items(jsonb_build_array(jsonb_build_object(
+      'content_id','k'||i,'content_type','series','title','K','season',1,'episode',i,'watched_at',i)), 1);
+  end loop;
+
+  -- From cursor 0, limit 2: exactly 2 of d's events, ascending, none of e's.
+  select count(*), min(event_id), max(event_id) into n, first_id, last_id
+    from public.sync_pull_watched_items_delta(1, 0, 2);
+  assert n = 2, format('expected 2 delta rows, got %s', n);
+  assert first_id < last_id, 'delta rows must be ascending by event_id';
+  assert not exists (
+    select 1 from public.sync_pull_watched_items_delta(1, 0, 100) where content_id='noise'
+  ), 'd must never see member e''s events';
+
+  -- R7 delta wire-shape: exact SupabaseWatchedItemEvent key set.
+  select string_agg(k, ',' order by k) into v_shape
+  from ( select jsonb_object_keys(to_jsonb(t)) as k
+         from ( select * from public.sync_pull_watched_items_delta(1, 0, 1) limit 1 ) t ) s;
+  assert v_shape = 'content_id,content_type,episode,event_id,operation,season,title,watched_at',
+    format('delta row JSON keys must match SupabaseWatchedItemEvent exactly; got: %s', v_shape);
+
+  raise notice 'watched_items delta pull OK';
+end $$;

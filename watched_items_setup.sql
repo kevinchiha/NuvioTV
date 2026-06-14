@@ -128,3 +128,23 @@ create or replace function public.sync_get_watched_items_delta_cursor(p_profile_
 $$;
 revoke all     on function public.sync_get_watched_items_delta_cursor(int) from public, anon;
 grant  execute on function public.sync_get_watched_items_delta_cursor(int) to authenticated;
+
+-- 6. Delta pull: owner-scoped (R1), event_id > cursor, ASC, limited (R8). Exact
+--    SupabaseWatchedItemEvent shape (R7); delete event rows carry zeroed watched_at.
+create or replace function public.sync_pull_watched_items_delta(
+  p_profile_id int, p_since_event_id bigint, p_limit int
+) returns table(
+  event_id bigint, operation text, content_id text, content_type text,
+  title text, season int, episode int, watched_at bigint
+) language sql security definer set search_path = '' as $$
+  select ev.event_id, ev.operation, ev.content_id, ev.content_type,
+         ev.title, ev.season, ev.episode, ev.watched_at
+  from public.watched_items_events ev
+  where ev.user_id = nullif(public.get_sync_owner(),'')::uuid       -- R1
+    and ev.profile_id = p_profile_id
+    and ev.event_id > p_since_event_id
+  order by ev.event_id asc                                          -- R8
+  limit p_limit
+$$;
+revoke all     on function public.sync_pull_watched_items_delta(int, bigint, int) from public, anon;
+grant  execute on function public.sync_pull_watched_items_delta(int, bigint, int) to authenticated;
