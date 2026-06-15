@@ -247,6 +247,8 @@ fun SettingsScreen(
                 // operator-managed (kevbox-admin / member_addon) and must not be managed on-device.
                 // Upstream (0.7.8) moved addons here from the sidebar; hide the whole category for the fork.
                 SettingsCategory.CONTENT_DISCOVERY -> false
+                // KevBox: hide the Trakt category from Settings for the fork.
+                SettingsCategory.TRAKT -> false
                 SettingsCategory.INTEGRATION -> true
                 SettingsCategory.ADVANCED -> true
                 else -> true

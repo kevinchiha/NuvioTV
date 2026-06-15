@@ -2,6 +2,7 @@ package com.nuvio.tv.ui.screens.library
 
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -86,6 +88,7 @@ import com.nuvio.tv.ui.util.formatAddonTypeLabel
 import com.nuvio.tv.ui.util.localizedContentType
 import com.nuvio.tv.ui.util.localizedGenreLabel
 import kotlinx.coroutines.delay
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
 
@@ -263,18 +266,15 @@ fun LibraryScreen(
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
                 )
-                Text(
-                    text = when {
-                        viewMode == LibraryViewMode.Cloud -> stringResource(R.string.library_source_cloud).uppercase()
-                        uiState.sourceMode == LibrarySourceMode.TRAKT -> "TRAKT"
-                        uiState.isNuvioAccount -> "NUVIO"
-                        else -> stringResource(R.string.library_source_local)
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (showBuiltInHeader) NuvioTheme.colors.TextTertiary else Color.Transparent,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 2.sp
-                )
+                if (showBuiltInHeader) {
+                    Image(
+                        painter = painterResource(id = R.drawable.app_logo_wordmark),
+                        contentDescription = stringResource(R.string.app_name),
+                        modifier = Modifier
+                            .height(24.dp)
+                            .aspectRatio(1085f / 344f)
+                    )
+                }
             }
         }
 
