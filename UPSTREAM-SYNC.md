@@ -43,9 +43,15 @@ git merge upstream/dev
 
 # 4. Publish a new release (bumps version, builds signed armeabi-v7a, uploads, writes version.json,
 #    commits, and pushes kevbox to your fork). KevBox runs its OWN version line, ahead of upstream's
-#    (e.g. upstream 0.7.5-beta → KevBox was already 0.8.0-beta). Bump YOUR next number, not upstream's:
-./release.sh 0.8.1-beta "Synced latest NuvioTV (0.7.5-beta) + KevBox changes"
+#    (e.g. upstream 0.7.8-beta → KevBox is already 0.8.x-beta). Bump YOUR next number, not upstream's:
+./release.sh 0.8.6-beta "Synced latest NuvioTV (0.7.8-beta) + KevBox changes"
 ```
+
+> ⚠️ **Let `release.sh` do the push — don't use VS Code's "Sync Changes" button.** `kevbox` carries
+> upstream's full history, so a `git pull --rebase` (which is what VS Code Sync runs) tries to **flatten
+> your merge commit into dozens of cherry-picks** and dumps you into a conflict-ridden rebase. If that
+> happens: `git rebase --abort` restores your merge commit untouched (it's still the branch tip + in the
+> reflog). Push only with `git push origin kevbox` or `release.sh`.
 
 That's it. The in-app updater on each TV will then see the new `versionCode` at
 `https://tv.kevbox.dev/version.json` and offer the update.
@@ -68,6 +74,8 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `PlayerRuntimeController.kt`, `PlayerViewModel.kt`, `PlayerRuntimeControllerInitialization.kt` | **keep BOTH** — our `telemetryRepository`/`deviceGuardDataStore` injection + telemetry `launch{}`/`telemetrySessionStarted` reset | **keep BOTH** — upstream's `streamBadgePresentation`, trakt-CW `launch{}`, `hasMarkedCurrentEpisodeCompleted` reset |
 | `AboutScreen.kt` | our `if (BuildConfig.FEATURE_TELEMETRY)` §11 privacy-notice block | upstream's added imports + tokenized spacer (`NuvioTheme.spacing.xxs`) |
 | `AuthSignInScreen.kt` | our `EmailPasswordForm(...)` sign-in body — **discard** upstream's QR/`Text` header (we replaced that flow) | nothing here |
+| `NuvioNavHost.kt` (Settings block) | route the dormant account entry to `Screen.AuthSignIn` (QR retired); **force `onNavigateToAddons`/`onNavigateToPlugins` to no-op `{}`** (see policy-regression callout) | **keep both** — take upstream's new `onNavigateToPlugins` param and any other added route callbacks |
+| `SettingsScreen.kt` | **hide the whole `CONTENT_DISCOVERY` category** (`SettingsCategory.CONTENT_DISCOVERY -> false` in the `visibleSections` filter) — it holds only the operator-forbidden Addons + Plugins rows | n/a — KevBox never edits this file except to suppress that category |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -82,6 +90,22 @@ the import** to each affected file.
 
 Lesson: after resolving markers, a clean `git status` does **not** mean you're done. Always run the
 compile check below — it's the only thing that catches this class of breakage.
+
+### ⚠️ Invisible *policy* regression — upstream re-exposing a feature we deliberately hid
+
+Worse than a compile break: a change that compiles **and** runs but quietly undoes a KevBox policy, with
+**zero conflict**. The 0.7.8-beta sync did exactly this — "Move addons into content discovery settings"
+(+ a new Plugins screen) **moved on-device addon management** from the sidebar (which KevBox had removed)
+**into Settings → Content Discovery**, wired to live routes. Because KevBox had never edited
+`SettingsScreen.kt`, the whole rework auto-merged with no marker — and family members silently regained
+the ability to view/edit addons + plugins, which the operator manages remotely (kevbox-admin /
+`member_addon`). Fixed in two layers: hide the `CONTENT_DISCOVERY` category in `SettingsScreen.kt`
+(`-> false`) **and** no-op `onNavigateToAddons`/`onNavigateToPlugins` in `NuvioNavHost.kt`.
+
+Lesson: compile-green does not prove policy-safe. **After each sync, grep for new navigation entry
+points to screens KevBox suppressed** — e.g. `grep -rn "navigate(Screen.AddonManager\|navigate(Screen.Plugins"`
+and review any new sidebar / Settings rows. Upstream can re-surface a hidden feature through a brand-new
+code path that never touches your files.
 
 ## Verify before shipping
 
