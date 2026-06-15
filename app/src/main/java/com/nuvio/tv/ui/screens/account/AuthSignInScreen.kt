@@ -238,29 +238,10 @@ fun AuthEmailOnboardingScreen(
                         }
                     }
                 },
-                secondaryButton = {
-                    Button(
-                        onClick = {
-                            viewModel.clearError()
-                            onContinue()
-                        },
-                        enabled = !uiState.isLoading,
-                        colors = ButtonDefaults.colors(
-                            containerColor = NuvioColors.BackgroundCard,
-                            focusedContainerColor = NuvioColors.FocusBackground,
-                            contentColor = NuvioColors.TextPrimary,
-                            focusedContentColor = NuvioColors.TextPrimary
-                        ),
-                        shape = ButtonDefaults.shape(RoundedCornerShape(50)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = stringResource(R.string.auth_qr_continue_without_account),
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
+                // KevBox: "Continue without account" bypass intentionally removed. The family build
+                // requires the email identity that drives Supabase sync, member access, and telemetry,
+                // so the onboarding gate must not be skippable. Upstream (0.7.8) added this secondaryButton;
+                // EmailPasswordForm renders no secondary slot when it is omitted (param defaults to null).
             )
         }
     }
