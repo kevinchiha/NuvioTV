@@ -200,14 +200,18 @@ never touches the login path or client, and is trivially retryable. The few-minu
 KevBox re-pulling on every app start. C2/C3 are later upgrades.
 
 **Credential vault.** A secured table `member_stremio_creds(user_id uuid pk, stremio_email text,
-stremio_password_enc bytea, stremio_authkey text, status text default 'pending', attempts int default 0,
+stremio_password text, status text default 'pending', attempts int default 0,
 last_run timestamptz, last_error text)`, RLS on, **no grants to anon/authenticated** (read only by the admin
-poller). **rev 3: store the encrypted email+password, not just the authKey** — authKeys go stale over the
+poller). **rev 3: store the email+password, not just the authKey** — authKeys go stale over the
 ~10-month tail and the importer has **no unattended re-login path** with authKey-only (`getLibrary`'s single
 `loginWithToken` retry needs a still-valid token and falls back only when creds are supplied,
 `stremio.ts:35-61,83-89`). With email+pass vaulted, the poller re-logins via `updateAuthKeyWithCredentials`.
-Encrypt with the existing `KEVBOX_ENC_KEY` (pgcrypto vs app-side is a §19 mechanics decision). The operator
-holds all members' Stremio creds.
+**rev 5 (2026-06-15, Plan 2): the password is stored PLAINTEXT, not encrypted.** The operator deletes every
+Stremio account permanently once the migration tail is drained, so the vault is a strictly time-boxed
+operational table; column-level encryption (pgcrypto / `KEVBOX_ENC_KEY`) buys nothing against an operator who
+holds the cleartext creds anyway and will destroy the source accounts. RLS-on + zero anon/authenticated grants
+is retained as defense-in-depth for the transient window, and **a `member_stremio_creds` teardown (`drop table`)
+is a hard deliverable** — run after the accounts are deleted. The operator holds all members' Stremio creds.
 
 ### 7.2 Manual backfill — the 17 already-active members
 Their first login is in the past, so C1's trigger never fires for them. Each gets a one-time
@@ -483,7 +487,8 @@ may not raise counts by the pushed amount — capture **pre/post** counts and as
   (gate-aware, Cinemeta fetch with drift detection, base-table verify, PG error-code branching §12), `src/kevbox-import.ts`
   (CLI: source-vs-dest reconciliation, `--no-library`, Trakt precheck, allowlist split from `--commit`),
   `src/kevbox-poller.ts` + `scripts/kevbox_poller.sh`.
-- `member_stremio_creds` vault table (RLS, no app grants, **encrypted email+password**) + a loader to populate creds.
+- `member_stremio_creds` vault table (RLS, no app grants, **plaintext email+password** — rev 5, accounts deleted
+  after migration) + a loader to populate creds + a **`_teardown.sql` (`drop table`)** run once the tail is drained.
 - **Poller ops (rev 3):** journal with `attempts` + dead-letter; **monitoring/alert on `status='failed'`** and on
   members with a `member_device` row but no `done` import; a **re-snapshot sweep at poller launch** (cohort drift).
 - `scripts/kevbox_import.sh` wrapper + `~/.config/stremio-kevbox-migration/app.env` convention.
@@ -524,7 +529,8 @@ may not raise counts by the pushed amount — capture **pre/post** counts and as
 - Trigger = `claim_device` (first-login) for the C1 auto path (has-ever-claimed; capped-out edge handled per §7.1).
 - **Sequencing: manually backfill the 17 FIRST (canary on a merge-sensitive, non-Trakt member, §10), THEN
   enable C1 for the ~320 tail.**
-- **Vault stores encrypted email+password** (not authKey-only) — enables unattended re-login (rev 3).
+- **Vault stores email+password** (not authKey-only) — enables unattended re-login (rev 3). **rev 5: PLAINTEXT,
+  not encrypted** — accounts are deleted after migration, so the vault is time-boxed; teardown (`drop table`) is a deliverable (§19).
 - **Merge-safety (rev 4):** `watch_progress` restore is non-destructive; **`watched_items` + `library` are
   REPLACE-not-union**. **rev-3 Option A as written was mechanically broken** (a passive "open the app" never
   pushes → `lastSuccessfulPushMs` stays 0). Corrected Option A = **forced push (Account "sync now") +
@@ -538,8 +544,12 @@ may not raise counts by the pushed amount — capture **pre/post** counts and as
 - ~~**§9.4 merge fix:** option A vs B~~ **RESOLVED (rev 4): do BOTH** — corrected Option A (forced push +
   survival-verify, `--no-library`) for the canary; Option B (client union patch) mandated before fleet-wide C1.
   rev-3 Option A was found mechanically broken (passive open never pushes); see §9.4.
-- **Vault encryption mechanics** — column-level pgcrypto vs app-side encrypt with `KEVBOX_ENC_KEY` before insert.
-  (The store-email+pass-vs-authKey question is now DECIDED: store encrypted email+pass, §18.)
+- ~~**Vault encryption mechanics** — column-level pgcrypto vs app-side encrypt with `KEVBOX_ENC_KEY`~~
+  **RESOLVED (rev 5, 2026-06-15): NO encryption — store the password PLAINTEXT.** The operator will delete every
+  Stremio account permanently after the migration tail is drained, making the vault a time-boxed operational
+  table; encryption adds no real protection given the operator holds the cleartext creds and destroys the source.
+  Mitigations instead: RLS-on + zero anon/authenticated grants (transient-window defense-in-depth), and a mandatory
+  `member_stremio_creds` **teardown (`drop table`)** deliverable run once the accounts are deleted. (§7.1, §16, §18)
 - **Poller cadence + first-login detection** — delta-since-last-tick vs "all pending with a row"; confirm the
   few-minutes lag is acceptable (KevBox re-pull absorbs it). Ensure the re-snapshot sweep covers the build window.
 - ~~watched_items/library merge paths — confirm union semantics~~ **RESOLVED (rev 3):** they are NOT a union —
