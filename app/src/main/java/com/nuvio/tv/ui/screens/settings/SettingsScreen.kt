@@ -239,7 +239,8 @@ fun SettingsScreen(
             when (section.category) {
                 SettingsCategory.EXPERIENCE -> false
                 SettingsCategory.DEBUG -> BuildConfig.IS_DEBUG_BUILD && !isEssentialMode
-                SettingsCategory.PROFILES -> isPrimaryProfileActive
+                // KevBox: hide the Profiles category from Settings for the fork.
+                SettingsCategory.PROFILES -> false
                 SettingsCategory.ACCOUNT -> isPrimaryProfileActive
                 SettingsCategory.LAYOUT -> true
                 // KevBox: Content Discovery holds only the Addons + Plugins rows, which are
