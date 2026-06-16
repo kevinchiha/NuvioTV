@@ -130,7 +130,7 @@ end $$;
 
 -- re-apply the whole setup mid-test (comment kept off the \i line — psql parses a trailing
 -- inline comment as extra \i arguments and emits noisy "extra argument ignored" warnings).
-\i collections_setup.sql
+\ir collections_setup.sql
 
 do $$
 declare s uuid := 'ffffffff-1111-cccc-ffff-ffffffffffff';

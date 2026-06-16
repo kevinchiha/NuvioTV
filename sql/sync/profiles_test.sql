@@ -230,7 +230,7 @@ begin
 end $$;
 
 -- re-apply the whole setup mid-test (comment kept off the \i line).
-\i profiles_setup.sql
+\ir profiles_setup.sql
 
 do $$
 declare s uuid := 'ffffffff-1111-aaaa-ffff-ffffffffffff';

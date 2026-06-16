@@ -128,7 +128,7 @@ begin
 end $$;
 
 -- re-apply the whole setup mid-test (comment kept off the \i line).
-\i home_catalog_settings_setup.sql
+\ir home_catalog_settings_setup.sql
 
 do $$
 declare s uuid := 'ffffffff-1111-dddd-ffff-ffffffffffff';

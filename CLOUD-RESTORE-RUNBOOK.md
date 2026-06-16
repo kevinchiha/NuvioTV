@@ -14,17 +14,17 @@ covers deploying the server schema (Plans 1–3) to the live KevBox Supabase pro
 
 ## Deploy order (MANDATORY — later objects reference earlier ones)
 
-Apply `*_setup.sql` in this order against the **live** project (e.g. `psql "$LIVE_DB_URL" -f <file>`):
+Apply each `*_setup.sql` (they live in `sql/sync/`) in this order against the **live** project (e.g. `psql "$LIVE_DB_URL" -f sql/sync/<file>`):
 
-1. `get_sync_owner_setup.sql`  ← also creates `sync_canary_members`; the gate is **closed by default** (empty allowlist ⇒ no member syncs ⇒ zero blast radius)
-2. `watch_progress_setup.sql`
-3. `watched_items_setup.sql`
-4. `library_setup.sql`
-5. `collections_setup.sql`
-6. `home_catalog_settings_setup.sql`
-7. `profile_settings_blob_setup.sql`
-8. `profiles_setup.sql`  ← `sync_delete_profile_data` references the Plan-1/2/3 data tables
-9. `sync_maintenance_setup.sql`  ← `get_sync_overview` is `language sql`; all referenced tables must exist
+1. `sql/sync/get_sync_owner_setup.sql`  ← also creates `sync_canary_members`; the gate is **closed by default** (empty allowlist ⇒ no member syncs ⇒ zero blast radius)
+2. `sql/sync/watch_progress_setup.sql`
+3. `sql/sync/watched_items_setup.sql`
+4. `sql/sync/library_setup.sql`
+5. `sql/sync/collections_setup.sql`
+6. `sql/sync/home_catalog_settings_setup.sql`
+7. `sql/sync/profile_settings_blob_setup.sql`
+8. `sql/sync/profiles_setup.sql`  ← `sync_delete_profile_data` references the Plan-1/2/3 data tables
+9. `sql/sync/sync_maintenance_setup.sql`  ← `get_sync_overview` is `language sql`; all referenced tables must exist
 
 > All setups are idempotent (`create … if not exists` / `create or replace`). Re-running is safe.
 
@@ -73,7 +73,8 @@ self-allowlist. Only an operator with DB access (or the `SECURITY DEFINER` resol
 ## Verification (after any deploy — branch or live)
 
 1. **Correctness suite (branch only — the strongest signal):** run the full Plan 1+2+3 ASSERT suite via
-   the runner (it wraps each `*_test.sql` in its own `begin … rollback`, so fixtures never persist):
+   the runner (it wraps each `*_test.sql` in its own `begin … rollback`, so fixtures never persist).
+   The files live in `sql/sync/`; pass bare names — the runner resolves each under `sql/sync/`:
    ```
    ./run_sync_tests.sh \
      get_sync_owner_setup.sql watch_progress_setup.sql watched_items_setup.sql library_setup.sql \
@@ -91,14 +92,14 @@ self-allowlist. Only an operator with DB access (or the `SECURITY DEFINER` resol
    they rely on the runner's per-file transaction rollback (their `test_login` GUC is transaction-local and
    their first push would otherwise commit seed rows to the branch).
 2. **RPC probe (detection signal — branch OR live):**
-   - Branch: `psql "$SYNC_TEST_DB_URL" -v ON_ERROR_STOP=1 -f sync_test_helpers.sql -f probe_sync_rpcs.sql`
-   - Live: edit `probe_sync_rpcs.sql` — remove the `insert into auth.users` line and replace
+   - Branch: `psql "$SYNC_TEST_DB_URL" -v ON_ERROR_STOP=1 -f sql/sync/sync_test_helpers.sql -f sql/sync/probe_sync_rpcs.sql`
+   - Live: edit `sql/sync/probe_sync_rpcs.sql` — remove the `insert into auth.users` line and replace
      `test_login(m)` with a real test member's claims, e.g.
      `select set_config('request.jwt.claims', '{"sub":"<REAL_MEMBER_UUID>"}', true);` — then run it.
      It is wrapped in `begin … rollback`, so nothing commits.
    Expect `PROBE OK …`.
 3. **Contract drift check (per §11):** on every upstream merge, diff `core/sync/*SyncService.kt` +
-   `SupabaseModels.kt` against the deployed `*_setup.sql` and re-run the probe. Add this to `UPSTREAM-SYNC.md`.
+   `SupabaseModels.kt` against the deployed `sql/sync/*_setup.sql` and re-run the probe. Add this to `UPSTREAM-SYNC.md`.
 4. **Live regression (T-REG):** confirm `get_access_verdict` / `claim_device` / `member_addon` apply /
    `record_heartbeat` still behave, and that `get_sync_owner` did not pre-exist before deploy.
 
@@ -112,11 +113,11 @@ Or run manually: `psql "$LIVE_DB_URL" -c "select public.prune_sync_events(180)"`
 
 ## Rollback (DATA-DESTRUCTIVE — the only rollback)
 
-Run the matching `*_teardown.sql` in REVERSE dependency order:
-`sync_maintenance_teardown.sql`, `profiles_teardown.sql`, `profile_settings_blob_teardown.sql`,
-`home_catalog_settings_teardown.sql`, `collections_teardown.sql`, `library_teardown.sql`,
-`watched_items_teardown.sql`, `watch_progress_teardown.sql` (leave `get_sync_owner` unless fully
-reverting; `get_sync_owner_teardown.sql` drops `sync_canary_members` **together with** the resolver, and
+Run the matching `sql/sync/*_teardown.sql` in REVERSE dependency order:
+`sql/sync/sync_maintenance_teardown.sql`, `sql/sync/profiles_teardown.sql`, `sql/sync/profile_settings_blob_teardown.sql`,
+`sql/sync/home_catalog_settings_teardown.sql`, `sql/sync/collections_teardown.sql`, `sql/sync/library_teardown.sql`,
+`sql/sync/watched_items_teardown.sql`, `sql/sync/watch_progress_teardown.sql` (leave `get_sync_owner` unless fully
+reverting; `sql/sync/get_sync_owner_teardown.sql` drops `sync_canary_members` **together with** the resolver, and
 only when no `sync_*` dependents remain — dropping the table while the resolver survived would make it
 raise `42P01`). **Teardown DROPS the stored rows** — any data written during the canary/live window is lost.
 Dropping the RPCs reverts every member to local-only at next start, no client update needed.

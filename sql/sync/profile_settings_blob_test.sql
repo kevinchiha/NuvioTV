@@ -123,7 +123,7 @@ begin
 end $$;
 
 -- re-apply the whole setup mid-test (comment kept off the \i line).
-\i profile_settings_blob_setup.sql
+\ir profile_settings_blob_setup.sql
 
 do $$
 declare s uuid := 'ffffffff-1111-eeee-ffff-ffffffffffff';

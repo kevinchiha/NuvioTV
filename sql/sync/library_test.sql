@@ -199,7 +199,7 @@ begin
 end $$;
 
 -- re-apply the whole setup mid-test (comment kept off the \i line — see Task 8 note).
-\i library_setup.sql
+\ir library_setup.sql
 
 do $$
 declare s uuid := 'ffffffff-cccc-ffff-ffff-ffffffffffff';

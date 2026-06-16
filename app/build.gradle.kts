@@ -137,11 +137,11 @@ android {
             buildConfigField("boolean", "FEATURE_EXTERNAL_TRAILERS_ENABLED", "true")
             buildConfigField("boolean", "FEATURE_MEMBER_ADDON_CONFIG", "true")
             // KevBox family build: remote access kill-switch + one-device-per-member limit ON.
-            // See plans/MEMBER-ACCESS-PLAN.md, member_access_setup.sql, member_device_setup.sql.
+            // See plans/MEMBER-ACCESS-PLAN.md, sql/member/member_access_setup.sql, sql/member/member_device_setup.sql.
             buildConfigField("boolean", "FEATURE_ACCESS_CONTROL", "true")
             buildConfigField("boolean", "FEATURE_DEVICE_LIMIT", "true")
             // KevBox family build: durations-only member activity telemetry ON.
-            // See plans/2026-06-09-member-activity-telemetry.md, member_telemetry_setup.sql.
+            // See plans/2026-06-09-member-activity-telemetry.md, sql/member/member_telemetry_setup.sql.
             buildConfigField("boolean", "FEATURE_TELEMETRY", "true")
         }
         create("playstore") {

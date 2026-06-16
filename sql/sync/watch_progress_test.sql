@@ -341,7 +341,7 @@ end $$;
 -- re-apply the whole setup mid-test (create-if-not-exists / or-replace).
 -- NOTE: keep the comment off the \i line — psql parses a trailing inline comment as extra
 -- \i arguments and emits noisy "extra argument ignored" warnings.
-\i watch_progress_setup.sql
+\ir watch_progress_setup.sql
 
 do $$
 declare s uuid := '99999999-9999-9999-9999-999999999999';
