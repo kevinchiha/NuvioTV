@@ -11,11 +11,14 @@ logic lives in new files — so upstream's commits rarely touch the same lines w
 is a ~5-minute merge with just an `app/build.gradle.kts` conflict.
 
 **But some cycles are heavier** — when upstream reworks an area we also touched (e.g. the 0.7.5-beta
-sync hit the player overhaul × our telemetry hooks, plus a repo-wide "design token" theming refactor).
-Expect **15–25 min** then, with conflicts in the player files, `Theme.kt`, `AboutScreen.kt`, and
-`AuthSignInScreen.kt`. See the expanded table below. The merge markers are the easy part — **the real
-gate is the compile check**, because upstream refactors can break our code with *no* conflict at all
-(see the "invisible breakage" callout).
+sync hit the player overhaul × our telemetry hooks, plus a repo-wide "design token" theming refactor;
+the 0.7.9-beta sync added a remote "sync backend switch" that deleted `SupabaseModule` and rewired
+every Supabase consumer — see the two 0.7.9 callouts below).
+Expect **25–40 min** then, with conflicts in the player files, `Theme.kt`, `AboutScreen.kt`,
+`AuthSignInScreen.kt`, and the `Account*` screens. See the expanded table below. The merge markers are
+the easy part — **the real gate is the compile check**, because upstream refactors can break our code
+with *no* conflict at all (see the "invisible breakage" callouts), and a remote-config change can hand
+control of our fleet to upstream with no code change at all (see the "remote control plane" callout).
 
 ## One-time setup (already done)
 
@@ -64,7 +67,9 @@ blocks, reset lines), the answer is almost always **keep both**.
 
 | File | Keep the KevBox side | Take upstream's side |
 |---|---|---|
-| `app/build.gradle.kts` | `applicationId = "tv.kevbox"`, our `versionCode`/`versionName`, `UPDATE_BASE_URL`, `isUniversalApk = false`, debug id `tv.kevbox.debug` | new dependencies, SDK/AGP bumps, new `buildConfigField`s, native/player changes |
+| `app/build.gradle.kts` | `applicationId = "tv.kevbox"`, our `versionCode`/`versionName`, `UPDATE_BASE_URL`, `isUniversalApk = false`, debug id `tv.kevbox.debug`; **keep `SYNC_BACKEND_MANIFEST_URL` blank (`""`)** and **leave `NUVIO_SUPABASE_*` blank** (see "remote control plane" callout) | new dependencies, SDK/AGP bumps, new `buildConfigField`s, native/player changes |
+| `MainActivity.kt` (`onResume`/`onStart`) | our `FEATURE_ACCESS_CONTROL`/`FEATURE_DEVICE_LIMIT` catch-up blocks | take upstream's new coroutine block that wraps `requestForegroundSync()` + `syncBackendSwitchService.refreshSelection()` — **don't** also keep a bare `requestForegroundSync()` or it fires twice |
+| `AccountScreen.kt` / `AccountSettingsContent.kt` | our `EmailPasswordForm` sign-in + `SHOW_SYNC_CODE_FEATURES` gating | take upstream's other additions, but **drop the read-only "Sync backend" `StatusCard`/`AccountInfoCard`** (it only shows an internal label like "Hosted"; not for family). Note: one copy auto-merges into the signed-out/signed-in sections with **no conflict** — grep `syncBackendName` and delete the stragglers |
 | `MainActivity.kt` | the `AuthEmailOnboardingScreen` first-run gate | everything else |
 | `AddonPreferences.kt` | KevBox `getDefaultAddons()` list + `seedDefaultAddonsOrderIfFirstLaunch()` | other additions |
 | `NuvioApplication.kt` | the addon-seed `launch{}` block | other startup changes |
@@ -106,6 +111,65 @@ Lesson: compile-green does not prove policy-safe. **After each sync, grep for ne
 points to screens KevBox suppressed** — e.g. `grep -rn "navigate(Screen.AddonManager\|navigate(Screen.Plugins"`
 and review any new sidebar / Settings rows. Upstream can re-surface a hidden feature through a brand-new
 code path that never touches your files.
+
+### 🛑 Remote control plane — upstream can switch our backend / force-logout the fleet (0.7.9-beta)
+
+The 0.7.9-beta sync added a **remote "sync backend switch"** (the `dbswitch` branch). On every
+`onCreate`/`onResume`/`onStart`, `MainActivity` calls `syncBackendSwitchService.refreshSelection()`,
+which fetches a JSON manifest from `BuildConfig.SYNC_BACKEND_MANIFEST_URL` and **obeys it**: the
+manifest can change the active sync backend and **force-logout every install** (`forceLogoutOnChange`
+defaults `true`). Upstream's default URL is `https://switch.nuvioapp.space/config.json` — a
+**NuvioMedia-controlled** endpoint we have no access to. Shipped as-is, that hands tapframe a remote
+off-switch over every family TV, plus a phone-home on every app foreground.
+
+**The fix is one line, and it must be re-applied on every future sync:** in `app/build.gradle.kts`,
+keep the `SYNC_BACKEND_MANIFEST_URL` `buildConfigField` default **blank** for *both* flavors:
+
+```kotlin
+buildConfigField("String", "SYNC_BACKEND_MANIFEST_URL", "\"${resolveProperty(devProperties, localProperties, "SYNC_BACKEND_MANIFEST_URL", "")}\"")
+```
+
+A blank URL makes `SyncBackendRepository.refreshFromManifest()` return `NotConfigured` immediately — no
+network call, no external switch. Second safety layer: leave `NUVIO_SUPABASE_URL` / `NUVIO_SUPABASE_ANON_KEY`
+**blank** so the alternate "nuvio" backend fails `isUsableClientConfig()` and can't be selected even if a
+manifest somehow slipped through. The default backend is `hosted`, which reads our existing
+`SUPABASE_URL`/`SUPABASE_ANON_KEY` — i.e. *our* Supabase — so blanking the manifest changes nothing about
+normal operation. **Post-sync check:** `grep -n "switch.nuvioapp.space\|SYNC_BACKEND_MANIFEST_URL" app/build.gradle.kts`
+— the only `nuvioapp.space` hit should be inside a comment, never a live `buildConfigField` default.
+
+### ⚠️ Invisible breakage #2 — upstream deletes a Hilt provider our own files depend on (0.7.9-beta)
+
+The same `dbswitch` work **deleted `app/src/main/java/com/nuvio/tv/core/di/SupabaseModule.kt`** (the Hilt
+`@Module` that `@Provides` `Postgrest`/`Auth`/`SupabaseClient`) and replaced it with an `@Inject`-able
+`SyncBackendSupabaseProvider` (so the remote switch can rebuild the client). Upstream re-wired *its own*
+injectors, but **four KevBox-only files upstream never sees** still inject `Postgrest` directly, so the
+merge auto-deletes the binding they rely on → **Hilt/compile failure with zero conflict markers**:
+
+- `app/src/full/java/com/nuvio/tv/core/memberconfig/MemberConfigService.kt`
+- `app/src/main/java/com/nuvio/tv/core/access/AccessControlService.kt`
+- `app/src/main/java/com/nuvio/tv/core/access/DeviceGuardService.kt`
+- `app/src/main/java/com/nuvio/tv/core/telemetry/TelemetryRepository.kt`
+
+Fix per file mirrors upstream's own migration (3 lines): swap the import, the constructor param, and add a
+property:
+
+```kotlin
+// import io.github.jan.supabase.postgrest.Postgrest   ->
+import com.nuvio.tv.core.network.SyncBackendSupabaseProvider
+// private val postgrest: Postgrest                    ->
+private val supabaseProvider: SyncBackendSupabaseProvider
+// add inside the class body:
+private val postgrest get() = supabaseProvider.postgrest
+```
+
+**Post-sync check (re-run on every future sync while `SupabaseModule` stays gone):**
+`grep -rn "private val .*: Postgrest\b\|private val .*: Auth\b\|private val .*: SupabaseClient\b" app/src`
+— should return **nothing** (every consumer goes through the provider). If upstream ever brings
+`SupabaseModule` back, these migrations become harmless no-ops, not breakage.
+
+> Note: upstream's 0.7.9 baseline profile (`baseline-prof.txt`/`startup-prof.txt`) still lists the deleted
+> `SupabaseModule` class — that's an upstream staleness, not ours. R8/ART silently drop unresolvable
+> profile rules, so it's benign and ships in upstream's own 0.7.9. Don't hand-edit those files.
 
 ## Verify before shipping
 
