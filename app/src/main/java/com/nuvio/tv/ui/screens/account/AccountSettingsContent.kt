@@ -122,8 +122,9 @@ fun AccountSettingsContent(
                 item(key = "account_sync_note_signed_out") {
                     AccountInlineNote(text = stringResource(R.string.account_sync_restart_note))
                 }
-                // Email/password sign-in. The old QR entry is dead (RPCs removed) and is no
-                // longer surfaced; account creation happens in the Supabase dashboard.
+                // KevBox: keep our email/password sign-in; discard upstream's QR sign-in button (the QR
+                // flow's RPCs were removed) AND its "Sync backend" StatusCard (internal label, not for
+                // family). The old QR entry is dead; account creation happens in the Supabase dashboard.
                 item(key = "account_sign_in_email") {
                     EmailPasswordForm(
                         onSubmit = { email, password ->
@@ -156,6 +157,8 @@ fun AccountSettingsContent(
                 item(key = "account_status") {
                     StatusCard(label = stringResource(R.string.account_signed_in_label), value = authState.email)
                 }
+                // KevBox: dropped upstream's "Sync backend" StatusCard here too (auto-merged in, removed
+                // for the same reason — internal label, not surfaced to family).
                 item(key = "account_sync_note_signed_in") {
                     AccountInlineNote(text = stringResource(R.string.account_sync_restart_note))
                 }

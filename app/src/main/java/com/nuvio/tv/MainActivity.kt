@@ -121,6 +121,7 @@ import com.nuvio.tv.core.access.AccessControlService
 import com.nuvio.tv.core.access.DeviceGuardService
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.build.AppFeaturePolicy
+import com.nuvio.tv.core.network.SyncBackendSwitchService
 import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.core.sync.ProfileSettingsSyncService
 import com.nuvio.tv.core.sync.ProfileSyncService
@@ -223,6 +224,9 @@ class MainActivity : ComponentActivity() {
     lateinit var startupSyncService: StartupSyncService
 
     @Inject
+    lateinit var syncBackendSwitchService: SyncBackendSwitchService
+
+    @Inject
     lateinit var androidTvChannelSyncService: com.nuvio.tv.core.sync.androidtv.AndroidTvChannelSyncService
 
     @Inject
@@ -300,6 +304,9 @@ class MainActivity : ComponentActivity() {
         externalPlaybackTracker.activityLauncher = externalPlayerLauncher
 
         PluginRuntimeHooks.onActivityCreate(this)
+        lifecycleScope.launch {
+            syncBackendSwitchService.refreshSelection()
+        }
 
         window?.decorView?.post {
             val snapshot = com.nuvio.tv.core.player.DisplayCapabilities.detect(this)
@@ -917,7 +924,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::jankStats.isInitialized) jankStats.isTrackingEnabled = true
-        startupSyncService.requestForegroundSync()
         // KevBox TV access kill-switch / device-limit catch-up. The foreground poller is a
         // LaunchedEffect that is cancelled while the Activity is STOPPED (Home → launcher, app
         // switch, external-player handoff), but the process often stays resident on Android TV, so
@@ -928,7 +934,13 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.FEATURE_DEVICE_LIMIT) {
             lifecycleScope.launch { deviceGuardService.refreshDeviceClaim() }
         }
+        // KevBox upstream-sync note: upstream (0.7.9) moved startupSyncService.requestForegroundSync()
+        // into the coroutine block below (alongside its sync-backend refreshSelection()). We keep our
+        // access/device blocks above and let upstream own this block — do NOT re-add a separate
+        // requestForegroundSync() call here or it fires twice.
         lifecycleScope.launch {
+            syncBackendSwitchService.refreshSelection()
+            startupSyncService.requestForegroundSync()
             if (isFirstResumeAfterCreate) {
                 isFirstResumeAfterCreate = false
                 traktProgressService.invalidateAndRefresh()
@@ -950,7 +962,10 @@ class MainActivity : ComponentActivity() {
         // tracked; onActivityResult keeps it for a completion or dismisses it otherwise.
         externalPlaybackTracker.raiseAutoNextOverlayOnReturn()
         super.onStart()
-        profileSettingsSyncService.requestForegroundPull()
+        lifecycleScope.launch {
+            syncBackendSwitchService.refreshSelection()
+            profileSettingsSyncService.requestForegroundPull()
+        }
         androidTvChannelSyncService.onForegroundChanged(true)
     }
 
@@ -1336,7 +1351,6 @@ private fun LegacySidebarButton(
                 textAlign = TextAlign.Start,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .fillMaxWidth()
                     .padding(start = 54.dp, end = 14.dp)
             )
         }

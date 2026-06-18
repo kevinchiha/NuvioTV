@@ -110,6 +110,8 @@ fun AccountScreen(
                         color = NuvioTheme.colors.TextSecondary
                     )
                 }
+                // KevBox: dropped upstream's "Sync backend" AccountInfoCard (auto-merged into the
+                // signed-out section; removed for consistency — internal label, not for family).
                 item {
                     AccountActionCard(
                         icon = Icons.Default.Person,
@@ -160,6 +162,8 @@ fun AccountScreen(
                         value = authState.email
                     )
                 }
+                // KevBox: dropped upstream's "Sync backend" AccountInfoCard (it only shows an internal
+                // label like "Hosted"; family members never need it, and we pin the backend anyway).
                 // Linked devices are backed by a sync RPC that no longer exists; hide the
                 // section so it isn't a permanently-empty/broken panel.
                 if (SHOW_SYNC_CODE_FEATURES) {

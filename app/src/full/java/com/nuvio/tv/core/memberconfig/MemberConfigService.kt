@@ -5,7 +5,7 @@ import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.memberconfig.model.MemberAddonRow
 import com.nuvio.tv.domain.model.AuthState
 import com.nuvio.tv.domain.repository.AddonRepository
-import io.github.jan.supabase.postgrest.Postgrest
+import com.nuvio.tv.core.network.SyncBackendSupabaseProvider
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,11 +33,19 @@ import javax.inject.Singleton
  */
 @Singleton
 class MemberConfigService @Inject constructor(
-    private val postgrest: Postgrest,
+    private val supabaseProvider: SyncBackendSupabaseProvider,
     private val authManager: AuthManager,
     private val addonRepository: AddonRepository,
     private val memberConfigPreferences: MemberConfigPreferences
 ) {
+    // KevBox upstream-sync note (0.7.9): upstream deleted SupabaseModule (which used to @Provide
+    // Postgrest directly via Hilt) and routed every consumer through SyncBackendSupabaseProvider so a
+    // remote "backend switch" could swap the client. This is a KevBox-only file upstream never touches,
+    // so the merge leaves it injecting the now-missing Postgrest binding → Hilt/compile break with NO
+    // conflict markers. We mirror upstream's exact fix: inject the provider, expose a `postgrest`
+    // property off it. Re-apply this on every future sync if SupabaseModule stays gone.
+    private val postgrest get() = supabaseProvider.postgrest
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**

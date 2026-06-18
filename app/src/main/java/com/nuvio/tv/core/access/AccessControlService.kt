@@ -4,7 +4,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.data.local.AccessControlDataStore
-import io.github.jan.supabase.postgrest.Postgrest
+import com.nuvio.tv.core.network.SyncBackendSupabaseProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,10 +32,14 @@ private const val TAG = "AccessControlService"
  */
 @Singleton
 class AccessControlService @Inject constructor(
-    private val postgrest: Postgrest,
+    private val supabaseProvider: SyncBackendSupabaseProvider,
     private val authManager: AuthManager,
     private val accessControlDataStore: AccessControlDataStore
 ) {
+    // KevBox upstream-sync note (0.7.9): SupabaseModule was deleted upstream; inject the new
+    // SyncBackendSupabaseProvider instead of Postgrest. See MemberConfigService for the full rationale.
+    private val postgrest get() = supabaseProvider.postgrest
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _lockedOut = MutableStateFlow(false)

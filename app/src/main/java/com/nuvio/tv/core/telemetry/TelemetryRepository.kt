@@ -3,7 +3,7 @@ package com.nuvio.tv.core.telemetry
 import android.util.Log
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.auth.AuthManager
-import io.github.jan.supabase.postgrest.Postgrest
+import com.nuvio.tv.core.network.SyncBackendSupabaseProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,9 +24,13 @@ import javax.inject.Singleton
  */
 @Singleton
 class TelemetryRepository @Inject constructor(
-    private val postgrest: Postgrest,
+    private val supabaseProvider: SyncBackendSupabaseProvider,
     private val authManager: AuthManager,
 ) {
+    // KevBox upstream-sync note (0.7.9): SupabaseModule was deleted upstream; inject the new
+    // SyncBackendSupabaseProvider instead of Postgrest. See MemberConfigService for the full rationale.
+    private val postgrest get() = supabaseProvider.postgrest
+
     suspend fun heartbeat(deviceId: String, kind: String) = call("record_heartbeat") {
         buildJsonObject {
             put("p_device_id", deviceId)
