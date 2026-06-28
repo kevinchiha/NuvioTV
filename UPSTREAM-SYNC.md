@@ -13,7 +13,8 @@ is a ~5-minute merge with just an `app/build.gradle.kts` conflict.
 **But some cycles are heavier** — when upstream reworks an area we also touched (e.g. the 0.7.5-beta
 sync hit the player overhaul × our telemetry hooks, plus a repo-wide "design token" theming refactor;
 the 0.7.9-beta sync added a remote "sync backend switch" that deleted `SupabaseModule` and rewired
-every Supabase consumer — see the two 0.7.9 callouts below).
+every Supabase consumer — see the two 0.7.9 callouts below; the 0.7.12-beta sync grew that surface again
+with a dev-only `DebugSyncBackendSwitchCard` and a new opt-in playback-reporting endpoint — see the 0.7.12 callouts).
 Expect **25–40 min** then, with conflicts in the player files, `Theme.kt`, `AboutScreen.kt`,
 `AuthSignInScreen.kt`, and the `Account*` screens. See the expanded table below. The merge markers are
 the easy part — **the real gate is the compile check**, because upstream refactors can break our code
@@ -69,14 +70,14 @@ blocks, reset lines), the answer is almost always **keep both**.
 |---|---|---|
 | `app/build.gradle.kts` | `applicationId = "tv.kevbox"`, our `versionCode`/`versionName`, `UPDATE_BASE_URL`, `isUniversalApk = false`, debug id `tv.kevbox.debug`; **keep `SYNC_BACKEND_MANIFEST_URL` blank (`""`)** and **leave `NUVIO_SUPABASE_*` blank** (see "remote control plane" callout) | new dependencies, SDK/AGP bumps, new `buildConfigField`s, native/player changes |
 | `MainActivity.kt` (`onResume`/`onStart`) | our `FEATURE_ACCESS_CONTROL`/`FEATURE_DEVICE_LIMIT` catch-up blocks | take upstream's new coroutine block that wraps `requestForegroundSync()` + `syncBackendSwitchService.refreshSelection()` — **don't** also keep a bare `requestForegroundSync()` or it fires twice |
-| `AccountScreen.kt` / `AccountSettingsContent.kt` | our `EmailPasswordForm` sign-in + `SHOW_SYNC_CODE_FEATURES` gating | take upstream's other additions, but **drop the read-only "Sync backend" `StatusCard`/`AccountInfoCard`** (it only shows an internal label like "Hosted"; not for family). Note: one copy auto-merges into the signed-out/signed-in sections with **no conflict** — grep `syncBackendName` and delete the stragglers |
+| `AccountScreen.kt` / `AccountSettingsContent.kt` | our `EmailPasswordForm` sign-in + `SHOW_SYNC_CODE_FEATURES` gating | take upstream's other additions, but **drop the read-only "Sync backend" `StatusCard`/`AccountInfoCard` AND the new `DebugSyncBackendSwitchCard`** (the 0.7.12 dev-only "local db switch", gated by `debugBackendSwitchEnabled`/`AppFeaturePolicy.debugBackendSwitcherEnabled` — never surface it to family). Note: copies auto-merge into the signed-out/signed-in sections with **no conflict** — grep `syncBackendName`/`DebugSyncBackendSwitchCard` and delete the stragglers (leave the ones in the dead `AuthQrSignInScreen.kt` — that screen is never navigated to) |
 | `MainActivity.kt` | the `AuthEmailOnboardingScreen` first-run gate | everything else |
 | `AddonPreferences.kt` | KevBox `getDefaultAddons()` list + `seedDefaultAddonsOrderIfFirstLaunch()` | other additions |
 | `NuvioApplication.kt` | the addon-seed `launch{}` block | other startup changes |
 | `app/src/full/java/.../updater/**` | the whole KevBox updater (version.json / SHA-256 / speed+ETA) | only if upstream reworked its own updater |
 | `app/src/full/res/**` and new files (`EmailPasswordForm`, `CredentialCrypto`, `LastSignInDataStore`, `DefaultContent`, `Checksum`, `release.sh`) | yours — upstream has none of these | n/a |
 | `Theme.kt` | our default `LocalAppTheme = AppTheme.OCEAN` (NOT upstream's `WHITE`) | upstream's new lines, e.g. `LocalNuvioTextStyles` and design-token additions |
-| `PlayerRuntimeController.kt`, `PlayerViewModel.kt`, `PlayerRuntimeControllerInitialization.kt` | **keep BOTH** — our `telemetryRepository`/`deviceGuardDataStore` injection + telemetry `launch{}`/`telemetrySessionStarted` reset | **keep BOTH** — upstream's `streamBadgePresentation`, trakt-CW `launch{}`, `hasMarkedCurrentEpisodeCompleted` reset |
+| `PlayerRuntimeController.kt`, `PlayerViewModel.kt`, `PlayerRuntimeControllerInitialization.kt` | **keep BOTH** — our `telemetryRepository`/`deviceGuardDataStore` injection + telemetry `launch{}`/`telemetrySessionStarted` reset. **EXCEPTION (0.7.12):** in the `STATE_ENDED` branch, keep our **commented-out** `emitCompletionScrobbleStop(...)` — do NOT take upstream's active call. Trakt completion already fires exactly once from `PlayerRuntimeControllerPlaybackEvents.kt`'s `if (ended && !wasEnded)` path; uncommenting here double-scrobbles | **keep BOTH** — upstream's `streamBadgePresentation`, trakt-CW `launch{}`, `hasMarkedCurrentEpisodeCompleted` reset |
 | `AboutScreen.kt` | our `if (BuildConfig.FEATURE_TELEMETRY)` §11 privacy-notice block | upstream's added imports + tokenized spacer (`NuvioTheme.spacing.xxs`) |
 | `AuthSignInScreen.kt` | our `EmailPasswordForm(...)` sign-in body — **discard** upstream's QR/`Text` header (we replaced that flow) | nothing here |
 | `NuvioNavHost.kt` (Settings block) | route the dormant account entry to `Screen.AuthSignIn` (QR retired); **force `onNavigateToAddons`/`onNavigateToPlugins` to no-op `{}`** (see policy-regression callout) | **keep both** — take upstream's new `onNavigateToPlugins` param and any other added route callbacks |
@@ -136,6 +137,19 @@ manifest somehow slipped through. The default backend is `hosted`, which reads o
 `SUPABASE_URL`/`SUPABASE_ANON_KEY` — i.e. *our* Supabase — so blanking the manifest changes nothing about
 normal operation. **Post-sync check:** `grep -n "switch.nuvioapp.space\|SYNC_BACKEND_MANIFEST_URL" app/build.gradle.kts`
 — the only `nuvioapp.space` hit should be inside a comment, never a live `buildConfigField` default.
+
+### 🛑 New data-sending endpoint each heavy cycle — verify it stays blank (0.7.12-beta)
+
+The remote-control-plane is not a one-off; **upstream keeps adding `*_URL`/`*_BASE_URL` `buildConfigField`s
+that send data out.** 0.7.12-beta added **opt-in playback-issue diagnostics reporting**:
+`PlaybackIssueReportRepository.submit()` POSTs `api/playback-reports` to `BuildConfig.PLAYBACK_REPORTS_BASE_URL`.
+It's **inert for KevBox by default** (the opt-in `playbackIssueReportsEnabled` defaults `false`, *and* `submit()`
+no-ops when the base URL is blank, *and* upstream itself defaults that URL blank — read from `local.properties`).
+So nothing to change **as long as `PLAYBACK_REPORTS_BASE_URL` is never set in `local.properties`**.
+
+**Standing post-sync check** — list every data-sending field and confirm none default to a NuvioMedia/tapframe host:
+`grep -nE 'buildConfigField.*(_URL|_BASE_URL)' app/build.gradle.kts` — each should resolve from `local.properties`
+(or `devProperties`) with a `""` fallback, never a hardcoded remote default. Treat any new one like the manifest URL.
 
 ### ⚠️ Invisible breakage #2 — upstream deletes a Hilt provider our own files depend on (0.7.9-beta)
 
