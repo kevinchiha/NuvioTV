@@ -324,6 +324,7 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                     .sortedByDescending { it.lastWatched }
                     .take(CW_MAX_RECENT_PROGRESS_ITEMS)
                     .toList()
+
                 val recentNextUpSeeds = nextUpSeeds
                     .asSequence()
                     .filter { progress -> cutoffMs == null || progress.lastWatched >= cutoffMs }
@@ -553,8 +554,8 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                         count = initialItems.size,
                         elapsedMs = SystemClock.elapsedRealtime() - cycleStartMs
                     )
-                    // Persist in-progress snapshot early so force-close doesn't lose items
-                    if (inProgressOnly.isNotEmpty()) {
+                    // Persist in-progress snapshot early so force-close doesn't lose items.
+                    if (inProgressOnly.isNotEmpty() && snapshot.hasLoadedRemoteProgress) {
                         viewModelScope.launch(Dispatchers.IO) {
                             val brokenUrls = com.nuvio.tv.ui.components.brokenImageUrls
                             val ipSnap = inProgressOnly.map { item ->
@@ -627,6 +628,11 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                                 )
                                 _uiState.update { state ->
                                     if (state.continueWatchingItems == partialItems) {
+                                        state
+                                    } else if (!snapshot.hasLoadedRemoteProgress && state.continueWatchingItems.isNotEmpty()) {
+                                        // Don't overwrite with partial data until remote progress
+                                        // has loaded. Partial next-up resolution should not replace
+                                        // cached items that include Trakt in-progress entries.
                                         state
                                     } else {
                                         state.copy(continueWatchingItems = partialItems)
@@ -858,16 +864,25 @@ internal fun HomeViewModel.loadContinueWatchingPipeline() {
                                             }
                                         }
                                     } else {
-                                        // No next-up — mark as validated with smart deadline:
-                                        // use upcoming season date if known, otherwise permanent.
-                                        val nextSeasonMs = cwBadgeNextSeasonMs[seed.contentId]
-                                        val deadline = nextSeasonMs
-                                            ?: (System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000)
-                                        fullyWatchedSeriesIds.updateWithValidation(
-                                            fullyWatchedSeriesIds.fullyWatchedSeriesIds.value,
-                                            setOf(seed.contentId),
-                                            mapOf(seed.contentId to deadline)
-                                        )
+                                        // No next-up — mark as validated with smart deadline
+                                        // ONLY if meta was actually resolved (confirming no next episode).
+                                        // If meta was unavailable (network error), skip marking to avoid
+                                        // incorrectly removing the series from Continue Watching.
+                                        val metaWasResolved = synchronized(cwMetaCache) {
+                                            cwMetaCache["${seed.contentType}:${seed.contentId}"]
+                                                ?: cwMetaCache["series:${seed.contentId}"]
+                                                ?: cwMetaCache["tv:${seed.contentId}"]
+                                        } != null
+                                        if (metaWasResolved) {
+                                            val nextSeasonMs = cwBadgeNextSeasonMs[seed.contentId]
+                                            val deadline = nextSeasonMs
+                                                ?: (System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000)
+                                            fullyWatchedSeriesIds.updateWithValidation(
+                                                fullyWatchedSeriesIds.fullyWatchedSeriesIds.value,
+                                                setOf(seed.contentId),
+                                                mapOf(seed.contentId to deadline)
+                                            )
+                                        }
                                     }
                                     kotlinx.coroutines.yield()
                                 }
@@ -1439,7 +1454,19 @@ private suspend fun HomeViewModel.buildLightweightNextUpItems(
                     showUnairedNextUp = showUnairedNextUp,
                     debug = debug
                 ) ?: run {
-                    logNextUpDecision("drop contentId=${progress.contentId} name=${progress.name} reason=buildNextUpItem-null")
+                    // If meta was not available (network error, addon timeout),
+                    // remove from processedContentIds so this series is NOT
+                    // treated as "rejected". The cached CW snapshot will keep
+                    // it visible until the next successful meta resolution.
+                    val metaResolved = synchronized(cwMetaCache) {
+                        cwMetaCache["${progress.contentType}:${progress.contentId}"]
+                            ?: cwMetaCache["series:${progress.contentId}"]
+                            ?: cwMetaCache["tv:${progress.contentId}"]
+                    } != null
+                    if (!metaResolved) {
+                        processedContentIds.remove(progress.contentId)
+                    }
+                    logNextUpDecision("drop contentId=${progress.contentId} name=${progress.name} reason=buildNextUpItem-null metaResolved=$metaResolved")
                     return@withPermit
                 }
                 val fullyWatched = fullyWatchedSeriesIds.fullyWatchedSeriesIds.value
@@ -1572,7 +1599,7 @@ internal fun sortContinueWatchingItems(
             val sortedReleased = released.sortedByDescending { item ->
                 when (item) {
                     is ContinueWatchingItem.InProgress -> item.progress.lastWatched
-                    is ContinueWatchingItem.NextUp -> item.info.lastWatched
+                    is ContinueWatchingItem.NextUp -> if (item.info.isReleaseAlert) item.info.sortTimestamp else item.info.lastWatched
                 }
             }
 
@@ -1670,16 +1697,22 @@ private suspend fun HomeViewModel.buildNextUpItem(
                 cwBadgeNextSeasonMs[progress.contentId] = ms
             }
         }
-        // Mark as validated so this seed is skipped on subsequent launches.
-        // Uses upcoming season date if known, otherwise 7-day default TTL.
-        val nextSeasonMs = cwBadgeNextSeasonMs[progress.contentId]
-        val deadline = nextSeasonMs
-            ?: (System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000)
-        fullyWatchedSeriesIds.updateWithValidation(
-            fullyWatchedSeriesIds.fullyWatchedSeriesIds.value,
-            setOf(progress.contentId),
-            mapOf(progress.contentId to deadline)
-        )
+        // Only mark as fully watched if meta was actually resolved (i.e. we
+        // confirmed there is no next episode). When meta is unavailable
+        // (network error, addon timeout) we must NOT treat the series as
+        // fully watched — that would incorrectly remove it from Continue
+        // Watching. The cached CW snapshot will keep it visible until the
+        // next successful meta resolution.
+        if (cachedMeta != null) {
+            val nextSeasonMs = cwBadgeNextSeasonMs[progress.contentId]
+            val deadline = nextSeasonMs
+                ?: (System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000)
+            fullyWatchedSeriesIds.updateWithValidation(
+                fullyWatchedSeriesIds.fullyWatchedSeriesIds.value,
+                setOf(progress.contentId),
+                mapOf(progress.contentId to deadline)
+            )
+        }
         return null
     }
     val seedMeta = resolveMetaForProgress(progress, cwMetaCache, debug)

@@ -245,6 +245,10 @@ class FolderDetailViewModel @Inject constructor(
             val posterCardCornerRadiusDp = layoutPreferenceDataStore.posterCardCornerRadiusDp.first()
             val showAll = (collection?.showAllTab ?: true) && folder.sources.size >= 2
 
+            val viewMode = collection?.viewMode ?: FolderViewMode.TABBED_GRID
+            val useShimmerPlaceholders = viewMode == FolderViewMode.FOLLOW_LAYOUT &&
+                (homeLayout == HomeLayout.MODERN || homeLayout == HomeLayout.CLASSIC)
+
             val sourceTabs = folder.sources.map { source ->
                 val (name, typeLabel, rawType) = when (source) {
                     is AddonCatalogCollectionSource -> {
@@ -258,7 +262,44 @@ class FolderDetailViewModel @Inject constructor(
                     is TmdbCollectionSource -> Triple(source.title, buildTmdbTypeLabel(source), source.mediaType.value.toCollectionRawType())
                     is TraktCollectionSource -> Triple(source.title, buildTraktTypeLabel(source), source.mediaType.value.toCollectionRawType())
                 }
-                FolderTab(label = name, typeLabel = typeLabel, rawType = rawType, source = source, isLoading = true)
+                // Generate placeholder CatalogRow with shimmer items for Modern/Classic follow-layout
+                val placeholderRow = if (useShimmerPlaceholders) {
+                    val (placeholderAddonId, placeholderCatalogId) = when (source) {
+                        is AddonCatalogCollectionSource -> source.addonId to source.catalogId
+                        is TmdbCollectionSource -> "tmdb" to buildTmdbSourceKey(source)
+                        is TraktCollectionSource -> "trakt" to buildTraktSourceKey(source)
+                    }
+                    val apiType = rawType.ifBlank { "movie" }
+                    val fakeItems = (0 until 8).map { i ->
+                        MetaPreview(
+                            id = "__placeholder_${placeholderCatalogId}_$i",
+                            type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
+                            rawType = apiType,
+                            name = " ",
+                            poster = "placeholder://empty",
+                            posterShape = com.nuvio.tv.domain.model.PosterShape.POSTER,
+                            background = null,
+                            logo = null,
+                            description = null,
+                            releaseInfo = " ",
+                            imdbRating = null,
+                            genres = emptyList()
+                        )
+                    }
+                    CatalogRow(
+                        addonId = placeholderAddonId,
+                        addonName = "",
+                        addonBaseUrl = "",
+                        catalogId = placeholderCatalogId,
+                        catalogName = name,
+                        type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
+                        rawType = apiType,
+                        items = fakeItems,
+                        isLoading = true,
+                        hasMore = false
+                    )
+                } else null
+                FolderTab(label = name, typeLabel = typeLabel, rawType = rawType, source = source, catalogRow = placeholderRow, isLoading = true)
             }
 
             val tabs = if (showAll) {
@@ -278,7 +319,7 @@ class FolderDetailViewModel @Inject constructor(
                 it.copy(
                     folder = folder,
                     collectionTitle = collection?.title ?: "",
-                    viewMode = collection?.viewMode ?: FolderViewMode.TABBED_GRID,
+                    viewMode = viewMode,
                     homeLayout = homeLayout,
                     posterLabelsEnabled = posterLabelsEnabled,
                     catalogAddonNameEnabled = catalogAddonNameEnabled,
@@ -304,6 +345,9 @@ class FolderDetailViewModel @Inject constructor(
             // The offset for source tab indices when "All" tab is present
             val tabOffset = if (showAll) 1 else 0
 
+            // Immediately build shimmer placeholders for FOLLOW_LAYOUT mode
+            rebuildFollowLayoutState()
+
             folder.sources.forEachIndexed { index, source ->
                 loadSourceForTab(index + tabOffset, source)
             }
@@ -315,7 +359,10 @@ class FolderDetailViewModel @Inject constructor(
         if (!hasAllTab) return
         val sourceTabs = state.tabs.drop(1) // skip the All tab
         val anyLoading = sourceTabs.any { it.isLoading }
-        val loadedRows = sourceTabs.mapNotNull { it.catalogRow }
+        // Only include real loaded rows (exclude placeholder shimmer rows)
+        val loadedRows = sourceTabs.mapNotNull { tab ->
+            tab.catalogRow?.takeIf { !it.isLoading }
+        }
 
         if (loadedRows.isEmpty()) return
 
@@ -343,11 +390,65 @@ class FolderDetailViewModel @Inject constructor(
         if (state.viewMode != FolderViewMode.FOLLOW_LAYOUT) return
         val sourceTabs = state.tabs.filter { !it.isAllTab }
         val loadedRows = sourceTabs.mapNotNull { it.catalogRow }
-        if (loadedRows.isEmpty()) return
+        val useShimmer = state.homeLayout == HomeLayout.MODERN || state.homeLayout == HomeLayout.CLASSIC
 
-        val homeRows = loadedRows.map { HomeRow.Catalog(it) }
+        // Build rows including placeholder shimmer rows for tabs still loading (Modern/Classic)
+        val allRows = if (useShimmer) {
+            sourceTabs.map { tab ->
+                if (tab.catalogRow != null) {
+                    tab.catalogRow
+                } else if (tab.isLoading) {
+                    // Generate a placeholder CatalogRow with shimmer items
+                    val (phAddonId, phCatalogId) = when (val src = tab.source) {
+                        is AddonCatalogCollectionSource -> src.addonId to src.catalogId
+                        is TmdbCollectionSource -> "tmdb" to buildTmdbSourceKey(src)
+                        is TraktCollectionSource -> "trakt" to buildTraktSourceKey(src)
+                        else -> "placeholder" to tab.label
+                    }
+                    val apiType = tab.rawType.ifBlank { "movie" }
+                    val fakeItems = (0 until 8).map { i ->
+                        MetaPreview(
+                            id = "__placeholder_${phCatalogId}_$i",
+                            type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
+                            rawType = apiType,
+                            name = " ",
+                            poster = "placeholder://empty",
+                            posterShape = com.nuvio.tv.domain.model.PosterShape.POSTER,
+                            background = null,
+                            logo = null,
+                            description = null,
+                            releaseInfo = " ",
+                            imdbRating = null,
+                            genres = emptyList()
+                        )
+                    }
+                    CatalogRow(
+                        addonId = phAddonId,
+                        addonName = "",
+                        addonBaseUrl = "",
+                        catalogId = phCatalogId,
+                        catalogName = tab.label,
+                        type = com.nuvio.tv.domain.model.ContentType.fromString(apiType),
+                        rawType = apiType,
+                        items = fakeItems,
+                        isLoading = true,
+                        hasMore = false
+                    )
+                } else {
+                    null // error state or other – skip
+                }
+            }.filterNotNull()
+        } else {
+            loadedRows
+        }
+
+        if (allRows.isEmpty()) return
+
+        val homeRows = allRows.map { HomeRow.Catalog(it) }
+        // Only include real (non-placeholder) rows in grid items
+        val realRows = allRows.filter { !it.isLoading }
         val gridItems = buildList<GridItem> {
-            loadedRows.forEach { row ->
+            realRows.forEach { row ->
                 add(GridItem.SectionDivider(
                     catalogName = row.catalogName,
                     catalogId = row.catalogId,
@@ -388,7 +489,7 @@ class FolderDetailViewModel @Inject constructor(
                 val modernPresentation = buildModernHomePresentation(
                     input = ModernHomePresentationInput(
                         homeRows = homeRows,
-                        catalogRows = loadedRows,
+                        catalogRows = allRows,
                         continueWatchingItems = emptyList(),
                         useLandscapePosters = state.modernLandscapePostersEnabled,
                         showCatalogTypeSuffix = state.catalogTypeSuffixEnabled,
@@ -400,7 +501,7 @@ class FolderDetailViewModel @Inject constructor(
                 )
                 _uiState.update { s ->
                     val homeState = HomeUiState(
-                        catalogRows = loadedRows,
+                        catalogRows = allRows,
                         homeRows = homeRows,
                         gridItems = gridItems,
                         heroItems = emptyList(),
@@ -431,7 +532,7 @@ class FolderDetailViewModel @Inject constructor(
         } else {
             _uiState.update { s ->
                 val homeState = HomeUiState(
-                    catalogRows = loadedRows,
+                    catalogRows = allRows,
                     homeRows = homeRows,
                     gridItems = gridItems,
                     heroItems = emptyList(),
@@ -908,6 +1009,36 @@ class FolderDetailViewModel @Inject constructor(
         }
     }
 
+    private fun buildTmdbSourceKey(source: TmdbCollectionSource): String {
+        return buildString {
+            append("tmdb_")
+            append(source.sourceType.name.lowercase(java.util.Locale.US))
+            source.tmdbId?.let {
+                append("_")
+                append(it)
+            }
+            append("_")
+            append(source.mediaType.value)
+            append("_")
+            append(source.sortBy.replace('.', '_'))
+            if (source.sourceType == com.nuvio.tv.domain.model.TmdbCollectionSourceType.DISCOVER) {
+                append("_")
+                append(source.filters.hashCode().toUInt().toString(16))
+            }
+        }
+    }
+
+    private fun buildTraktSourceKey(source: TraktCollectionSource): String {
+        return listOf(
+            "trakt",
+            "list",
+            source.traktListId.toString(),
+            source.mediaType.value,
+            source.sortBy.lowercase(java.util.Locale.US),
+            source.sortHow.lowercase(java.util.Locale.US)
+        ).joinToString("_")
+    }
+
     private fun String.toCollectionRawType(): String {
         return if (lowercase() == "tv") "series" else this
     }
@@ -923,6 +1054,14 @@ class FolderDetailViewModel @Inject constructor(
             _enrichingItemId.value = null
         }
         if (item.id in enrichedItemIds) {
+            // Ensure enrichedPreviews has this item for hero display.
+            if (item.id !in _enrichedPreviews.value) {
+                val enrichedItem = _uiState.value.tabs
+                    .firstNotNullOfOrNull { tab -> tab.catalogRow?.items?.firstOrNull { it.id == item.id } }
+                if (enrichedItem != null) {
+                    _enrichedPreviews.update { it + (item.id to enrichedItem) }
+                }
+            }
             return
         }
 
@@ -1055,35 +1194,41 @@ class FolderDetailViewModel @Inject constructor(
                 item.logo.isNullOrBlank()
             val needsExternalAddon = enrichment == null || artworkStillMissing
             if (needsExternalAddon && externalMetaEnabled) {
-                val metaResult = metaRepository.getMetaFromAllAddons(item.apiType, item.id)
+                val metaResult = metaRepository.getMetaFromAllAddons(item.apiType, item.id, item.sourceAddonBaseUrl)
                     .first { it is NetworkResult.Success || it is NetworkResult.Error }
-                if (metaResult is NetworkResult.Success) {
-                    val meta = metaResult.data
-                    if (artworkStillMissing) {
-                        // Only apply artwork — TMDB already provided the rest.
-                        updateItemInTabs(item.id) { merged ->
-                            merged.copy(
-                                background = meta.background?.takeIf { it.isNotBlank() } ?: merged.background,
-                                logo = meta.logo?.takeIf { it.isNotBlank() } ?: merged.logo
-                            )
-                        }
-                    } else {
-                        updateItemInTabs(item.id) { merged ->
-                            merged.copy(
-                                name = meta.name.takeIf { it.isNotBlank() } ?: merged.name,
-                                description = meta.description?.takeIf { it.isNotBlank() } ?: merged.description,
-                                background = meta.background?.takeIf { it.isNotBlank() } ?: merged.background,
-                                logo = meta.logo?.takeIf { it.isNotBlank() } ?: merged.logo,
-                                genres = meta.genres.takeIf { it.isNotEmpty() } ?: merged.genres,
-                                imdbRating = meta.imdbRating ?: merged.imdbRating,
-                                releaseInfo = meta.releaseInfo?.takeIf { it.isNotBlank() } ?: merged.releaseInfo
-                            )
+                when {
+                    metaResult is NetworkResult.Success -> {
+                        val meta = metaResult.data
+                        if (artworkStillMissing) {
+                            // Only apply artwork — TMDB already provided the rest.
+                            updateItemInTabs(item.id) { merged ->
+                                merged.copy(
+                                    background = meta.background?.takeIf { it.isNotBlank() } ?: merged.background,
+                                    logo = meta.logo?.takeIf { it.isNotBlank() } ?: merged.logo
+                                )
+                            }
+                        } else {
+                            updateItemInTabs(item.id) { merged ->
+                                merged.copy(
+                                    name = meta.name.takeIf { it.isNotBlank() } ?: merged.name,
+                                    description = meta.description?.takeIf { it.isNotBlank() } ?: merged.description,
+                                    background = meta.background?.takeIf { it.isNotBlank() } ?: merged.background,
+                                    logo = meta.logo?.takeIf { it.isNotBlank() } ?: merged.logo,
+                                    genres = meta.genres.takeIf { it.isNotEmpty() } ?: merged.genres,
+                                    imdbRating = meta.imdbRating ?: merged.imdbRating,
+                                    releaseInfo = meta.releaseInfo?.takeIf { it.isNotBlank() } ?: merged.releaseInfo
+                                )
+                            }
                         }
                     }
-                } else {
-                    // External meta also failed — mark as failed enrichment.
-                    if (item.id !in _enrichedPreviews.value) {
-                        _failedEnrichmentIds.value = _failedEnrichmentIds.value + item.id
+                    metaResult is NetworkResult.Error && metaResult.code == NetworkResult.SOURCE_SUFFICIENT_CODE -> {
+                        // Catalog already has the best available meta — no update needed.
+                    }
+                    else -> {
+                        // External meta also failed — mark as failed enrichment.
+                        if (item.id !in _enrichedPreviews.value) {
+                            _failedEnrichmentIds.value = _failedEnrichmentIds.value + item.id
+                        }
                     }
                 }
             }
@@ -1098,6 +1243,7 @@ class FolderDetailViewModel @Inject constructor(
             if (enrichedItem != null) {
                 _enrichedPreviews.update { it + (item.id to enrichedItem) }
             }
+            enrichedItemIds.add(item.id)
             rebuildFollowLayoutState()
         }
     }
@@ -1287,7 +1433,7 @@ class FolderDetailViewModel @Inject constructor(
                 }
                 if (!tmdbEnriched && externalMetaEnabled && item.id !in prefetchedExternalMetaIds) {
                     prefetchedExternalMetaIds.add(item.id)
-                    val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id)
+                    val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id, item.sourceAddonBaseUrl)
                         .first { it is com.nuvio.tv.core.network.NetworkResult.Success || it is com.nuvio.tv.core.network.NetworkResult.Error }
                     if (result is com.nuvio.tv.core.network.NetworkResult.Success) {
                         enrichedItemIds.add(item.id)
@@ -1303,6 +1449,18 @@ class FolderDetailViewModel @Inject constructor(
                                 releaseInfo = meta.releaseInfo?.takeIf { it.isNotBlank() } ?: merged.releaseInfo
                             )
                         }
+                        val enrichedItem = _uiState.value.tabs
+                            .firstNotNullOfOrNull { tab -> tab.catalogRow?.items?.firstOrNull { it.id == item.id } }
+                        if (enrichedItem != null) {
+                            _enrichedPreviews.update { it + (item.id to enrichedItem) }
+                        }
+                    } else if (result is com.nuvio.tv.core.network.NetworkResult.Error && result.code == com.nuvio.tv.core.network.NetworkResult.SOURCE_SUFFICIENT_CODE) {
+                        enrichedItemIds.add(item.id)
+                        val enrichedItem = _uiState.value.tabs
+                            .firstNotNullOfOrNull { tab -> tab.catalogRow?.items?.firstOrNull { it.id == item.id } }
+                        if (enrichedItem != null) {
+                            _enrichedPreviews.update { it + (item.id to enrichedItem) }
+                        }
                     }
                 }
                 // Artwork-only fallback: TMDB enriched but useArtwork is off and item lacks logo.
@@ -1310,7 +1468,7 @@ class FolderDetailViewModel @Inject constructor(
                     item.logo.isNullOrBlank() && item.id !in prefetchedExternalMetaIds
                 if (adjArtworkMissing && externalMetaEnabled) {
                     prefetchedExternalMetaIds.add(item.id)
-                    val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id)
+                    val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id, item.sourceAddonBaseUrl)
                         .first { it is com.nuvio.tv.core.network.NetworkResult.Success || it is com.nuvio.tv.core.network.NetworkResult.Error }
                     if (result is com.nuvio.tv.core.network.NetworkResult.Success) {
                         val meta = result.data
@@ -1329,6 +1487,9 @@ class FolderDetailViewModel @Inject constructor(
                         }
                         enrichedItemIds.add(item.id)
                         rebuildFollowLayoutState()
+                    } else if (result is com.nuvio.tv.core.network.NetworkResult.Error && result.code == com.nuvio.tv.core.network.NetworkResult.SOURCE_SUFFICIENT_CODE) {
+                        // Source addon matched — catalog data is sufficient, mark as enriched.
+                        enrichedItemIds.add(item.id)
                     } else {
                         // External addon failed — still mark as enriched to avoid infinite retries.
                         enrichedItemIds.add(item.id)

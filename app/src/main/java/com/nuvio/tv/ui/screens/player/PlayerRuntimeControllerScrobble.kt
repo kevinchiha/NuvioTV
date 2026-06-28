@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.screens.player
 
+import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -16,6 +17,14 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
         message = "urlHash=${url.hashCode().toUInt().toString(16)} loadSavedProgress=$loadSavedProgress " +
             "clearPendingSwitchPref=true"
     )
+    val clickElapsedMs = launchStartedAtElapsedMs
+        ?.let { (SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
+        ?: -1L
+    queuePlaybackRawEventLine(
+        "PREPARE_PLAYBACK: clickElapsedMs=$clickElapsedMs host=${url.safeScrobbleHost()} " +
+            "loadSavedProgress=$loadSavedProgress currentSeason=${currentSeason ?: -1} " +
+            "currentEpisode=${currentEpisode ?: -1} streamName=${_uiState.value.currentStreamName ?: "n/a"}"
+    )
     clearPendingEngineSwitchTrackPreference()
     playbackPreparationJob?.cancel()
 
@@ -26,6 +35,10 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
     }
 
     playbackPreparationJob = scope.launch {
+        setLoadingStatus(
+            phase = "preparing_metadata",
+            message = context.getString(com.nuvio.tv.R.string.player_loading_preparing)
+        )
         refreshScrobbleItem()
         if (persistedTrackPreference == null) {
             contentId?.let { id ->
@@ -77,10 +90,24 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
         // seek to be silently skipped — the player would start from 0:00
         // or hang in buffering after a late seek.
         if (loadSavedProgress) {
+            recordLoadingDiagnosticEvent(
+                phase = "loading_saved_progress",
+                message = context.getString(com.nuvio.tv.R.string.player_loading_preparing)
+            )
             loadSavedProgressSuspend(currentSeason, currentEpisode)
         }
+        recordLoadingDiagnosticEvent(
+            phase = "initializing_player",
+            message = context.getString(com.nuvio.tv.R.string.player_loading_building)
+        )
         initializePlayer(url, headers)
     }
+}
+
+private fun String.safeScrobbleHost(): String {
+    return runCatching {
+        android.net.Uri.parse(this).host ?: substringBefore("://").takeIf { it.isNotBlank() } ?: "unknown"
+    }.getOrDefault("unknown")
 }
 
 internal suspend fun PlayerRuntimeController.warmTraktEpisodeMappingForCurrentPlayback() {

@@ -65,6 +65,7 @@ class PlayerViewModel @Inject constructor(
     private val directDebridResolver: DirectDebridResolver,
     private val directDebridStreamPreparer: DirectDebridStreamPreparer,
     private val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation,
+    private val playbackIssueReportRepository: com.nuvio.tv.data.repository.PlaybackIssueReportRepository,
     private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
     private val telemetryRepository: TelemetryRepository,
@@ -109,6 +110,7 @@ class PlayerViewModel @Inject constructor(
         telemetryRepository = telemetryRepository,
         deviceGuardDataStore = deviceGuardDataStore,
         streamBadgePresentation = streamBadgePresentation,
+        playbackIssueReportRepository = playbackIssueReportRepository,
         savedStateHandle = savedStateHandle,
         scope = viewModelScope
     )

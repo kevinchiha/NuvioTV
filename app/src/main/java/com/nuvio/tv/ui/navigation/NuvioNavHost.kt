@@ -514,11 +514,6 @@ fun NuvioNavHost(
                 onStreamSelected = { playbackInfo ->
                     val streamUrl = playbackInfo.url
                         ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
-                    // When both url and infoHash are present (debrid cached torrent),
-                    // prefer the HTTP url and don't pass infoHash — avoids starting
-                    // TorrServer for a stream that's already available via HTTP.
-                    val effectiveInfoHash = if (playbackInfo.url != null) null else playbackInfo.infoHash
-                    val effectiveFileIdx = if (playbackInfo.url != null) null else playbackInfo.fileIdx
                     streamUrl?.let { url ->
                         navController.navigate(
                             Screen.Player.createRoute(
@@ -548,8 +543,8 @@ fun NuvioNavHost(
                                 addonName = playbackInfo.addonName,
                                 addonLogo = playbackInfo.addonLogo,
                                 streamDescription = playbackInfo.streamDescription,
-                                infoHash = effectiveInfoHash,
-                                fileIdx = effectiveFileIdx,
+                                infoHash = playbackInfo.infoHash,
+                                fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage
                             )
@@ -559,8 +554,6 @@ fun NuvioNavHost(
                 onAutoPlayResolved = { playbackInfo ->
                     val autoPlayUrl = playbackInfo.url
                         ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
-                    val effectiveInfoHash = if (playbackInfo.url != null) null else playbackInfo.infoHash
-                    val effectiveFileIdx = if (playbackInfo.url != null) null else playbackInfo.fileIdx
                     autoPlayUrl?.let { url ->
                         navController.navigate(
                             Screen.Player.createRoute(
@@ -590,8 +583,8 @@ fun NuvioNavHost(
                                 addonName = playbackInfo.addonName,
                                 addonLogo = playbackInfo.addonLogo,
                                 streamDescription = playbackInfo.streamDescription,
-                                infoHash = effectiveInfoHash,
-                                fileIdx = effectiveFileIdx,
+                                infoHash = playbackInfo.infoHash,
+                                fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage
                             )
@@ -729,6 +722,11 @@ fun NuvioNavHost(
                     defaultValue = null
                 },
                 navArgument("contentLanguage") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument("launchStartedAtMs") {
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null

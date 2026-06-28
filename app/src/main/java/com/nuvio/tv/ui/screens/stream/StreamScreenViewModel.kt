@@ -104,6 +104,7 @@ class StreamScreenViewModel @Inject constructor(
     private var resumeBaselineStreams: List<AddonStreams>? = null
     private var sourceChipErrorDismissJob: Job? = null
     private var pendingCacheSaveJob: Job? = null
+    private var pendingBingeGroupSaveJob: Job? = null
     private var streamBadgePresentationJob: Job? = null
     private var streamBadgePresentationRequestId = 0L
     private var badgedAddonNames: Set<String> = emptySet()
@@ -388,7 +389,7 @@ class StreamScreenViewModel @Inject constructor(
                 if (cached != null) {
                     autoPlayHandledForSession = true
                     resolvedAutoPlayTarget = true
-                    val isCachedTorrent = cached.infoHash != null
+                    val isCachedTorrent = cached.infoHash != null && cached.url.isNullOrBlank()
                     val showOverlay = playerSettings.playerPreference == PlayerPreference.EXTERNAL
                     updateUiStateIfChanged {
                         it.copy(
@@ -742,13 +743,18 @@ class StreamScreenViewModel @Inject constructor(
                 markRemainingSourceChipsAsError()
                 if (directAutoPlayFlowEnabledForSession && !resolvedAutoPlayTarget) {
                     directAutoPlayFlowEnabledForSession = false
+                    // All addons finished with no instant stream to auto-play: drop the loader and
+                    // reveal the manual picker now instead of holding until the hard timeout. Clear
+                    // isLoading too, so an empty result set doesn't leave the screen stuck loading.
                     updateUiStateIfChanged {
                         it.copy(
+                            isLoading = false,
                             isDirectAutoPlayFlow = false,
                             showDirectAutoPlayOverlay = false,
                             directAutoPlayMessage = null
                         )
                     }
+                    externalPlaybackTracker.releaseAutoNextOverlay()
                 }
             }
 
@@ -825,6 +831,7 @@ class StreamScreenViewModel @Inject constructor(
                                 directAutoPlayMessage = null
                             )
                         }
+                        externalPlaybackTracker.releaseAutoNextOverlay()
                         streamLoadInner.cancel()
                         markRemainingSourceChipsAsError()
                     }
@@ -1141,7 +1148,6 @@ class StreamScreenViewModel @Inject constructor(
                     url = result.url,
                     isExternal = false,
                     isTorrent = false,
-                    infoHash = null,
                     headers = null,
                     filename = result.filename ?: basePlaybackInfo.filename,
                     videoSize = result.videoSize ?: basePlaybackInfo.videoSize
@@ -1208,9 +1214,10 @@ class StreamScreenViewModel @Inject constructor(
 
     fun consumeAbortedAutoNextContinuation() = externalPlaybackTracker.consumeAbortedAutoNextContinuation()
 
-    /** Release the MainActivity auto-next loader once this Stream screen has settled. */
+    /** Release the MainActivity auto-next loader once this Stream screen has settled. Hides the
+     *  overlay only; it must not abort the chain, or a fast settle would suppress the next advance. */
     fun dismissExternalAutoNextOverlay() {
-        externalPlaybackTracker.dismissAutoNextOverlay()
+        externalPlaybackTracker.releaseAutoNextOverlay()
     }
 
     /** Set to true when external player is launched, reset on stop. */
@@ -1328,7 +1335,7 @@ class StreamScreenViewModel @Inject constructor(
         val bg = playbackInfo.bingeGroup
         val cid = playbackInfo.contentId
         if (bg != null && !cid.isNullOrBlank()) {
-            viewModelScope.launch {
+            pendingBingeGroupSaveJob = viewModelScope.launch {
                 bingeGroupCacheDataStore.save(cid, bg)
             }
         }
@@ -1338,6 +1345,13 @@ class StreamScreenViewModel @Inject constructor(
 
     suspend fun awaitStreamLinkCacheSave() {
         pendingCacheSaveJob?.join()
+        pendingBingeGroupSaveJob?.join()
+    }
+
+    private suspend fun persistBingeGroupForPlayback(playbackInfo: StreamPlaybackInfo) {
+        val bg = playbackInfo.bingeGroup ?: return
+        val cid = playbackInfo.contentId?.takeIf { it.isNotBlank() } ?: return
+        bingeGroupCacheDataStore.save(cid, bg)
     }
 
     override fun onCleared() {
@@ -1393,6 +1407,8 @@ class StreamScreenViewModel @Inject constructor(
                 directAutoPlayMessage = null
             )
         }
+
+        persistBingeGroupForPlayback(playbackInfo)
 
         var playUrl = url
         if (playbackInfo.isTorrent || url.startsWith("torrent:")) {
@@ -1555,6 +1571,18 @@ class StreamScreenViewModel @Inject constructor(
             fetchSubtitlesForExternalPlayer(metadata, playbackInfo, settings)
         } else {
             null
+        }
+        if (settings.externalPlayerSendSkipSegments) {
+            updateUiStateIfChanged {
+                it.copy(
+                    directAutoPlayMessage = if (settings.showPlayerLoadingStatus) {
+                        context.getString(R.string.external_player_loading_skip_segments)
+                    } else {
+                        null
+                    },
+                    directAutoPlayProgress = null
+                )
+            }
         }
 
         // Set timestamp right before actual launch so the 500ms guard

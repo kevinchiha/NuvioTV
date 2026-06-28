@@ -241,6 +241,7 @@ internal fun PlayerRuntimeController.observeEpisodeWatchProgress() {
 internal fun PlayerRuntimeController.observeSubtitleSettings() {
     scope.launch {
         playerSettingsDataStore.playerSettings.collect { settings ->
+            currentPlayerSettingsForReport = settings
             val currentState = _uiState.value
             val showOnlyPreferredLanguagesChanged =
                 currentState.subtitleStyle.showOnlyPreferredLanguages != settings.subtitleStyle.showOnlyPreferredLanguages
@@ -284,7 +285,13 @@ internal fun PlayerRuntimeController.observeSubtitleSettings() {
                     subtitleStyle = settings.subtitleStyle,
                     loadingOverlayEnabled = settings.loadingOverlayEnabled,
                     showPlayerLoadingStatus = settings.showPlayerLoadingStatus,
+                    playbackIssueReportsEnabled = settings.playbackIssueReportsEnabled,
                     showLoadingOverlay = shouldShowOverlay,
+                    loadingIssueReportVisible = if (settings.playbackIssueReportsEnabled) {
+                        state.loadingIssueReportVisible
+                    } else {
+                        false
+                    },
                     pauseOverlayEnabled = settings.pauseOverlayEnabled,
                     osdClockEnabled = settings.osdClockEnabled,
                     internalPlayerEngine = resolvedInternalPlayerEngine,
@@ -428,7 +435,7 @@ internal fun PlayerRuntimeController.observeSubtitleSettings() {
                 if (skipIntervals.isNotEmpty() || _uiState.value.activeSkipInterval != null) {
                     skipIntervals = emptyList()
                     skipIntroFetchedKey = null
-                    lastAutoSkippedIntervalKey = null
+                    autoSkippedIntervalKeys.clear()
                     _uiState.update { it.copy(activeSkipInterval = null, skipIntervalDismissed = true) }
                 }
             } else {
@@ -574,9 +581,27 @@ internal fun PlayerRuntimeController.tryApplyPendingResumeProgress(player: Playe
 
     if (target > 0L) {
         player.seekTo(target)
-        _uiState.update { it.copy(pendingSeekPosition = null) }
-        pendingResumeProgress = null
     }
+    _uiState.update { it.copy(pendingSeekPosition = null) }
+    pendingResumeProgress = null
+}
+
+internal fun PlayerRuntimeController.resolvePendingInitialResumePosition(): Long {
+    val saved = pendingResumeProgress ?: return 0L
+    val target = when {
+        saved.duration > 0L -> saved.resolveResumePosition(saved.duration)
+        saved.position > 0L -> saved.position
+        else -> 0L
+    }
+    if (target <= 0L && saved.progressPercent == null) {
+        clearPendingInitialResumePosition()
+    }
+    return target.coerceAtLeast(0L)
+}
+
+internal fun PlayerRuntimeController.clearPendingInitialResumePosition() {
+    pendingResumeProgress = null
+    _uiState.update { it.copy(pendingSeekPosition = null) }
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)

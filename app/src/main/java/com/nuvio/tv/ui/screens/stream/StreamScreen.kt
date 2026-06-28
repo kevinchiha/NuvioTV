@@ -118,7 +118,7 @@ fun StreamScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val playerPreference by viewModel.playerPreference.collectAsStateWithLifecycle(
-        initialValue = PlayerPreference.INTERNAL
+        initialValue = null
     )
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
@@ -173,12 +173,13 @@ fun StreamScreen(
         if (openExternalInBrowser(playbackInfo)) {
             return
         }
+        val preference = playerPreference ?: return
         if (playbackInfo.isTorrent && !p2pEnabled) {
             pendingTorrentPlaybackInfo = playbackInfo
             showP2pConsentDialog = true
             return
         }
-        when (playerPreference) {
+        when (preference) {
             PlayerPreference.INTERNAL -> {
                 launchInternalPlayer(playbackInfo)
             }
@@ -205,9 +206,10 @@ fun StreamScreen(
             showP2pConsentDialog = true
             return
         }
+        val preference = playerPreference ?: return
         if (uiState.isDirectAutoPlayFlow) {
             // Respect player preference even in direct autoplay flow
-            when (playerPreference) {
+            when (preference) {
                 PlayerPreference.EXTERNAL -> {
                     val url = playbackInfo.url ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
                     url?.let { urlString ->
@@ -298,7 +300,7 @@ fun StreamScreen(
                 return@LaunchedEffect
             }
             // Respect player preference for cached links too
-            when (playerPreference) {
+            when (playerPreference ?: return@LaunchedEffect) {
                 PlayerPreference.EXTERNAL -> {
                     val url = playbackInfo.url ?: if (playbackInfo.isTorrent) "torrent://${playbackInfo.infoHash}" else null
                     url?.let { urlString ->
@@ -1131,6 +1133,8 @@ private fun StreamCard(
     val streamDescription = remember(stream) { stream.getDisplayDescription() }
     val hasBadges = stream.badges.isNotEmpty() || (showFileSizeBadges && stream.behaviorHints?.videoSize != null) || reserveBadgeSpace
 
+    var isFocused by remember { mutableStateOf(false) }
+
     // Track whether badges transitioned from empty to non-empty while this
     // card was composed. If they did, we animate. If the card enters
     // composition with badges already present (tab switch), no animation.
@@ -1157,6 +1161,7 @@ private fun StreamCard(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { isFocused = it.isFocused }
             .then(if (onUpKey != null) Modifier.onKeyEvent { event ->
                 if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN && event.key == Key.DirectionUp) {
                     onUpKey(); true
@@ -1186,7 +1191,8 @@ private fun StreamCard(
                             badges = stream.badges,
                             fileSizeBytes = stream.behaviorHints?.videoSize,
                             showFileSizeBadge = showFileSizeBadges,
-                            animate = shouldAnimateBadges
+                            animate = shouldAnimateBadges,
+                            focused = isFocused
                         )
                     } else {
                         Spacer(modifier = Modifier.height(20.dp))
@@ -1217,6 +1223,7 @@ private fun StreamCard(
                             fileSizeBytes = stream.behaviorHints?.videoSize,
                             showFileSizeBadge = showFileSizeBadges,
                             animate = shouldAnimateBadges,
+                            focused = isFocused,
                             modifier = Modifier.padding(top = NuvioTheme.spacing.xxs)
                         )
                     } else {

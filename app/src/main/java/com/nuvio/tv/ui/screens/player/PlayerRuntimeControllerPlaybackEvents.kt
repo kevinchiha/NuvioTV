@@ -1,9 +1,14 @@
 package com.nuvio.tv.ui.screens.player
 
+import android.net.Uri
 import android.util.Log
 import androidx.media3.common.Player
 import com.nuvio.tv.R
+import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.data.local.SubtitleStyleSettings
+import com.nuvio.tv.data.repository.PlaybackIssueErrorInput
+import com.nuvio.tv.data.repository.PlaybackIssuePlaybackSettingsInput
+import com.nuvio.tv.data.repository.PlaybackIssueReportInput
 import com.nuvio.tv.data.repository.SkipInterval
 import com.nuvio.tv.data.repository.TraktScrobbleItem
 import com.nuvio.tv.data.repository.extractYear
@@ -157,15 +162,27 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     val playingNow = view.isPlayingNow()
                     val cacheBuffering = view.isPausedForCacheNow() || view.isCoreIdleNow()
                     var firstFrameReady = hasRenderedFirstFrame
-                    if (!firstFrameReady) {
-                        firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && playerDuration > 0L)
-                        if (firstFrameReady) {
-                            hasRenderedFirstFrame = true
-                            if (_uiState.value.postPlayDismissedForCurrentEpisode) {
-                                _uiState.update { it.copy(postPlayDismissedForCurrentEpisode = false) }
+                        if (!firstFrameReady) {
+                            firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && playerDuration > 0L)
+                            if (firstFrameReady) {
+                                hasRenderedFirstFrame = true
+                                val clickToFirstFrameMs = launchStartedAtElapsedMs
+                                    ?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
+                                    ?: -1L
+                                val initToFirstFrameMs = (System.currentTimeMillis() - playerInitializationStartedAtMs)
+                                    .coerceAtLeast(0L)
+                                playbackAnalyticsDiagnostics.recordRawEventLine(
+                                    "PLAYBACK_STARTUP: clickToFirstFrameMs=$clickToFirstFrameMs " +
+                                        "initToFirstFrameMs=$initToFirstFrameMs playbackSpeed=${_uiState.value.playbackSpeed} " +
+                                        "currentPositionMs=$pos durationMs=$playerDuration engine=MPV " +
+                                        "host=${currentStreamUrl.safePlaybackEventsHost()}"
+                                )
+                                finishLoadingDiagnostics("mpv_first_frame_ready")
+                                if (_uiState.value.postPlayDismissedForCurrentEpisode) {
+                                    _uiState.update { it.copy(postPlayDismissedForCurrentEpisode = false) }
+                                }
                             }
                         }
-                    }
                     if (playerDuration > lastKnownDuration) {
                         lastKnownDuration = playerDuration
                     }
@@ -216,6 +233,12 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     duration = playerDuration.coerceAtLeast(0L),
                     bufferedPosition = player.bufferedPosition.coerceAtLeast(displayPosition)
                 )
+                playbackAnalyticsDiagnostics.recordProgressSnapshot(
+                    player = player,
+                    hasRenderedFirstFrame = hasRenderedFirstFrame,
+                    rebufferCount = rebufferCount,
+                    rebufferTotalMs = rebufferTotalMs
+                )
                 // Update torrent rebuffer progress from ExoPlayer's buffer state
                 if (isTorrentStream && _uiState.value.isBuffering && hasRenderedFirstFrame) {
                     val bufferedAheadMs = (player.bufferedPosition - pos).coerceAtLeast(0)
@@ -262,6 +285,22 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         val usedMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
                         val maxMb = runtime.maxMemory() / (1024 * 1024)
                         Log.d(PlayerRuntimeController.TAG, "BUFFER: ahead=${bufAhead}s, loading=$loading, heap=$usedMb/${maxMb}MB, pos=${pos / 1000}s")
+                        
+                        if (NuvioExoPlayerPerformanceHelper.shouldLogMemoryFootprint()) {
+                            val defaultAllocator = _loadControl?.allocator as? androidx.media3.exoplayer.upstream.DefaultAllocator
+                            val totalFootprintBytes = defaultAllocator?.let { allocator ->
+                                try {
+                                    val method = allocator.javaClass.getMethod("getMemoryFootprint")
+                                    method.invoke(allocator) as? Int ?: 0
+                                } catch (e: Exception) {
+                                    0
+                                }
+                            } ?: 0
+                            val totalActiveBytes = defaultAllocator?.totalBytesAllocated ?: 0
+                            val footprintMb = totalFootprintBytes / (1024 * 1024)
+                            val activeMb = totalActiveBytes / (1024 * 1024)
+                            Log.d("ExoMemory", "Off-heap OS ahead: $footprintMb MB, active: $activeMb MB")
+                        }
                     }
                 }
             }
@@ -288,6 +327,219 @@ internal fun PlayerRuntimeController.startWatchProgressSaving() {
 internal fun PlayerRuntimeController.stopWatchProgressSaving() {
     watchProgressSaveJob?.cancel()
     watchProgressSaveJob = null
+}
+
+internal fun PlayerRuntimeController.submitPlaybackIssueReport() {
+    val state = _uiState.value
+    if (!state.playbackIssueReportsEnabled) return
+    if (state.playbackIssueReportStatus == PlaybackIssueReportStatus.Sending ||
+        state.playbackIssueReportStatus == PlaybackIssueReportStatus.Sent
+    ) return
+    val timeline = _playbackTimeline.value
+    val diagnostics = lastPlaybackDiagnosticsForReport.takeIf { it.timestampMs > 0L }
+        ?: LastPlaybackDiagnostics(
+            timestampMs = System.currentTimeMillis(),
+            host = currentStreamUrl.reportSafeHost(),
+            result = state.error?.let { "Error: $it" } ?: "Pending"
+        )
+    val reportError = lastPlaybackIssueError
+        ?: PlaybackIssueErrorInput(
+            displayMessage = state.error,
+            errorCode = null,
+            errorCodeName = null,
+            exceptionClass = null,
+            causeClass = null,
+            causeMessage = null,
+            httpStatus = null
+        )
+    val audioTrack = state.audioTracks.reportTrackLabel(state.selectedAudioTrackIndex)
+    val subtitleTrack = state.subtitleTracks.reportTrackLabel(state.selectedSubtitleTrackIndex)
+    val reportReason = if (state.error == null && state.showLoadingOverlay && !hasRenderedFirstFrame) {
+        "loading_stall"
+    } else {
+        "playback_error"
+    }
+    val loadingInput = buildPlaybackIssueLoadingInput(reportReason)
+    val playbackAnalyticsInput = playbackAnalyticsDiagnostics.snapshot(
+        player = _exoPlayer,
+        hasRenderedFirstFrame = hasRenderedFirstFrame,
+        rebufferCount = rebufferCount,
+        rebufferTotalMs = rebufferTotalMs,
+        rebufferStartedAtMs = rebufferStartedAtMs
+    ).copy(startupStages = loadingInput.events)
+    val input = PlaybackIssueReportInput(
+        diagnostics = diagnostics,
+        error = reportError,
+        title = title,
+        contentName = contentName,
+        contentId = contentId,
+        contentType = contentType,
+        videoId = currentVideoId,
+        season = currentSeason,
+        episode = currentEpisode,
+        episodeTitle = currentEpisodeTitle,
+        releaseYear = year,
+        streamUrl = currentStreamUrl,
+        streamMimeType = currentStreamMimeType,
+        streamName = state.currentStreamName,
+        addonName = currentAddonName,
+        videoHash = currentVideoHash,
+        videoSize = currentVideoSize,
+        requestHeaders = currentHeaders,
+        responseHeaders = currentStreamResponseHeaders,
+        playerEngine = currentInternalPlayerEngine.name,
+        loading = loadingInput,
+        positionMs = timeline.currentPosition.takeIf { it > 0L },
+        durationMs = timeline.duration.takeIf { it > 0L },
+        bufferedPositionMs = timeline.bufferedPosition.takeIf { it > 0L },
+        selectedAudioTrack = audioTrack,
+        selectedSubtitleTrack = subtitleTrack,
+        isTorrentStream = isTorrentStream,
+        playbackSettings = buildPlaybackIssuePlaybackSettingsInput(),
+        playbackAnalytics = playbackAnalyticsInput
+    )
+
+    val requestVersion = playbackIssueReportRequestVersion.incrementAndGet()
+    _uiState.update {
+        it.copy(
+            playbackIssueReportStatus = PlaybackIssueReportStatus.Sending,
+            playbackIssueReportId = null,
+            playbackIssueReportError = null
+        )
+    }
+    scope.launch {
+        val result = playbackIssueReportRepository.submit(input)
+        _uiState.update { current ->
+            if (playbackIssueReportRequestVersion.get() != requestVersion ||
+                current.playbackIssueReportStatus != PlaybackIssueReportStatus.Sending
+            ) {
+                current
+            } else {
+                result.fold(
+                    onSuccess = { reportId ->
+                        current.copy(
+                            playbackIssueReportStatus = PlaybackIssueReportStatus.Sent,
+                            playbackIssueReportId = reportId,
+                            playbackIssueReportError = null
+                        )
+                    },
+                    onFailure = { error ->
+                        current.copy(
+                            playbackIssueReportStatus = PlaybackIssueReportStatus.Failed,
+                            playbackIssueReportId = null,
+                            playbackIssueReportError = error.message ?: "Unable to send report"
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun PlayerRuntimeController.buildPlaybackIssuePlaybackSettingsInput(): PlaybackIssuePlaybackSettingsInput {
+    val settings = currentPlayerSettingsForReport
+    val state = _uiState.value
+    val effectiveDecoderPriority = cachedDecoderPriority
+    return PlaybackIssuePlaybackSettingsInput(
+        playerPreference = settings.playerPreference.name,
+        internalPlayerEngine = settings.internalPlayerEngine.name,
+        resolvedInternalPlayerEngine = currentInternalPlayerEngine.name,
+        autoSwitchInternalPlayerOnError = settings.autoSwitchInternalPlayerOnError,
+        decoderPriority = settings.decoderPriority,
+        decoderPriorityName = decoderPriorityReportName(settings.decoderPriority),
+        effectiveDecoderPriority = effectiveDecoderPriority,
+        effectiveDecoderPriorityName = decoderPriorityReportName(effectiveDecoderPriority),
+        downmixEnabled = settings.downmixEnabled,
+        audioOutputChannels = settings.audioOutputChannels.settingValue,
+        maintainOriginalAudioOnDownmix = settings.maintainOriginalAudioOnDownmix,
+        tunnelingEnabled = settings.tunnelingEnabled,
+        tunnelingEffective = state.tunnelingEnabled,
+        forceOpticalPassthrough = settings.forceOpticalPassthrough,
+        skipSilence = settings.skipSilence,
+        audioAmplificationDb = settings.audioAmplificationDb,
+        centerMixLevelDb = settings.centerMixLevelDb,
+        persistAudioAmplification = settings.persistAudioAmplification,
+        rememberAudioDelayPerDevice = settings.rememberAudioDelayPerDevice,
+        preferredAudioLanguage = settings.preferredAudioLanguage,
+        secondaryPreferredAudioLanguage = settings.secondaryPreferredAudioLanguage,
+        preferredSubtitleLanguage = settings.subtitleStyle.preferredLanguage,
+        secondaryPreferredSubtitleLanguage = settings.subtitleStyle.secondaryPreferredLanguage,
+        useForcedSubtitles = settings.subtitleStyle.useForcedSubtitles,
+        showOnlyPreferredSubtitleLanguages = settings.subtitleStyle.showOnlyPreferredLanguages,
+        useLibass = settings.useLibass,
+        activePlayerUsesLibass = requestedUseLibassByUser && !isUsingMpvEngine(),
+        libassRenderType = settings.libassRenderType.name,
+        addonSubtitleStartupMode = settings.addonSubtitleStartupMode.name,
+        externalPlayerForwardSubtitles = settings.externalPlayerForwardSubtitles,
+        subtitleOrganizationMode = settings.subtitleOrganizationMode.name,
+        loadingOverlayEnabled = settings.loadingOverlayEnabled,
+        showPlayerLoadingStatus = settings.showPlayerLoadingStatus,
+        playbackIssueReportsEnabled = settings.playbackIssueReportsEnabled,
+        dv5ToDv81Enabled = settings.dv5ToDv81Enabled,
+        dv7ToDv81PreserveMappingEnabled = settings.dv7ToDv81PreserveMappingEnabled,
+        dv7HandlingMode = settings.dv7HandlingMode.name,
+        dv7LibdoviModeOverride = settings.dv7LibdoviModeOverride,
+        stripHdr10PlusSei = settings.stripHdr10PlusSei,
+        mpvHardwareDecodeMode = settings.mpvHardwareDecodeMode.name,
+        frameRateMatchingMode = settings.frameRateMatchingMode.name,
+        resolutionMatchingEnabled = settings.resolutionMatchingEnabled,
+        resizeMode = settings.resizeMode,
+        aspectMode = state.aspectMode.name,
+        bufferEngineEnabled = settings.bufferEngineEnabled,
+        minBufferMs = settings.bufferSettings.minBufferMs,
+        maxBufferMs = settings.bufferSettings.maxBufferMs,
+        bufferForPlaybackMs = settings.bufferSettings.bufferForPlaybackMs,
+        bufferForPlaybackAfterRebufferMs = settings.bufferSettings.bufferForPlaybackAfterRebufferMs,
+        targetBufferSizeMb = settings.bufferSettings.targetBufferSizeMb,
+        backBufferDurationMs = settings.bufferSettings.backBufferDurationMs,
+        effectiveBackBufferDurationMs = effectiveBackBufferDurationMs,
+        retainBackBufferFromKeyframe = settings.bufferSettings.retainBackBufferFromKeyframe,
+        parallelNetworkEnabled = settings.parallelNetworkEnabled,
+        bufferBudgetManaged = settings.bufferBudgetManaged,
+        allowLargeTargetBuffer = settings.allowLargeTargetBuffer,
+        vodCacheEnabled = settings.vodCacheEnabled,
+        vodCacheSizeMode = settings.vodCacheSizeMode.name,
+        vodCacheSizeMb = settings.vodCacheSizeMb,
+        useParallelConnections = settings.useParallelConnections,
+        parallelConnectionCount = settings.parallelConnectionCount,
+        parallelChunkSizeMb = settings.parallelChunkSizeMb,
+        enableHttp2 = settings.enableHttp2,
+        nuvioPerformanceModeEnabled = settings.nuvioPerformanceModeEnabled,
+        streamAutoPlayMode = settings.streamAutoPlayMode.name,
+        streamAutoPlaySource = settings.streamAutoPlaySource.name,
+        streamAutoPlayNextEpisodeEnabled = settings.streamAutoPlayNextEpisodeEnabled,
+        streamAutoPlayPreferBingeGroupForNextEpisode = settings.streamAutoPlayPreferBingeGroupForNextEpisode,
+        streamAutoPlayReuseBingeGroup = settings.streamAutoPlayReuseBingeGroup,
+        streamAutoPlayTimeoutSeconds = settings.streamAutoPlayTimeoutSeconds,
+        stillWatchingEnabled = settings.stillWatchingEnabled,
+        stillWatchingEpisodeThreshold = settings.stillWatchingEpisodeThreshold,
+        nextEpisodeThresholdMode = settings.nextEpisodeThresholdMode.name,
+        nextEpisodeThresholdPercent = settings.nextEpisodeThresholdPercent,
+        nextEpisodeThresholdMinutesBeforeEnd = settings.nextEpisodeThresholdMinutesBeforeEnd,
+        streamReuseLastLinkEnabled = settings.streamReuseLastLinkEnabled,
+        streamReuseLastLinkCacheHours = settings.streamReuseLastLinkCacheHours
+    )
+}
+
+private fun decoderPriorityReportName(priority: Int): String =
+    when (priority) {
+        0 -> "DEVICE_ONLY"
+        2 -> "PREFER_APP"
+        else -> "PREFER_DEVICE"
+    }
+
+private fun List<TrackInfo>.reportTrackLabel(selectedIndex: Int): String? {
+    val track = firstOrNull { it.index == selectedIndex } ?: getOrNull(selectedIndex) ?: return null
+    return buildString {
+        append(track.name)
+        track.language?.takeIf { it.isNotBlank() }?.let { append(" | ").append(it) }
+        track.codec?.takeIf { it.isNotBlank() }?.let { append(" | ").append(it) }
+        track.channelCount?.let { append(" | ").append(it).append("ch") }
+    }
+}
+
+private fun String.reportSafeHost(): String {
+    return runCatching { Uri.parse(this).host ?: "unknown" }.getOrDefault("unknown")
 }
 
 internal fun PlayerRuntimeController.saveWatchProgressIfNeeded() {
@@ -371,7 +623,10 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
     scope.launch(kotlinx.coroutines.NonCancellable) {
         if (progress.isCompleted() && !hasMarkedCurrentEpisodeCompleted) {
             hasMarkedCurrentEpisodeCompleted = true
-            watchProgressRepository.markAsCompleted(progress)
+            // Don't send markAsWatched to Trakt from the player — the scrobble
+            // stop (≥80%) already causes Trakt to add the history entry.
+            // Local stores + Nuvio Sync are still updated.
+            watchProgressRepository.markAsCompleted(progress, syncRemoteToTrakt = false)
         } else {
             watchProgressRepository.saveProgress(progress, syncRemote = syncRemote)
         }
@@ -444,6 +699,13 @@ internal fun PlayerRuntimeController.buildScrobbleItem(): TraktScrobbleItem? {
 internal fun PlayerRuntimeController.emitScrobbleStart() {
     if (isShortPlaceholderStream()) return
     if (hasRequestedScrobbleStartForCurrentItem) return
+
+    // Don't start a new Trakt scrobble session if playback resumes at ≥80%.
+    // This avoids creating a duplicate history entry when the user continues
+    // watching something already marked as watched. If the user seeks back
+    // below 80%, the next progress update will re-trigger scrobble start.
+    val currentProgress = currentPlaybackProgressPercent()
+    if (currentProgress >= 80f) return
 
     hasRequestedScrobbleStartForCurrentItem = true
     val requestGeneration = ++scrobbleStartRequestGeneration
@@ -696,11 +958,18 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                 _exoPlayer?.let { player ->
                     if (player.isPlaying) {
                         userPausedManually = true
+                        pauseStartTimeMs = System.currentTimeMillis()
                         player.pause()
                         schedulePauseOverlay()
                     } else {
                         userPausedManually = false
                         cancelPauseOverlay()
+                        val pausedDuration = System.currentTimeMillis() - pauseStartTimeMs
+                        if (pauseStartTimeMs > 0L && pausedDuration > PlayerRuntimeController.LONG_PAUSE_THRESHOLD_MS) {
+                            val pos = player.currentPosition
+                            player.seekTo((pos - 1000L).coerceAtLeast(0L))
+                        }
+                        pauseStartTimeMs = 0L
                         player.play()
                     }
                 }
@@ -1094,12 +1363,19 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         PlayerEvent.OnRetry -> {
             hasRenderedFirstFrame = false
             hasRetriedCurrentStreamAfter416 = false
+            playbackIssueReportRequestVersion.incrementAndGet()
             resetErrorRetryState()
+            lastPlaybackIssueError = null
             clearPendingEngineSwitchTrackPreference()
             resetPostPlayOverlayState(clearEpisode = false)
             _uiState.update { state ->
                 state.copy(
                     error = null,
+                    playbackIssueReportStatus = PlaybackIssueReportStatus.Idle,
+                    playbackIssueReportId = null,
+                    playbackIssueReportError = null,
+                    loadingIssueReportVisible = false,
+                    loadingIssueElapsedMs = 0L,
                     showLoadingOverlay = state.loadingOverlayEnabled,
                     showSubtitleTimingDialog = false,
                     showSubtitleDelayOverlay = false
@@ -1129,6 +1405,9 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                 releasePlayer()
                 initializePlayer(currentStreamUrl, currentHeaders)
             }
+        }
+        PlayerEvent.OnReportPlaybackIssue -> {
+            submitPlaybackIssueReport()
         }
         PlayerEvent.OnParentalGuideHide -> {
             _uiState.update { it.copy(showParentalGuide = false) }
@@ -1316,6 +1595,12 @@ internal fun PlayerRuntimeController.buildStreamInfoData(): StreamInfoData {
             com.nuvio.tv.data.local.InternalPlayerEngine.AUTO -> null
         }
     )
+}
+
+private fun String.safePlaybackEventsHost(): String {
+    return runCatching {
+        Uri.parse(this).host ?: substringBefore("://").takeIf { it.isNotBlank() } ?: "unknown"
+    }.getOrDefault("unknown")
 }
 
 private fun formatTorrentSpeed(context: android.content.Context, bytesPerSec: Long): String {
