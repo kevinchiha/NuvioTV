@@ -5,7 +5,7 @@ import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.memberconfig.model.MemberAddonRow
 import com.nuvio.tv.domain.model.AuthState
 import com.nuvio.tv.domain.repository.AddonRepository
-import com.nuvio.tv.core.network.SyncBackendSupabaseProvider
+import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,18 +33,16 @@ import javax.inject.Singleton
  */
 @Singleton
 class MemberConfigService @Inject constructor(
-    private val supabaseProvider: SyncBackendSupabaseProvider,
+    private val postgrest: Postgrest,
     private val authManager: AuthManager,
     private val addonRepository: AddonRepository,
     private val memberConfigPreferences: MemberConfigPreferences
 ) {
-    // KevBox upstream-sync note (0.7.9): upstream deleted SupabaseModule (which used to @Provide
-    // Postgrest directly via Hilt) and routed every consumer through SyncBackendSupabaseProvider so a
-    // remote "backend switch" could swap the client. This is a KevBox-only file upstream never touches,
-    // so the merge leaves it injecting the now-missing Postgrest binding → Hilt/compile break with NO
-    // conflict markers. We mirror upstream's exact fix: inject the provider, expose a `postgrest`
-    // property off it. Re-apply this on every future sync if SupabaseModule stays gone.
-    private val postgrest get() = supabaseProvider.postgrest
+    // KevBox upstream-sync note: 0.7.9 deleted SupabaseModule and we routed this KevBox-only file
+    // through SyncBackendSupabaseProvider (the remote "backend switch" client). 0.7.16 REVERTED that —
+    // SupabaseModule is back and @Provides Postgrest directly, and the provider was deleted — so we
+    // inject Postgrest directly again, like every upstream sync service. If a future sync re-deletes
+    // SupabaseModule, re-introduce a provider indirection (grep SyncBackendSupabaseProvider history).
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

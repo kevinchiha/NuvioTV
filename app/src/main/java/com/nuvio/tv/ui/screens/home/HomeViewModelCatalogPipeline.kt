@@ -10,14 +10,17 @@ import com.nuvio.tv.domain.model.CatalogRow
 import com.nuvio.tv.domain.model.Collection
 import com.nuvio.tv.domain.model.HomeLayout
 import com.nuvio.tv.domain.model.enabledAddons
+import com.nuvio.tv.domain.model.legacyKey
 import com.nuvio.tv.domain.model.mergeCatalogPage
 import com.nuvio.tv.domain.model.nextCatalogSkip
 import com.nuvio.tv.domain.model.skipStep
+import com.nuvio.tv.domain.model.WatchedItem
 import com.nuvio.tv.domain.model.supportsExtra
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -574,7 +577,7 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
         val selectedHeroRows = if (selectedHeroCatalogSet.isNotEmpty()) {
             // Include hero catalogs from ordered rows
             val fromOrdered = orderedRows.filter { row ->
-                val key = "${row.addonId}_${row.apiType}_${row.catalogId}"
+                val key = row.legacyKey()
                 key in selectedHeroCatalogSet
             }
             // Also include hero catalogs loaded but not in catalog order
@@ -657,7 +660,7 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
         val computedDisplayRows = orderedRows.map { row ->
             val shouldKeepFullRowInModern = currentLayout == HomeLayout.MODERN
             if (row.items.size > 25 && !shouldKeepFullRowInModern) {
-                val key = "${row.addonId}_${row.apiType}_${row.catalogId}"
+                val key = row.legacyKey()
                 val cachedEntry = getTruncatedRowCacheEntry(key)
                 if (cachedEntry != null && cachedEntry.sourceRow === row) {
                     cachedEntry.truncatedRow
@@ -673,7 +676,7 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
                     truncatedRow
                 }
             } else {
-                val key = "${row.addonId}_${row.apiType}_${row.catalogId}"
+                val key = row.legacyKey()
                 removeTruncatedRowCacheEntry(key)
                 row
             }
@@ -690,7 +693,7 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
 
     val (computedHomeRows, nextGridItems) = withContext(Dispatchers.Default) {
         val computedHomeRows = buildList {
-            val displayRowsByKey = displayRows.associateBy { "${it.addonId}_${it.apiType}_${it.catalogId}" }
+            val displayRowsByKey = displayRows.associateBy { it.legacyKey() }
             // Build a lookup of placeholder descriptors by key for lazy catalogs
             val placeholdersByKey = synchronized(catalogStateLock) {
                 placeholderDescriptors.associateBy { it.catalogKey }
@@ -975,14 +978,27 @@ internal fun HomeViewModel.reconcilePosterStatusObserversPipeline(rows: List<Cat
     if (allSeriesItemsByKey.isNotEmpty()) {
         seriesWatchedObserverJob?.cancel()
         seriesWatchedObserverJob = viewModelScope.launch {
-            fullyWatchedSeriesIds.fullyWatchedSeriesIds.collectLatest { fullyWatched ->
+            combine(
+                fullyWatchedSeriesIds.fullyWatchedSeriesIds,
+                watchedItemsPreferences.allItems
+            ) { fullyWatched, watchedItems ->
+                fullyWatched to watchedItems
+            }.collectLatest { (fullyWatched, watchedItems) ->
+                val effectiveFullyWatched = if (watchProgressRepository.isTraktProgressActive()) {
+                    fullyWatched
+                } else {
+                    reconcileFullyWatchedFromLocalItems(
+                        fullyWatched = fullyWatched,
+                        watchedItems = watchedItems,
+                        seriesContentIds = allSeriesItemsByKey.values
+                    )
+                }
                 val seriesStatus = buildMap {
                     allSeriesItemsByKey.forEach { (statusKey, contentId) ->
-                        put(statusKey, contentId in fullyWatched)
+                        put(statusKey, contentId in effectiveFullyWatched)
                     }
                 }
                 _uiState.update { state ->
-                    // Merge with existing status to preserve movie entries.
                     val merged = state.movieWatchedStatus
                         .filterKeys { it !in allSeriesItemsByKey.keys } + seriesStatus
                     if (state.movieWatchedStatus == merged) state
@@ -1005,4 +1021,34 @@ internal fun HomeViewModel.reconcilePosterStatusObserversPipeline(rows: List<Cat
             state.copy(movieWatchedPending = trimmedMovieWatchedPending)
         }
     }
+}
+
+private fun HomeViewModel.reconcileFullyWatchedFromLocalItems(
+    fullyWatched: Set<String>,
+    watchedItems: List<WatchedItem>,
+    seriesContentIds: Iterable<String>
+): Set<String> {
+    val watchedEpisodesByContentId = watchedItems
+        .filter { it.season != null && it.episode != null }
+        .groupBy { it.contentId }
+        .mapValues { (_, items) -> items.map { it.season!! to it.episode!! }.toSet() }
+    val cacheResolvedIds = mutableSetOf<String>()
+    val cacheResolvedFullyWatched = buildSet {
+        seriesContentIds.forEach { contentId ->
+            val requiredEpisodes = synchronized(cwBadgeEpisodeCache) {
+                cwBadgeEpisodeCache["series:$contentId"] ?: cwBadgeEpisodeCache["tv:$contentId"]
+            } ?: return@forEach
+            cacheResolvedIds.add(contentId)
+            val watchedEpisodes = watchedEpisodesByContentId[contentId].orEmpty()
+            if (requiredEpisodes.isNotEmpty() && requiredEpisodes.all { it in watchedEpisodes }) {
+                add(contentId)
+            }
+        }
+    }
+    if (cacheResolvedIds.isEmpty()) return fullyWatched
+    val mergedHolderIds = (fullyWatched - cacheResolvedIds) + cacheResolvedFullyWatched
+    if (mergedHolderIds != fullyWatchedSeriesIds.fullyWatchedSeriesIds.value) {
+        fullyWatchedSeriesIds.updateWithValidation(mergedHolderIds, cacheResolvedIds)
+    }
+    return mergedHolderIds
 }

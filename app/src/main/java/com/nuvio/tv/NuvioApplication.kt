@@ -17,10 +17,13 @@ import coil3.request.allowRgb565
 import coil3.bitmapFactoryMaxParallelism
 
 import okio.Path.Companion.toOkioPath
+import com.nuvio.tv.core.diagnostics.SentryInitializer
 import com.nuvio.tv.core.runtime.PluginRuntimeHooks
+import com.nuvio.tv.core.sync.RealtimeSyncInvalidationService
 import com.nuvio.tv.core.sync.StartupSyncService
 import com.nuvio.tv.core.sync.androidtv.AndroidTvChannelSyncService
 import com.nuvio.tv.data.local.AddonPreferences
+import com.nuvio.tv.data.local.SentrySettingsDataStore
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +42,8 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var startupSyncService: StartupSyncService
     @Inject lateinit var androidTvChannelSyncService: AndroidTvChannelSyncService
     @Inject lateinit var addonPreferences: AddonPreferences
+    @Inject lateinit var realtimeSyncInvalidationService: RealtimeSyncInvalidationService
+    @Inject lateinit var sentrySettingsDataStore: SentrySettingsDataStore
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -69,6 +74,7 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        SentryInitializer.start(this, sentrySettingsDataStore)
         PluginRuntimeHooks.onApplicationCreate(this)
         androidTvChannelSyncService.start()
         // KevBox TV: persist the default addon install order on first launch so a fresh
@@ -82,6 +88,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
             } catch (t: Throwable) {
                 android.util.Log.w("NuvioApplication", "Default addon seed failed", t)
             }
+        }
+        if (BuildConfig.REALTIME_SYNC_ENABLED) {
+            realtimeSyncInvalidationService.start()
         }
         // Load locale synchronously so it's available before Activity.attachBaseContext.
         // SharedPreferences reads are fast (cached in memory after first access).

@@ -13,6 +13,7 @@ internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) 
     isReleasingPlayer = true
     // Telemetry (M9): the ticker lives on viewModelScope and must not outlive the player.
     if (BuildConfig.FEATURE_TELEMETRY) heartbeatScheduler.stop()
+    com.nuvio.tv.core.recommendations.TvRecommendationManager.isPlaybackActive.value = false
     if (flushPlaybackState) {
         stopTorrentStream()
         flushPlaybackSnapshotForSwitchOrExit()
@@ -28,6 +29,9 @@ internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) 
         e.printStackTrace()
     }
     progressJob?.cancel()
+    mpvTrackRefreshJob?.cancel()
+    mpvTrackRefreshJob = null
+    mpvTrackRefreshInProgress = false
     hideControlsJob?.cancel()
     watchProgressSaveJob?.cancel()
     seekProgressSyncJob?.cancel()

@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.screens.player
 import android.net.Uri
 import android.util.Log
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.SeekParameters
 import com.nuvio.tv.R
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.data.local.SubtitleStyleSettings
@@ -52,7 +53,7 @@ internal fun PlayerRuntimeController.skipInterval(interval: SkipInterval): Boole
     } else {
         (interval.endTime * 1000).toLong()
     }
-    seekPlaybackTo(seekMs.coerceAtMost(duration))
+    seekPlaybackTo(seekMs.coerceAtMost(duration), SeekParameters.NEXT_SYNC)
     scheduleProgressSyncAfterSeek()
     _uiState.update { it.copy(activeSkipInterval = null, skipIntervalDismissed = true) }
     return true
@@ -205,7 +206,6 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         )
                     }
                     updateMpvAvailableTracks()
-                    tryAutoSelectPreferredSubtitleFromAvailableTracks()
                     updateActiveSkipInterval(pos)
                     evaluatePostPlayOverlayVisibility(
                         positionMs = pos,
@@ -502,7 +502,7 @@ private fun PlayerRuntimeController.buildPlaybackIssuePlaybackSettingsInput(): P
         vodCacheSizeMb = settings.vodCacheSizeMb,
         useParallelConnections = settings.useParallelConnections,
         parallelConnectionCount = settings.parallelConnectionCount,
-        parallelChunkSizeMb = settings.parallelChunkSizeMb,
+        parallelChunkSizeKb = settings.parallelChunkSizeKb,
         enableHttp2 = settings.enableHttp2,
         nuvioPerformanceModeEnabled = settings.nuvioPerformanceModeEnabled,
         streamAutoPlayMode = settings.streamAutoPlayMode.name,
@@ -989,7 +989,12 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             val target = (current + event.deltaMs)
                 .coerceAtLeast(0L)
                 .coerceAtMost(maxDuration)
-            seekPlaybackTo(target)
+            val seekParameters = if (event.deltaMs < 0L) {
+                SeekParameters.PREVIOUS_SYNC
+            } else {
+                SeekParameters.NEXT_SYNC
+            }
+            seekPlaybackTo(target, seekParameters)
             updatePlaybackTimeline(currentPosition = target)
             scheduleProgressSyncAfterSeek()
             if (_uiState.value.showControls) {
@@ -1015,7 +1020,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         PlayerEvent.OnCommitPreviewSeek -> {
             val target = pendingPreviewSeekPosition
             if (target != null) {
-                seekPlaybackTo(target)
+                seekPlaybackTo(target, SeekParameters.CLOSEST_SYNC)
                 updatePlaybackTimeline(currentPosition = target)
                 pendingPreviewSeekPosition = null
                 scheduleProgressSyncAfterSeek()
@@ -1028,7 +1033,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         }
         is PlayerEvent.OnSeekTo -> {
             pendingPreviewSeekPosition = null
-            seekPlaybackTo(event.position)
+            seekPlaybackTo(event.position, SeekParameters.CLOSEST_SYNC)
             updatePlaybackTimeline(currentPosition = event.position)
             scheduleProgressSyncAfterSeek()
             if (_uiState.value.showControls) {

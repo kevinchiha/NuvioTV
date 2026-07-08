@@ -5,7 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.data.local.DeviceGuardDataStore
-import com.nuvio.tv.core.network.SyncBackendSupabaseProvider
+import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,13 +37,12 @@ private const val TAG = "DeviceGuardService"
  */
 @Singleton
 class DeviceGuardService @Inject constructor(
-    private val supabaseProvider: SyncBackendSupabaseProvider,
+    private val postgrest: Postgrest,
     private val authManager: AuthManager,
     private val deviceGuardDataStore: DeviceGuardDataStore
 ) {
-    // KevBox upstream-sync note (0.7.9): SupabaseModule was deleted upstream; inject the new
-    // SyncBackendSupabaseProvider instead of Postgrest. See MemberConfigService for the full rationale.
-    private val postgrest get() = supabaseProvider.postgrest
+    // KevBox upstream-sync note: 0.7.16 reverted the 0.7.9 dbswitch — SupabaseModule is back and
+    // @Provides Postgrest directly, so we inject Postgrest again. See MemberConfigService for rationale.
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

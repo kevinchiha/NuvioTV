@@ -1,11 +1,15 @@
 package com.nuvio.tv.ui.screens.player
 
 import android.util.Log
+import androidx.media3.exoplayer.SeekParameters
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.data.local.InternalPlayerEngine
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 private const val MPV_RESUME_SEEK_TOLERANCE_MS = 1500L
@@ -48,7 +52,6 @@ internal fun PlayerRuntimeController.attachMpvView(view: NuvioMpvSurfaceView?) {
         startProgressUpdates()
         startWatchProgressSaving()
         updateMpvAvailableTracks()
-        tryAutoSelectPreferredSubtitleFromAvailableTracks()
         scheduleHideControls()
         emitScrobbleStart()
     }.onFailure {
@@ -152,7 +155,6 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         startProgressUpdates()
         startWatchProgressSaving()
         updateMpvAvailableTracks()
-        tryAutoSelectPreferredSubtitleFromAvailableTracks()
         scheduleHideControls()
         emitScrobbleStart()
     }.onFailure { error ->
@@ -265,9 +267,28 @@ internal fun PlayerRuntimeController.resumeForLifecycle() {
 internal fun PlayerRuntimeController.updateMpvAvailableTracks() {
     if (!isUsingMpvEngine()) return
     if (mpvTrackRefreshInProgress) return
+    val view = mpvView ?: return
+    val streamUrlAtRefresh = currentStreamUrl
     mpvTrackRefreshInProgress = true
-    try {
-    val snapshot = mpvView?.readTrackSnapshot() ?: return
+    mpvTrackRefreshJob = scope.launch {
+        try {
+            val snapshot = withContext(Dispatchers.IO) {
+                view.readTrackSnapshot()
+            }
+            if (!isUsingMpvEngine() || mpvView !== view || currentStreamUrl != streamUrlAtRefresh) return@launch
+            applyMpvTrackSnapshot(snapshot)
+            tryAutoSelectPreferredSubtitleFromAvailableTracks()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Log.w(PlayerRuntimeController.TAG, "Failed to refresh MPV track snapshot: ${error.message}")
+        } finally {
+            mpvTrackRefreshInProgress = false
+        }
+    }
+}
+
+private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnapshot) {
     val switchPending = pendingEngineSwitchTrackPreference
         ?.takeIf { it.streamUrl == currentStreamUrl && it.sourceEngine == InternalPlayerEngine.EXOPLAYER }
     logSwitchTrace(
@@ -377,9 +398,6 @@ internal fun PlayerRuntimeController.updateMpvAvailableTracks() {
             "uiSubtitleIndex=${_uiState.value.selectedSubtitleTrackIndex} " +
             "uiAddonSelected=${_uiState.value.selectedAddonSubtitle?.let { "${it.lang}/${it.addonName}/${it.id}" } ?: "none"}"
     )
-    } finally {
-        mpvTrackRefreshInProgress = false
-    }
 }
 
 private fun PlayerRuntimeController.performPendingMpvHardRestartIfNeeded(view: NuvioMpvSurfaceView): Boolean {
@@ -483,7 +501,10 @@ internal fun PlayerRuntimeController.isPlaybackCurrentlyPlaying(): Boolean {
     }
 }
 
-internal fun PlayerRuntimeController.seekPlaybackTo(positionMs: Long) {
+internal fun PlayerRuntimeController.seekPlaybackTo(
+    positionMs: Long,
+    seekParameters: SeekParameters = SeekParameters.CLOSEST_SYNC
+) {
     if (isUsingMpvEngine()) {
         mpvView?.let { view ->
             view.seekToMs(positionMs)
@@ -492,29 +513,26 @@ internal fun PlayerRuntimeController.seekPlaybackTo(positionMs: Long) {
         }
     } else {
         _exoPlayer?.let { player ->
-            // When performance mode is active, detect in-buffer seeks and
-            // suppress the buffering spinner for a smoother experience.
             if (NuvioExoPlayerPerformanceHelper.enabled) {
-                val inBuffer = NuvioExoPlayerPerformanceHelper.isSeekInBuffer(player, positionMs)
+                val currentPos = player.currentPosition
+                val isForwardSeek = positionMs >= currentPos
+                val inBuffer = isForwardSeek && NuvioExoPlayerPerformanceHelper.isSeekInBuffer(player, positionMs)
                 if (inBuffer) {
                     suppressBufferingUiForSeek = true
                     scheduleSeekSuppressTimeout()
                 } else {
-                    seekBufferingUiDeferred = true
+                    // Out of buffer or backward seek: show spinner immediately
+                    seekBufferingUiDeferred = false
+                    suppressBufferingUiForSeek = false
                     seekBufferingUiJob?.cancel()
-                    seekBufferingUiJob = scope.launch {
-                        kotlinx.coroutines.delay(seekBufferingUiDelayMs)
-                        seekBufferingUiDeferred = false
-                        if (player.playbackState == androidx.media3.common.Player.STATE_BUFFERING) {
-                            _uiState.update { it.copy(isBuffering = true) }
-                        }
-                    }
+                    _uiState.update { it.copy(isBuffering = true) }
                 }
                 NuvioExoPlayerPerformanceHelper.buildScrubbingParams()?.let { params ->
                     isScrubbingModeActive = true
                     player.setScrubbingModeParameters(params)
                 }
             }
+            player.setSeekParameters(seekParameters)
             player.seekTo(positionMs)
         }
     }
