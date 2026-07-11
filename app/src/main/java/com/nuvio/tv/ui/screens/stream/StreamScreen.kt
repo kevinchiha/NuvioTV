@@ -2,8 +2,6 @@
 
 package com.nuvio.tv.ui.screens.stream
 
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -83,7 +81,6 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
-import com.nuvio.tv.core.player.ExternalPlayerLauncher
 import com.nuvio.tv.core.streams.StreamBadgePlacement
 import com.nuvio.tv.core.streams.StreamBadgeSettings
 import com.nuvio.tv.data.local.PlayerPreference
@@ -146,22 +143,40 @@ fun StreamScreen(
         }
     }
 
-    fun openExternalInBrowser(playbackInfo: StreamPlaybackInfo): Boolean {
-        if (!playbackInfo.isExternal) return false
-        val url = playbackInfo.url?.takeIf { it.isNotBlank() } ?: return false
-        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            .addCategory(Intent.CATEGORY_BROWSABLE)
-        runCatching {
-            context.startActivity(browserIntent)
-        }.onFailure {
-            ExternalPlayerLauncher.launch(
-                context = context,
-                url = url,
-                title = playbackInfo.title,
-                headers = playbackInfo.headers
-            )
-        }
-        return true
+    // ============================ KevBox FORK DIVERGENCE ============================
+    // KevBox upstream-sync note: this ENTIRE function is a fork rewrite of upstream's
+    // `openExternalInBrowser(playbackInfo)`. DO NOT take upstream's version on merge.
+    //
+    // WHY: External-URL "streams" in the stream list are AIOStreams informational
+    // entries (e.g. the "Removal Reasons" / "Statistics" cards — externalUrl set,
+    // playable url == null, so Stream.isExternal() is true). They point at github /
+    // website URLs, NOT video. Upstream launches them with Intent.ACTION_VIEW +
+    // CATEGORY_BROWSABLE. On our Android TV boxes that intent is hijacked by the
+    // sideloaded "Downloader" app (AFTVnews), which opens with no way back — the
+    // family has to force-close KevBox TV to escape. Nothing on a 10-foot UI benefits
+    // from opening a browser anyway.
+    //
+    // FIX: make these entries non-actionable. Keep them VISIBLE in the list (the
+    // removal-reasons info is useful) but swallow the click — return true so
+    // routePlayback()/routeAutoPlay() treat it as "handled" and fall through to
+    // nothing. Launch NO intent. Contract is unchanged (true == external/consumed,
+    // false == let normal playback routing proceed), so the two callers below did
+    // not need logic changes, only the rename.
+    //
+    // WHEN RE-APPLYING AFTER AN UPSTREAM SYNC:
+    //   1. Upstream restores a function that builds an Intent(ACTION_VIEW, ...) and
+    //      calls context.startActivity(...) / ExternalPlayerLauncher.launch(...).
+    //      Replace its whole body with the single `return playbackInfo.isExternal`.
+    //   2. Re-remove the now-unused imports it drags back in:
+    //        import android.content.Intent
+    //        import android.net.Uri
+    //        import com.nuvio.tv.core.player.ExternalPlayerLauncher
+    //   3. Keep both call sites pointed at consumeExternalStreamClick(...).
+    // ===============================================================================
+    fun consumeExternalStreamClick(playbackInfo: StreamPlaybackInfo): Boolean {
+        // true  -> external/informational entry: consumed, launch nothing (KevBox)
+        // false -> real stream: let routePlayback/routeAutoPlay handle playback
+        return playbackInfo.isExternal
     }
 
     fun launchInternalPlayer(playbackInfo: StreamPlaybackInfo) {
@@ -170,7 +185,8 @@ fun StreamScreen(
     }
 
     fun routePlayback(playbackInfo: StreamPlaybackInfo) {
-        if (openExternalInBrowser(playbackInfo)) {
+        // KevBox: was openExternalInBrowser(...) upstream — now a no-op swallow. See above.
+        if (consumeExternalStreamClick(playbackInfo)) {
             return
         }
         val preference = playerPreference ?: return
@@ -196,7 +212,8 @@ fun StreamScreen(
     }
 
     fun routeAutoPlay(playbackInfo: StreamPlaybackInfo) {
-        if (openExternalInBrowser(playbackInfo)) {
+        // KevBox: was openExternalInBrowser(...) upstream — now a no-op swallow. See above.
+        if (consumeExternalStreamClick(playbackInfo)) {
             viewModel.onEvent(StreamScreenEvent.OnAutoPlayConsumed)
             return
         }
