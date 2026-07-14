@@ -266,6 +266,45 @@ grep -rn "SyncBackendSupabaseProvider" app/src --include=*.kt   # after a 0.7.16
 > `SupabaseModule` class — that's an upstream staleness, not ours. R8/ART silently drop unresolvable
 > profile rules, so it's benign and ships in upstream's own 0.7.9. Don't hand-edit those files.
 
+### 🛑 Invisible breakage #3 — client adds an RPC arg the Supabase server doesn't have → ALL sync pushes silently 404 (0.7.16)
+
+**The worst kind of break in this doc: it compiles, it passes a single-device smoke test, and it silently
+stops the *entire* cloud-sync fleet for days.** 0.7.16 introduced `SyncClientIdentity.putSyncOriginClientId()`
+(`core/sync/SyncClientIdentity.kt`, `ORIGIN_CLIENT_ID_PARAM = "p_origin_client_id"`) and wired it into **every**
+`sync_push_*` / `sync_delete_*` RPC body the app sends — watch progress, watched items, library, collections,
+profiles, profile-settings, home-catalog-settings (for a new realtime self-echo-suppression feature). But the
+**Supabase functions were never migrated to accept the new arg.** PostgREST resolves an RPC by matching the JSON
+body keys to a function's named parameters, so a 3-key body `{p_entries, p_profile_id, p_origin_client_id}`
+matched **no** function → HTTP 404 `PGRST202` ("could not find the function … in the schema cache") on every push.
+
+Why it's invisible: the throw is **swallowed** (`WatchProgressSyncService` `catch { Log.e(…); Result.failure }`,
+then `WatchProgressRepo W "Failed single progress push; falling back to full sync next cycle"`). Nothing crashes.
+The build is clean. A lone test device still shows its own **local** history, so a one-device smoke test looks
+fine. It only surfaces as **cross-device desync** and a **stale admin dashboard** days later. Symptom in prod:
+member `watch_progress` / `watched_items` writes stop dead on the exact day 0.8.16-beta rolled out (2026-07-07);
+heartbeats keep working because `claim_device` is a *different*, unchanged RPC.
+
+**Fix (server-side, no app release needed — the shipped devices self-heal on next push):** add the arg as
+**optional** to each function, and DROP the old 2-arg overload (keeping both makes a 2-key call ambiguous →
+`PGRST203`). Lives in the **kevbox repo**, not here: `supabase/migrations/0011_sync_push_accept_origin_client_id.sql`
+(`p_origin_client_id text default null`, arg accepted-and-ignored — realtime echo-suppression left unwired,
+harmless). Applied to prod 2026-07-14.
+
+**Standing post-sync check — every arg the client sends to a sync RPC MUST exist on the server function.**
+This is the general rule; `p_origin_client_id` was just the first instance. After any sync that touches
+`core/sync/`, enumerate the params the client sends and confirm each has a server counterpart:
+```bash
+# 1. What params does the app now send to sync_push_*/sync_delete_* RPCs? (watch for NEW ones)
+grep -rnE 'rpc\("sync_(push|delete)_|put\(|putSyncOriginClientId' app/src/main/java/com/nuvio/tv/core/sync/
+# 2. In the kevbox repo, confirm every sync_push_/sync_delete_ function accepts them (want: empty):
+#    supabase db query --linked "select p.proname, pg_get_function_arguments(p.oid)
+#      from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'
+#      and (p.proname like 'sync_push_%' or p.proname like 'sync_delete_%') and p.proname not like '%\_for'
+#      and pg_get_function_arguments(p.oid) not ilike '%origin_client_id%';"
+```
+If the app sends a key with no matching server param, PostgREST 404s the push and the error is swallowed — there
+is **no** compile or runtime signal. Treat any new key in a sync RPC body as a required server migration.
+
 ## Verify before shipping
 
 ```bash
