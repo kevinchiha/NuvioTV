@@ -85,6 +85,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|navigation|layoutDirection|fontScale|locale"
             android:theme="@style/Theme.MyApplication.Launcher">
             <intent-filter>
@@ -93,6 +94,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="nuvio" />
+            </intent-filter>
+            <!-- KevBox FORK DIVERGENCE: upstream also registers the stremio:// scheme here, but that
+                 scheme resolves ONLY to addon-install deeplinks (DeepLinkParser), which KevBox refuses
+                 (addons are operator-managed). Dropped so the TV doesn't advertise itself as a Stremio
+                 addon handler. The nuvio:// filter is kept for harmless title (Meta) deeplinks. -->
         </activity>
 
         <profileable android:shell="true" />

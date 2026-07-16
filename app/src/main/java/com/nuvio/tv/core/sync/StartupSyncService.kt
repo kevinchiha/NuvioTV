@@ -175,9 +175,10 @@ class StartupSyncService @Inject constructor(
     }
 
     fun requestAddonSyncNow() {
+        val profileId = profileManager.activeProfileId.value
+        Log.d(TAG, "Manual addon sync enqueued for profile $profileId")
         scope.launch {
-            val profileId = profileManager.activeProfileId.value
-            Log.d(TAG, "Manual addon sync requested for profile $profileId")
+            Log.d(TAG, "Manual addon sync starting for profile $profileId")
 
             if (BuildConfig.FEATURE_MEMBER_ADDON_CONFIG) {
                 // Member addon config owns addon reconciliation in the 'full' flavor.
@@ -197,7 +198,7 @@ class StartupSyncService @Inject constructor(
 
                 Log.d(TAG, "Manual addon sync pulled ${remoteAddonUrls.size} addons for profile $profileId")
             } catch (e: Exception) {
-                Log.e(TAG, "Manual addon sync failed", e)
+                Log.e(TAG, "Manual addon sync failed for profile $profileId", e)
             } finally {
                 addonRepository.isSyncingFromRemote = false
             }
@@ -218,7 +219,7 @@ class StartupSyncService @Inject constructor(
                 "plugins" -> pullRealtimePlugins(profileId)
                 "library" -> pullRealtimeLibrary(profileId)
                 "watch_progress" -> {
-                    watchProgressSyncService.restoreLastPushTimestamp()
+                    watchProgressSyncService.restoreLastPushTimestamp(profileId)
                     syncWatchProgressDelta(
                         profileId = profileId,
                         pushUnsynced = false,
@@ -226,7 +227,7 @@ class StartupSyncService @Inject constructor(
                     )
                 }
                 "watched_items" -> {
-                    watchedItemsSyncService.restoreLastPushTimestamp()
+                    watchedItemsSyncService.restoreLastPushTimestamp(profileId)
                     pullWatchedItemsDelta(
                         profileId = profileId,
                         traktMode = traktAuthDataStore.isEffectivelyAuthenticated.first(),
@@ -281,8 +282,8 @@ class StartupSyncService @Inject constructor(
         val profileId = profileManager.activeProfileId.value
         val isTraktConnected = traktAuthDataStore.isEffectivelyAuthenticated.first()
         val shouldUseSupabaseWatchProgressSync = watchProgressSyncService.shouldUseSupabaseWatchProgressSync()
-        watchProgressSyncService.restoreLastPushTimestamp()
-        watchedItemsSyncService.restoreLastPushTimestamp()
+        watchProgressSyncService.restoreLastPushTimestamp(profileId)
+        watchedItemsSyncService.restoreLastPushTimestamp(profileId)
         Log.d(
             TAG,
             "Periodic watch state pull: profile=$profileId isTraktConnected=$isTraktConnected shouldUseSupabaseWatchProgressSync=$shouldUseSupabaseWatchProgressSync"
@@ -431,8 +432,8 @@ class StartupSyncService @Inject constructor(
 
             val isTraktConnected = traktAuthDataStore.isEffectivelyAuthenticated.first()
             val shouldUseSupabaseWatchProgressSync = watchProgressSyncService.shouldUseSupabaseWatchProgressSync()
-            watchProgressSyncService.restoreLastPushTimestamp()
-            watchedItemsSyncService.restoreLastPushTimestamp()
+            watchProgressSyncService.restoreLastPushTimestamp(profileId)
+            watchedItemsSyncService.restoreLastPushTimestamp(profileId)
             Log.d(
                 TAG,
                 "Watch progress sync: isTraktConnected=$isTraktConnected shouldUseSupabaseWatchProgressSync=$shouldUseSupabaseWatchProgressSync"
@@ -482,8 +483,8 @@ class StartupSyncService @Inject constructor(
             pullBroadRemoteData(profileId, includeProfileSettings)
             val isTraktConnected = traktAuthDataStore.isEffectivelyAuthenticated.first()
             val shouldUseSupabaseWatchProgressSync = watchProgressSyncService.shouldUseSupabaseWatchProgressSync()
-            watchProgressSyncService.restoreLastPushTimestamp()
-            watchedItemsSyncService.restoreLastPushTimestamp()
+            watchProgressSyncService.restoreLastPushTimestamp(profileId)
+            watchedItemsSyncService.restoreLastPushTimestamp(profileId)
             Log.d(
                 TAG,
                 "Warm watch progress sync: isTraktConnected=$isTraktConnected shouldUseSupabaseWatchProgressSync=$shouldUseSupabaseWatchProgressSync"
@@ -538,7 +539,7 @@ class StartupSyncService @Inject constructor(
                 }
         }
 
-        traktCredentialSyncService.pullFromRemote()
+        traktCredentialSyncService.pullFromRemote(profileId = profileId)
             .onSuccess { applied ->
                 Log.d(TAG, "Trakt credential pull completed for profile $profileId (applied=$applied)")
             }
@@ -740,7 +741,7 @@ class StartupSyncService @Inject constructor(
                 } else {
                     Log.d(TAG, "Detected unsynced watched items, pushing to remote")
                 }
-                watchedItemsSyncService.pushToRemote()
+                watchedItemsSyncService.pushToRemote(profileId)
             }
         } catch (e: Exception) {
             if (traktMode) {
@@ -780,7 +781,7 @@ class StartupSyncService @Inject constructor(
                 } else {
                     Log.d(TAG, "Detected unsynced watched items after snapshot, pushing to remote")
                 }
-                watchedItemsSyncService.pushToRemote()
+                watchedItemsSyncService.pushToRemote(profileId)
             }
         } catch (e: Exception) {
             if (traktMode) {

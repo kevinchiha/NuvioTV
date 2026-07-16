@@ -1,6 +1,7 @@
 package com.nuvio.tv
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
@@ -122,6 +123,8 @@ import com.nuvio.tv.core.access.AccessControlService
 import com.nuvio.tv.core.access.DeviceGuardService
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.build.AppFeaturePolicy
+import com.nuvio.tv.core.deeplink.DeepLinkHandler
+import com.nuvio.tv.core.deeplink.DeepLinkParser
 import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.core.sync.ProfileSettingsSyncService
 import com.nuvio.tv.core.sync.ProfileSyncService
@@ -137,11 +140,14 @@ import com.nuvio.tv.data.repository.TraktProgressService
 import com.nuvio.tv.domain.model.AppFont
 import com.nuvio.tv.domain.model.AppTheme
 import com.nuvio.tv.domain.model.AuthState
+import com.nuvio.tv.domain.model.CardDepthStyle
 import com.nuvio.tv.domain.model.DiscoverLocation
 import com.nuvio.tv.domain.model.ExperienceMode
 import com.nuvio.tv.domain.model.SettingsUiStyle
+import com.nuvio.tv.domain.deeplink.AppDeepLink
 import com.nuvio.tv.domain.repository.AddonRepository
 import com.nuvio.tv.ui.components.NuvioScrollDefaults
+import com.nuvio.tv.ui.components.LocalCardDepthStyle
 import com.nuvio.tv.ui.components.ProfileAvatarCircle
 import com.nuvio.tv.ui.navigation.NuvioNavHost
 import com.nuvio.tv.ui.navigation.Screen
@@ -168,6 +174,7 @@ import dev.chrisbanes.haze.haze
 import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
@@ -201,7 +208,8 @@ private data class MainUiPrefs(
     val smoothBringIntoViewEnabled: Boolean = true,
     val fastHorizontalNavigationEnabled: Boolean = false,
     val composeHighlighterEnabled: Boolean = false,
-    val settingsUiStyle: SettingsUiStyle = SettingsUiStyle.CLASSIC
+    val settingsUiStyle: SettingsUiStyle = SettingsUiStyle.CLASSIC,
+    val cardDepthStyle: CardDepthStyle = CardDepthStyle()
 )
 
 @AndroidEntryPoint
@@ -261,6 +269,11 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var deviceGuardService: DeviceGuardService
 
+    @Inject
+    lateinit var deepLinkHandler: DeepLinkHandler
+
+    private val pendingDeepLinkUrl = MutableStateFlow<String?>(null)
+
     private lateinit var jankStats: JankStats
 
     /** Activity-level launcher for external video players. Survives all navigation changes. */
@@ -312,6 +325,7 @@ class MainActivity : ComponentActivity() {
         // Extract extras set by the Continue Watching launcher channel preview programs.
         val launchContentId = intent?.getStringExtra("contentId")
         val launchContentType = intent?.getStringExtra("contentType")
+        captureDeepLinkIntent(intent)
 
         setContent {
             var hasSelectedProfileThisSession by rememberSaveable { mutableStateOf(false) }
@@ -468,7 +482,12 @@ class MainActivity : ComponentActivity() {
                         settingsUiStyle = settingsUiStyle,
                     )
                 }
-                combine(themeAndExperienceFlow, layoutAndFeaturesFlow, extraFeaturesFlow) { themePrefs, layoutPrefs, extraPrefs ->
+                combine(
+                    themeAndExperienceFlow,
+                    layoutAndFeaturesFlow,
+                    extraFeaturesFlow,
+                    layoutPreferenceDataStore.cardDepthStyle
+                ) { themePrefs, layoutPrefs, extraPrefs, cardDepthStyle ->
                     themePrefs.copy(
                         hasChosenLayout = layoutPrefs.hasChosenLayout,
                         sidebarCollapsed = layoutPrefs.sidebarCollapsed,
@@ -480,6 +499,7 @@ class MainActivity : ComponentActivity() {
                         fastHorizontalNavigationEnabled = extraPrefs.fastHorizontalNavigationEnabled,
                         composeHighlighterEnabled = extraPrefs.composeHighlighterEnabled,
                         settingsUiStyle = extraPrefs.settingsUiStyle,
+                        cardDepthStyle = cardDepthStyle
                     )
                 }
             }
@@ -506,6 +526,7 @@ class MainActivity : ComponentActivity() {
                     LocalBringIntoViewSpec provides bringIntoViewSpec,
                     LocalFastHorizontalNavigationEnabled provides mainUiPrefs.fastHorizontalNavigationEnabled,
                     LocalRecompositionHighlighterEnabled provides (BuildConfig.IS_DEBUG_BUILD && mainUiPrefs.composeHighlighterEnabled),
+                    LocalCardDepthStyle provides mainUiPrefs.cardDepthStyle,
                     com.nuvio.tv.core.player.LocalTrailerPlayerPool provides trailerPlayerPool
                 ) {
                 Surface(
@@ -611,6 +632,10 @@ class MainActivity : ComponentActivity() {
                     // addon-management onboarding surface unreachable (it was already effectively dead
                     // since the 4 baked defaults mean installedAddons is never empty).
                     val needsEssentialAddonSetup = false
+                    val pendingDeepLink by pendingDeepLinkUrl.collectAsState()
+                    // KevBox FORK DIVERGENCE: upstream's onboarding-time AppDeepLink.AddonInstall handler
+                    // (deepLinkHandler.installAddon) is intentionally dropped here — see the Meta-only
+                    // deeplink block below. Family addons are operator-managed; no link may install one.
 
                     if (needsEssentialAddonSetup) {
                         EssentialAddonSetupScreen(
@@ -730,6 +755,36 @@ class MainActivity : ComponentActivity() {
                                     itemType = launchContentType
                                 )
                             )
+                        }
+                    }
+
+                    LaunchedEffect(navController, layoutChosen, pendingDeepLink) {
+                        val url = pendingDeepLink ?: return@LaunchedEffect
+                        if (!layoutChosen) return@LaunchedEffect
+                        when (val deepLink = DeepLinkParser.parse(url)) {
+                            is AppDeepLink.Meta -> {
+                                pendingDeepLinkUrl.value = null
+                                navController.navigate(
+                                    Screen.Detail.createRoute(
+                                        itemId = deepLink.id,
+                                        itemType = deepLink.type
+                                    )
+                                ) {
+                                    launchSingleTop = true
+                                }
+                            }
+                            is AppDeepLink.AddonInstall -> {
+                                // KevBox FORK DIVERGENCE: addon-install deeplinks (nuvio://.../manifest,
+                                // stremio://...) are consumed and ignored — no install, no navigation to
+                                // Screen.AddonManager. Family addons are operator-managed remotely
+                                // (member_addon / kevbox-admin); letting a link/QR add an addon and open
+                                // the (otherwise-suppressed) Addon Manager would re-open that door.
+                                // deepLinkHandler stays injected only to keep this branch mergeable.
+                                pendingDeepLinkUrl.value = null
+                            }
+                            null -> {
+                                pendingDeepLinkUrl.value = null
+                            }
                         }
                     }
 
@@ -901,7 +956,8 @@ class MainActivity : ComponentActivity() {
                             backdropUrl = ov.backdrop,
                             logoUrl = ov.logo,
                             title = ov.title,
-                            message = stringResource(R.string.external_auto_next_loading),
+                            message = ov.message ?: stringResource(R.string.external_auto_next_loading),
+                            progress = ov.progress,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -947,6 +1003,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureDeepLinkIntent(intent)
+    }
+
+    private fun captureDeepLinkIntent(intent: Intent?) {
+        val url = intent?.dataString?.trim()?.takeIf(String::isNotBlank) ?: return
+        pendingDeepLinkUrl.value = url
+    }
+
     override fun onPause() {
         super.onPause()
         if (::jankStats.isInitialized) jankStats.isTrackingEnabled = false
@@ -981,6 +1048,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        externalPlaybackTracker.onExternalPlayerCoveredApp()
         super.onStop()
         startupSyncService.stopPeriodicSurfacePulls()
         // App going to background (e.g. user returning to the launcher): reconcile the
