@@ -97,6 +97,8 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `AndroidManifest.xml` (0.7.16) | **keep `allowBackup="true"` + `dataExtractionRules="@xml/data_extraction_rules"` + `fullBackupContent="@xml/full_backup_content"`** — these are KevBox-authored rules that **exclude the access-kill-switch DataStores** (`access_control`/`device_guard`) from cloud backup + device transfer, so a locked-out member can't clone a "last-verified" grace state or duplicate a device id. They only work with backup ON | **discard** upstream's `allowBackup="false"` (it would orphan our exclusion rules) |
 | `WatchedItemsSyncService.kt` (0.7.16) | our **rev-4 Option B union** — the first cloud-restore snapshot for a never-synced profile must `replaceWithRemoteItems(..., unionWhenNeverSynced = true)` so it doesn't wipe a family member's existing watch history. Upstream extracted a shared `pullSnapshotFromRemote(...)` helper — **put the `unionWhenNeverSynced = true` INSIDE that helper** so all restore paths inherit it (the flag is a no-op for already-synced profiles, so it's safe universally) | take upstream's delta-cursor resilience refactor (the `try { fetchDeltaCursor } catch { snapshot fallback }`) |
 | `StreamScreen.kt` (external-stream tap) | **replace upstream's `openExternalInBrowser(playbackInfo)` with our `consumeExternalStreamClick(playbackInfo)` = `return playbackInfo.isExternal`** — launch NO intent. External-URL entries in the stream list are AIOStreams info cards ("Removal Reasons"/"Statistics", externalUrl set + url == null); upstream's `Intent.ACTION_VIEW`/`CATEGORY_BROWSABLE` gets hijacked by the sideloaded Downloader app and traps the user (force-close required). Same contract (true == consumed), so the two callers (`routePlayback`/`routeAutoPlay`) only need the rename. **Also re-remove the imports it drags back:** `android.content.Intent`, `android.net.Uri`, `com.nuvio.tv.core.player.ExternalPlayerLauncher`. Full rationale is in the `// KevBox FORK DIVERGENCE` block on the function | take upstream's other stream-list changes; this is the only line that matters |
+| `MainActivity.kt` (deeplinks, 0.7.18) | in **both** deeplink `LaunchedEffect`s, **neutralize the `AppDeepLink.AddonInstall` branch** — no `deepLinkHandler.installAddon(...)`, no `navController.navigate(Screen.AddonManager.route)`; just `pendingDeepLinkUrl.value = null`. This is a **policy regression** guard: a `stremio://…/manifest`/`nuvio://…addon` link (browser/QR/other app) would otherwise install an arbitrary addon AND drop the user into the (suppressed) Addon Manager — addons are operator-managed (`member_addon`). `deepLinkHandler` stays `@Inject`ed (unused) purely to keep the branch mergeable. See the `// KevBox FORK DIVERGENCE` blocks | **keep** the `AppDeepLink.Meta` branch (opens a Detail screen — harmless, lets a `tv.kevbox.dev` title link deep-link in) and everything else upstream added (card-depth, `pendingDeepLinkUrl`, `onNewIntent`) |
+| `AndroidManifest.xml` (deeplinks, 0.7.18) | **drop the `<data android:scheme="stremio" />` intent-filter** — that scheme resolves ONLY to addon-install deeplinks (`DeepLinkParser`), so registering it makes the TV advertise as a Stremio-addon handler we then refuse. A `// KevBox FORK DIVERGENCE` comment marks where it was removed | **keep** the `nuvio://` filter (serves harmless Meta/title deeplinks) and `launchMode="singleTop"` |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -157,6 +159,16 @@ Lesson: compile-green does not prove policy-safe. **After each sync, grep for ne
 points to screens KevBox suppressed** — e.g. `grep -rn "navigate(Screen.AddonManager\|navigate(Screen.Plugins"`
 and review any new sidebar / Settings rows. Upstream can re-surface a hidden feature through a brand-new
 code path that never touches your files.
+
+**0.7.18 did it again — through deeplinks.** "adding deeplinks for addons and detailscreen" registered
+`nuvio://` + `stremio://` VIEW/BROWSABLE intent-filters (`AndroidManifest.xml`) and wired
+`AppDeepLink.AddonInstall` in `MainActivity` to `deepLinkHandler.installAddon(...)` **and**
+`navController.navigate(Screen.AddonManager.route)`. That's a brand-new entry point straight to the
+addon-install path that bypasses every door we'd already shut (sidebar, `CONTENT_DISCOVERY` category,
+`onNavigateToAddons` no-op). It compiles and runs. Fixed by neutralizing the `AddonInstall` branch in
+both `LaunchedEffect`s + dropping the `stremio://` filter (see the two 0.7.18 table rows above) — the
+`Meta`/title deeplink is kept. So the post-sync policy grep must also cover **manifest intent-filters and
+deeplink handlers**, not just `navigate(...)` call sites.
 
 ### 🛑 Remote control plane — upstream can switch our backend / force-logout the fleet (0.7.9-beta)
 
