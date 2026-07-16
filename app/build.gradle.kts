@@ -120,8 +120,8 @@ android {
         applicationId = "tv.kevbox"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1039
-        versionName = "0.8.16-beta"
+        versionCode = 1040
+        versionName = "0.8.18-beta"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
         buildConfigField("String", "INTRODB_API_URL", "\"${localProperties.getProperty("INTRODB_API_URL", "")}\"")
