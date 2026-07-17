@@ -652,7 +652,16 @@ class MainActivity : ComponentActivity() {
                     // onboarding/profile/loading guards and before the scaffold render. The poller
                     // LaunchedEffect (outer level, above the Surface) keeps running while locked, so
                     // re-enabling the member flips the screen mid-session on the next check.
-                    val accessGateActive = BuildConfig.FEATURE_ACCESS_CONTROL || BuildConfig.FEATURE_DEVICE_LIMIT
+                    // The gate is ONLY meaningful while signed in: the lock is cleared exclusively
+                    // by a successful server check made AS the member (both services route a null
+                    // currentUserId to the monotonic grace path, which can never clear). Showing it
+                    // while signed out bricks the app — Retry is a no-op, Back is swallowed, and the
+                    // sign-in flow is unreachable, so a member whose session died while locked can
+                    // never recover short of clearing app data. Signed-out users fall through to the
+                    // normal flow; on re-login the poller's immediate refresh re-evaluates the truth
+                    // (and re-locks if the server still says LOCKED/DENIED).
+                    val accessGateActive = (BuildConfig.FEATURE_ACCESS_CONTROL || BuildConfig.FEATURE_DEVICE_LIMIT) &&
+                        authState is AuthState.FullAccount
                     if (accessGateActive) {
                         // Wait for the persisted lock state to land so a previously-locked member
                         // never flashes full content for a frame at cold start. Only require a
