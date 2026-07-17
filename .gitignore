@@ -56,3 +56,6 @@ logs
 AGENTS.md
 status-page/
 memories/
+# Kimi Code local data
+.kimi-code/memory/
+.kimi-code/local.toml
