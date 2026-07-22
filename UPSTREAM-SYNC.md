@@ -317,6 +317,14 @@ grep -rnE 'rpc\("sync_(push|delete)_|put\(|putSyncOriginClientId' app/src/main/j
 If the app sends a key with no matching server param, PostgREST 404s the push and the error is swallowed — there
 is **no** compile or runtime signal. Treat any new key in a sync RPC body as a required server migration.
 
+**0.7.19 note — the surface can also *shrink*.** 0.7.19 deleted `TraktCredentialSyncService` (its
+`sync_push_provider_credentials` / `sync_pull_provider_credentials` calls are gone; Trakt tokens no longer
+sync between devices — each device authenticates Trakt locally). Only `sync_delete_provider_credentials`
+survives, in the new `TraktCredentialCleanupService`, with the **same** params as before and a soft-fail
+`Result` wrapper. No new wire keys → no server migration. Otherwise 0.7.19 was the lightest cycle yet:
+2 trivial conflicts (version numbers; a NuvioApplication import pair), manifest untouched, no policy
+regression, no new `buildConfigField` surfaces, scrobble-stop comment untouched.
+
 ## Verify before shipping
 
 ```bash
