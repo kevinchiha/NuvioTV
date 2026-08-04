@@ -696,7 +696,7 @@ class AccountViewModel @Inject constructor(
         pluginSyncService.pushToRemote()
         addonSyncService.pushToRemote()
         watchProgressSyncService.pushToRemote(profileId)
-        librarySyncService.pushToRemote()
+        librarySyncService.pushToRemote(profileId)
         watchedItemsSyncService.pushToRemote(profileId)
     }
 
@@ -743,24 +743,19 @@ class AccountViewModel @Inject constructor(
                 watchProgressRepository.isSyncingFromRemote = false
 
                 libraryRepository.isSyncingFromRemote = true
-                librarySyncService.pullFromRemote().fold(
-                    onSuccess = { remoteLibraryItems ->
-                        Log.d("AccountViewModel", "pullRemoteData: pulled ${remoteLibraryItems.size} library items")
-                        val preservedLocalLibrary = libraryPreferences.mergeRemoteItems(
-                            remoteLibraryItems,
-                            preserveLocal = true, // rev 4 Option B — sign-in/QR restore is a first pull; union, never replace
+                librarySyncService.syncFromRemote(profileId).fold(
+                    onSuccess = { result ->
+                        Log.d(
+                            "AccountViewModel",
+                            "pullRemoteData: library sync snapshot=${result.usedSnapshot} " +
+                                "upserts=${result.appliedUpserts} deletes=${result.appliedDeletes}"
                         )
-                        libraryRepository.hasCompletedInitialPull = true // align with StartupSyncService; enables later mutation pushes
-                        if (preservedLocalLibrary) {
-                            Log.d("AccountViewModel", "pullRemoteData: detected preserved local library items, pushing union to remote")
-                            librarySyncService.pushToRemote()
-                        }
-                        Log.d("AccountViewModel", "pullRemoteData: reconciled local library with ${remoteLibraryItems.size} remote items")
                     },
                     onFailure = { e ->
                         Log.e("AccountViewModel", "pullRemoteData: failed to pull library items", e)
                     }
                 )
+                libraryRepository.hasCompletedInitialPull = true
                 libraryRepository.isSyncingFromRemote = false
 
                 val watchedItemsResult = watchedItemsSyncService.syncDeltaFromRemote(profileId).getOrElse { throw it }

@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.screens.library
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +26,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -80,6 +83,8 @@ import com.nuvio.tv.domain.model.PosterShape
 import com.nuvio.tv.domain.model.TraktListPrivacy
 import com.nuvio.tv.ui.components.EmptyScreenState
 import com.nuvio.tv.ui.components.GridContentCard
+import com.nuvio.tv.ui.screens.detail.requestFocusAfterFrames
+import kotlinx.coroutines.delay
 import com.nuvio.tv.ui.components.PosterCardDefaults
 import com.nuvio.tv.ui.components.LoadingIndicator
 import com.nuvio.tv.ui.components.NuvioDialog
@@ -222,7 +227,7 @@ fun LibraryScreen(
             ) {
                 LoadingIndicator()
                 Text(
-                    text = stringResource(R.string.library_syncing),
+                    text = stringResource(R.string.library_syncing_library),
                     style = MaterialTheme.typography.bodyMedium,
                     color = NuvioTheme.colors.TextSecondary
                 )
@@ -285,6 +290,29 @@ fun LibraryScreen(
                 onSelected = { mode ->
                     viewMode = mode
                     expandedPicker = null
+                },
+                // Refresh belongs to the cloud view only, pinned right in line with the tabs.
+                trailing = if (viewMode == LibraryViewMode.Cloud) {
+                    {
+                        Button(
+                            onClick = viewModel::refreshCloudLibrary,
+                            enabled = !uiState.cloudLibrary.isRefreshing,
+                            colors = ButtonDefaults.colors(
+                                containerColor = NuvioTheme.colors.BackgroundCard,
+                                contentColor = NuvioTheme.colors.TextPrimary
+                            )
+                        ) {
+                            Text(
+                                if (uiState.cloudLibrary.isRefreshing) {
+                                    stringResource(R.string.library_syncing_btn)
+                                } else {
+                                    stringResource(R.string.cloud_library_refresh)
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    null
                 }
             )
         }
@@ -331,11 +359,12 @@ fun LibraryScreen(
                 )
             }
 
-            if (uiState.sourceMode == LibrarySourceMode.TRAKT && uiState.isTraktAuthenticated) {
+            if (uiState.sourceMode == LibrarySourceMode.TRAKT && uiState.isTrackingAuthenticated) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     LibraryActionsRow(
                         pending = uiState.pendingOperation,
                         isSyncing = uiState.isSyncing,
+                        showManageLists = uiState.sourceMode == LibrarySourceMode.TRAKT,
                         onManageLists = viewModel::onOpenManageLists,
                         onRefresh = viewModel::onRefresh
                     )
@@ -346,13 +375,17 @@ fun LibraryScreen(
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     val selectedTypeLabel = uiState.selectedTypeTab?.let { localizedTypeLabel(it.key) }?.lowercase() ?: stringResource(R.string.library_type_items)
                     val title = when {
-                        uiState.sourceMode == LibrarySourceMode.TRAKT && !uiState.isTraktAuthenticated -> stringResource(R.string.library_empty_trakt_not_auth_title)
+                        uiState.sourceMode == LibrarySourceMode.TRAKT && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_trakt_not_auth_title)
+                        uiState.sourceMode == LibrarySourceMode.SIMKL && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_simkl_not_auth_title)
                         uiState.sourceMode == LibrarySourceMode.TRAKT -> stringResource(R.string.library_empty_trakt_title, selectedTypeLabel)
+                        uiState.sourceMode == LibrarySourceMode.SIMKL -> stringResource(R.string.library_empty_simkl_title, selectedTypeLabel)
                         else -> stringResource(R.string.library_empty_local_title, selectedTypeLabel)
                     }
                     val subtitle = when {
-                        uiState.sourceMode == LibrarySourceMode.TRAKT && !uiState.isTraktAuthenticated -> stringResource(R.string.library_empty_trakt_not_auth_subtitle)
+                        uiState.sourceMode == LibrarySourceMode.TRAKT && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_trakt_not_auth_subtitle)
+                        uiState.sourceMode == LibrarySourceMode.SIMKL && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_simkl_not_auth_subtitle)
                         uiState.sourceMode == LibrarySourceMode.TRAKT -> stringResource(R.string.library_empty_trakt_subtitle)
+                        uiState.sourceMode == LibrarySourceMode.SIMKL -> stringResource(R.string.library_empty_simkl_subtitle)
                         else -> stringResource(R.string.library_empty_local_subtitle)
                     }
                     EmptyScreenState(
@@ -411,9 +444,9 @@ fun LibraryScreen(
             }
 
             item(span = { GridItemSpan(maxLineSpan) }) {
-                CloudLibraryActionsRow(
-                    isRefreshing = uiState.cloudLibrary.isRefreshing,
-                    onRefresh = viewModel::refreshCloudLibrary
+                CloudLibrarySearchRow(
+                    query = uiState.cloudSearchQuery,
+                    onQueryChange = viewModel::onCloudSearchQueryChange
                 )
             }
 
@@ -561,31 +594,37 @@ fun LibraryScreen(
 private fun LibraryViewModeRow(
     selectedMode: LibraryViewMode,
     primaryFocusRequester: FocusRequester,
-    onSelected: (LibraryViewMode) -> Unit
+    onSelected: (LibraryViewMode) -> Unit,
+    /** Optional action pinned to the right of the tabs (used for the cloud refresh button). */
+    trailing: (@Composable () -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
     ) {
-        LibraryViewMode.entries.forEachIndexed { index, mode ->
-            val selected = mode == selectedMode
-            Button(
-                onClick = { onSelected(mode) },
-                modifier = Modifier
-                    .then(if (index == 0) Modifier.focusRequester(primaryFocusRequester) else Modifier),
-                colors = ButtonDefaults.colors(
-                    containerColor = if (selected) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                )
-            ) {
-                Text(
-                    text = when (mode) {
-                        LibraryViewMode.Saved -> stringResource(R.string.library_source_saved)
-                        LibraryViewMode.Cloud -> stringResource(R.string.library_source_cloud)
-                    }
-                )
+        Row(horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)) {
+            LibraryViewMode.entries.forEachIndexed { index, mode ->
+                val selected = mode == selectedMode
+                Button(
+                    onClick = { onSelected(mode) },
+                    modifier = Modifier
+                        .then(if (index == 0) Modifier.focusRequester(primaryFocusRequester) else Modifier),
+                    colors = ButtonDefaults.colors(
+                        containerColor = if (selected) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
+                        contentColor = NuvioTheme.colors.TextPrimary
+                    )
+                ) {
+                    Text(
+                        text = when (mode) {
+                            LibraryViewMode.Saved -> stringResource(R.string.library_source_saved)
+                            LibraryViewMode.Cloud -> stringResource(R.string.library_source_cloud)
+                        }
+                    )
+                }
             }
         }
+        trailing?.invoke()
     }
 }
 
@@ -651,25 +690,85 @@ private fun CloudLibraryItemType.localizedLabel(): String =
         CloudLibraryItemType.File -> stringResource(R.string.cloud_library_type_files)
     }
 
+private fun isCloudSearchSelectKey(keyCode: Int): Boolean {
+    return keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
+        keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
+        keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
+}
+
+/**
+ * Free-text filter over the already-loaded cloud library. Purely local: it never triggers a
+ * provider request, it just narrows [LibraryUiState.visibleCloudItems]. Filtering is applied on
+ * every keystroke, so results narrow live as you type.
+ *
+ * Follows the same D-pad text-entry pattern as the list editor dialog: the field stays read-only
+ * until SELECT is pressed, so arrow keys keep navigating the grid instead of moving a caret.
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-private fun CloudLibraryActionsRow(
-    isRefreshing: Boolean,
-    onRefresh: () -> Unit
+private fun CloudLibrarySearchRow(
+    query: String,
+    onQueryChange: (String) -> Unit
 ) {
+    var editing by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
+        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
     ) {
-        Button(
-            onClick = onRefresh,
-            enabled = !isRefreshing,
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
+        androidx.compose.material3.OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier
+                .weight(1f)
+                .onFocusChanged { if (!it.isFocused) editing = false }
+                .onPreviewKeyEvent { event ->
+                    val native = event.nativeKeyEvent
+                    if (native.action == AndroidKeyEvent.ACTION_DOWN && isCloudSearchSelectKey(native.keyCode)) {
+                        editing = true
+                        keyboardController?.show()
+                    }
+                    false
+                },
+            readOnly = !editing,
+            singleLine = true,
+            maxLines = 1,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(
+                onDone = {
+                    editing = false
+                    keyboardController?.hide()
+                }
+            ),
+            label = { androidx.compose.material3.Text(stringResource(R.string.cloud_library_search_label)) },
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedTextColor = NuvioTheme.colors.TextPrimary,
+                unfocusedTextColor = NuvioTheme.colors.TextPrimary,
+                focusedContainerColor = NuvioTheme.colors.BackgroundCard,
+                unfocusedContainerColor = NuvioTheme.colors.BackgroundCard,
+                focusedBorderColor = NuvioTheme.colors.FocusRing,
+                unfocusedBorderColor = NuvioTheme.colors.Border,
+                focusedLabelColor = NuvioTheme.colors.TextSecondary,
+                unfocusedLabelColor = NuvioTheme.colors.TextTertiary,
+                cursorColor = NuvioTheme.colors.FocusRing
             )
-        ) {
-            Text(if (isRefreshing) stringResource(R.string.library_syncing_btn) else stringResource(R.string.cloud_library_refresh))
+        )
+
+        if (query.isNotEmpty()) {
+            Button(
+                onClick = {
+                    onQueryChange("")
+                    editing = false
+                },
+                colors = ButtonDefaults.colors(
+                    containerColor = NuvioTheme.colors.BackgroundCard,
+                    contentColor = NuvioTheme.colors.TextPrimary
+                )
+            ) {
+                Text(stringResource(R.string.cloud_library_search_clear))
+            }
         }
     }
 }
@@ -903,7 +1002,7 @@ private fun LibrarySelectorsRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
         ) {
-            if (sourceMode == LibrarySourceMode.TRAKT) {
+            if (sourceMode != LibrarySourceMode.LOCAL) {
                 LibraryDropdownPicker(
                     modifier = Modifier
                         .weight(1f)
@@ -919,7 +1018,7 @@ private fun LibrarySelectorsRow(
             }
 
             LibraryDropdownPicker(
-                modifier = if (sourceMode == LibrarySourceMode.TRAKT) {
+                modifier = if (sourceMode != LibrarySourceMode.LOCAL) {
                     Modifier.weight(1f)
                 } else {
                     Modifier
@@ -1005,7 +1104,7 @@ private fun LibrarySelectorsRow(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryDropdownPicker(
     modifier: Modifier = Modifier,
@@ -1019,7 +1118,34 @@ private fun LibraryDropdownPicker(
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var anchorSize by remember { mutableStateOf(IntSize.Zero) }
-    var focusedOptionValue by remember(expanded) { mutableStateOf<String?>(null) }
+    // Seed focused option with the current selection so reopen highlights the right row
+    // even before focus lands (fixes #2848 / incomplete #2507 race on TV).
+    var focusedOptionValue by remember(expanded) {
+        mutableStateOf(if (expanded) selectedValue else null)
+    }
+    val selectedItemFocusRequester = remember { FocusRequester() }
+    val selectedBringIntoViewRequester = remember { BringIntoViewRequester() }
+
+    // Popup content attaches focus targets a few frames after expand. A fixed 50ms
+    // delay was flaky on TV and left focus on the first item for non-top selections.
+    LaunchedEffect(expanded, selectedValue) {
+        if (!expanded || selectedValue == null) return@LaunchedEffect
+        var focused = selectedItemFocusRequester.requestFocusAfterFrames(frames = 3)
+        var attempt = 0
+        while (!focused && attempt < 6) {
+            delay(32)
+            focused = runCatching { selectedItemFocusRequester.requestFocus() }.getOrDefault(false)
+            attempt++
+        }
+        if (!focused) return@LaunchedEffect
+        runCatching { selectedBringIntoViewRequester.bringIntoView() }
+        // Material DropdownMenu may still move initial focus to the first item after
+        // the popup settles; re-assert once so long lists keep the real selection.
+        delay(48)
+        if (runCatching { selectedItemFocusRequester.requestFocus() }.getOrDefault(false)) {
+            runCatching { selectedBringIntoViewRequester.bringIntoView() }
+        }
+    }
 
     Box(modifier = modifier) {
         Card(
@@ -1111,6 +1237,15 @@ private fun LibraryDropdownPicker(
 
                 DropdownMenuItem(
                     modifier = Modifier
+                        .then(
+                            if (isSelected) {
+                                Modifier
+                                    .focusRequester(selectedItemFocusRequester)
+                                    .bringIntoViewRequester(selectedBringIntoViewRequester)
+                            } else {
+                                Modifier
+                            }
+                        )
                         .padding(horizontal = 6.dp, vertical = NuvioTheme.spacing.xxs)
                         .background(
                             color = itemBackgroundColor,
@@ -1153,6 +1288,7 @@ private data class LibraryOption(
 private fun LibraryActionsRow(
     pending: Boolean,
     isSyncing: Boolean,
+    showManageLists: Boolean,
     onManageLists: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -1160,15 +1296,17 @@ private fun LibraryActionsRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
     ) {
-        Button(
-            onClick = onManageLists,
-            enabled = !pending && !isSyncing,
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
-            )
-        ) {
-            Text(stringResource(R.string.library_manage_lists))
+        if (showManageLists) {
+            Button(
+                onClick = onManageLists,
+                enabled = !pending && !isSyncing,
+                colors = ButtonDefaults.colors(
+                    containerColor = NuvioTheme.colors.BackgroundCard,
+                    contentColor = NuvioTheme.colors.TextPrimary
+                )
+            ) {
+                Text(stringResource(R.string.library_manage_lists))
+            }
         }
         Button(
             onClick = onRefresh,

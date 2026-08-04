@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -100,7 +101,7 @@ internal enum class SettingsCategory {
     INTEGRATION,
     PLAYBACK,
     ADVANCED,
-    TRAKT,
+    TRACKING,
     ABOUT,
     DEBUG
 }
@@ -196,10 +197,10 @@ private fun rememberSettingsSectionSpecs() = listOf(
         destination = SettingsSectionDestination.Inline
     ),
     SettingsSectionSpec(
-        category = SettingsCategory.TRAKT,
-        title = "Trakt",
-        rawIconRes = R.raw.trakt_tv_glyph,
-        subtitle = stringResource(R.string.settings_trakt_subtitle),
+        category = SettingsCategory.TRACKING,
+        title = stringResource(R.string.settings_tracking_title),
+        icon = Icons.Default.Sync,
+        subtitle = stringResource(R.string.settings_tracking_subtitle),
         destination = SettingsSectionDestination.External
     ),
     SettingsSectionSpec(
@@ -228,7 +229,7 @@ private fun rememberSettingsSectionSpecs() = listOf(
 @Composable
 fun SettingsScreen(
     showBuiltInHeader: Boolean = true,
-    onNavigateToTrakt: () -> Unit = {},
+    onNavigateToTracking: () -> Unit = {},
     onNavigateToAddons: () -> Unit = {},
     onNavigateToPlugins: () -> Unit = {},
     onNavigateToAuthQrSignIn: () -> Unit = {},
@@ -272,8 +273,8 @@ fun SettingsScreen(
                 // operator-managed (kevbox-admin / member_addon) and must not be managed on-device.
                 // Upstream (0.7.8) moved addons here from the sidebar; hide the whole category for the fork.
                 SettingsCategory.CONTENT_DISCOVERY -> false
-                // KevBox: hide the Trakt category from Settings for the fork.
-                SettingsCategory.TRAKT -> false
+                // KevBox: hide the Tracking (Trakt/Simkl) category from Settings for the fork.
+                SettingsCategory.TRACKING -> false
                 SettingsCategory.INTEGRATION -> true
                 SettingsCategory.ADVANCED -> true
                 else -> true
@@ -364,7 +365,7 @@ fun SettingsScreen(
                 if (section.destination == SettingsSectionDestination.External) {
                     when (section.category) {
                         SettingsCategory.ACCOUNT -> onNavigateToAuthQrSignIn()
-                        SettingsCategory.TRAKT -> onNavigateToTrakt()
+                        SettingsCategory.TRACKING -> onNavigateToTracking()
                         else -> Unit
                     }
                 } else {
@@ -835,7 +836,7 @@ private fun SettingsDetailPane(
             }
         )
         SettingsCategory.DEBUG -> DebugSettingsContent()
-        SettingsCategory.TRAKT -> Unit
+        SettingsCategory.TRACKING -> Unit
     }
 }
 

@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.components
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -60,8 +62,10 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.domain.model.CatalogRow
+import com.nuvio.tv.domain.model.CardDepthSurface
 import com.nuvio.tv.domain.model.MetaPreview
 import com.nuvio.tv.domain.model.stableItemKey
+import com.nuvio.tv.domain.model.PLACEHOLDER_IMAGE_URL
 import com.nuvio.tv.ui.util.formatAddonTypeLabel
 import com.nuvio.tv.ui.util.localizedContentType
 import androidx.compose.ui.platform.LocalContext
@@ -191,7 +195,8 @@ fun CatalogRowSection(
     }
     val catalogTitle = remember(catalogRow.catalogName, typeLabel, showCatalogTypeSuffix) {
         val formattedName = catalogRow.catalogName.replaceFirstChar { it.uppercase() }
-        if (showCatalogTypeSuffix && typeLabel.isNotEmpty()) "$formattedName - $typeLabel" else formattedName
+        if (formattedName.isBlank()) ""
+        else if (showCatalogTypeSuffix && typeLabel.isNotEmpty()) "$formattedName - $typeLabel" else formattedName
     }
 
     Column(modifier = modifier.fillMaxWidth().then(
@@ -209,19 +214,19 @@ fun CatalogRowSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)) {
                 Text(
-                    text = catalogTitle,
+                    text = catalogTitle.ifBlank { " " },
                     style = MaterialTheme.typography.headlineMedium,
-                    color = NuvioTheme.colors.TextPrimary,
+                    color = if (catalogTitle.isBlank()) Color.Transparent else NuvioTheme.colors.TextPrimary,
                     maxLines = 3,
                     overflow = TextOverflow.Clip
                 )
                 if (showAddonName) {
                     Text(
-                        text = stringResource(R.string.catalog_from_addon, catalogRow.addonName),
+                        text = if (catalogTitle.isBlank()) " " else stringResource(R.string.catalog_from_addon, catalogRow.addonName),
                         style = MaterialTheme.typography.labelMedium,
-                        color = NuvioTheme.colors.TextTertiary
+                        color = if (catalogTitle.isBlank()) Color.Transparent else NuvioTheme.colors.TextTertiary
                     )
                 }
             }
@@ -260,7 +265,7 @@ fun CatalogRowSection(
         }
 
         val usesPlaceholderShimmer = catalogRow.isLoading &&
-            catalogRow.items.firstOrNull()?.poster?.startsWith("placeholder://") == true
+            catalogRow.items.firstOrNull()?.poster == PLACEHOLDER_IMAGE_URL
         val placeholderShimmerOffsetState = if (usesPlaceholderShimmer) {
             rememberPlaceholderShimmerOffsetState(label = "classicPlaceholderShimmer")
         } else {
@@ -305,6 +310,7 @@ fun CatalogRowSection(
                 ) { FocusRequester() }
 
                 val isPlaceholder = item.id.startsWith("__placeholder_")
+                val isNonFirstPlaceholder = isPlaceholder && index > 0
                 val onItemClickStable = remember(item.id, catalogRow.addonBaseUrl) {
                     { if (!isPlaceholder) latestOnItemClick(item.id, item.apiType, catalogRow.addonBaseUrl) }
                 }
@@ -341,6 +347,10 @@ fun CatalogRowSection(
                     modifier = Modifier
                         .then(directionalFocusModifier)
                         .then(
+                            if (isNonFirstPlaceholder) Modifier.focusProperties { canFocus = false }
+                            else Modifier
+                        )
+                        .then(
                             if (isEntryTarget) Modifier.focusRequester(entryFocusRequester!!) else Modifier
                         ),
                     focusRequester = cardFocusRequester
@@ -349,18 +359,38 @@ fun CatalogRowSection(
 
             if (!showSeeAll && catalogRow.isLoading) {
                 item(key = "${catalogRow.type}_${catalogRow.catalogId}_loading") {
-                    Box(
+                    val cardDepthStyle = LocalCardDepthStyle.current
+                    Card(
+                        onClick = {},
                         modifier = Modifier
                             .width(posterCardStyle.width)
-                            .height(posterCardStyle.height),
-                        contentAlignment = Alignment.Center
+                            .height(posterCardStyle.height)
+                            .focusProperties { canFocus = false },
+                        shape = CardDefaults.shape(shape = seeAllCardShape),
+                        colors = CardDefaults.colors(
+                            containerColor = NuvioTheme.colors.BackgroundCard,
+                            focusedContainerColor = NuvioTheme.colors.BackgroundCard
+                        )
                     ) {
-                        LoadingIndicator()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(seeAllCardShape)
+                                .nuvioCardDepth(
+                                    shape = seeAllCardShape,
+                                    surface = CardDepthSurface.POSTERS,
+                                    style = cardDepthStyle
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            LoadingIndicator()
+                        }
                     }
                 }
             }
             if (showSeeAll) {
                 item(key = "${catalogRow.type}_${catalogRow.catalogId}_see_all") {
+                    val cardDepthStyle = LocalCardDepthStyle.current
                     Card(
                         onClick = onSeeAll,
                         modifier = Modifier
@@ -381,7 +411,14 @@ fun CatalogRowSection(
                         scale = CardDefaults.scale(focusedScale = posterCardStyle.focusedScale)
                     ) {
                         Box(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(seeAllCardShape)
+                                .nuvioCardDepth(
+                                    shape = seeAllCardShape,
+                                    surface = CardDepthSurface.POSTERS,
+                                    style = cardDepthStyle
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             Column(
