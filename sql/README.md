@@ -17,6 +17,14 @@ or fresh-TV login (canary-gated, closed by default). Each object is a triad:
 
 Plus `sync_test_helpers.sql` (shared fixtures), `sync_canary_test.sql` (gate proof), `probe_sync_rpcs.sql` (detection probe).
 
+`library_delta_setup.sql` / `library_delta_teardown.sql` are a setup/teardown PAIR (no `_test.sql`):
+the upstream-0.8.1 library sync layer applied on top of `library_setup.sql` — append-only
+`library_events` log + delta RPCs (`sync_push_library_items`, `sync_delete_library_items`,
+`sync_get_library_delta_cursor`, `sync_pull_library_delta`), the `registered_devices` table +
+`register_current_device` RPC, and an in-place replacement of `sync_push_library` /
+`sync_push_library_for` that keeps the old fleet working while appending upsert events. Applied
+to prod 2026-08-04; the teardown restores the pre-delta push bodies before dropping the new tables.
+
 - **Deploy order, canary rollout, verification, rollback:** see [`../CLOUD-RESTORE-RUNBOOK.md`](../CLOUD-RESTORE-RUNBOOK.md).
 - **Run the test suite:** `./run_sync_tests.sh <files…>` from the repo root (pass bare names — it resolves them under `sql/sync/`).
 
