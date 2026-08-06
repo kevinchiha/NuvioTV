@@ -363,7 +363,10 @@ conflicts** (new files + auto-merged wiring), so it's invisible unless you grep.
   `grep -rn "UpdateBannerHost\|dismissBanner\|setUpdateBannerEnabled\|updateBannerEnabled\|UpdateBannerPolicy\|consumeFeedbackMessage\|dismissUnknownSourcesDialog\|AbiSelector\|VersionUtils" app/src` → EMPTY.
   Watch `app/src/main/baseline-prof.txt`/`startup-prof.txt` — upstream's regenerated profiles reference
   `AbiSelector`/`VersionUtils`; either sed out those stale lines (done 0.8.1) or regenerate profiles via
-  the `baselineprofile` module.
+  the `baselineprofile` module. **0.8.2:** upstream now also COMMITS the generated copies at
+  `app/src/main/generated/baselineProfiles/{baseline,startup}-prof.txt` (new files, ~78k lines each) —
+  same stale refs, same sed treatment (done 0.8.2); the grep above will hit these `.txt` files, which is
+  fine — only `.kt` hits matter.
 
 ### 🛑 Library sync rewritten to delta/events — SERVER MIGRATION REQUIRED (0.8.1)
 
@@ -413,6 +416,18 @@ queue them as pending upserts; marked `KevBox FORK DIVERGENCE (ponytail)`, test 
   new scope; take upstream's Coil `CacheControlCacheStrategy` + `SimklAnimeIdPreferenceHolder`.
 - `.gitignore` conflicted for the first time (union both sides).
 - Resolved on branch `sync-0.8.1` (merge `45204625d`), spec archived at `plans/sync-0.8.1-resolution.md`.
+
+### 0.8.2 — the light cycle (2026-08-06)
+
+33 commits (dev tip `86e0510e0`→`320c64dc7`; the `0.8.2-beta` tag sits 12 commits behind tip). Content:
+continue-watching card styles + inline previews in Layout Settings, subtitle-addon fetch fixes
+(idPrefixes fallback, path encoding, DTO nullability), a `StreamRepositoryImpl` plugin-isolation
+refactor (TMDB lookup only when a compatible scraper is enabled), upstream reverting its own
+seek-forward/416 fix (1 line in `PlayerRuntimeControllerInitialization.kt` — auto-merged over our
+telemetry hooks fine), D-pad focus fix for skip-intro + next-episode coexistence, i18n. **One conflict:
+the version block.** Nothing touched the updater, `core/sync` (no server migration), MainActivity,
+manifest, SettingsScreen, or `buildConfigField`s. Only new trap: the committed generated baseline
+profiles (see the updater callout). Released **0.9.2-beta (1043)** same day.
 
 
 ## Verify before shipping
