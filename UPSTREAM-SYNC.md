@@ -430,6 +430,40 @@ manifest, SettingsScreen, or `buildConfigField`s. Only new trap: the committed g
 profiles (see the updater callout). Released **0.9.2-beta (1043)** same day.
 
 
+### 0.8.3 — provider-credential sync = server migration; a fork divergence retired (2026-08-10)
+
+72 commits (0.8.2-beta→0.8.3-beta), resolved on branch `sync0.8.3`. Mostly a big subtitle "sidecar"
+rework (new `PlayerSidecarSubtitles.kt`/`PlayerSubtitleRtlFix.kt`, `PlayerRuntimeControllerInitialization.kt`
+gutted −395 lines) + player/perf fixes. Manifest, MainActivity, updater, SettingsScreen, NuvioNavHost,
+WatchedItemsSyncService, LibrarySyncReducer all untouched — every policy guard and fork patch survived
+with no action. Four conflicts: version block (keep ours), 2 generated baseline profiles (take theirs +
+the standing sed — NOTE the sed pattern must be **case-insensitive-ish**: upstream's profiles also carry
+`getUpdateBannerEnabled`/`UpdateBannerEnabledKey` method rules that a lowercase `updateBannerEnabled`
+pattern misses), and `PlayerSettingsDataStore.kt` — which **retired a fork divergence**:
+
+- **`AddonSubtitleStartupMode` is deleted upstream** (enum, keys, parse, settings UI). Our PREFERRED_ONLY
+  default flip died with it — **take upstream wholesale, do NOT try to preserve it.** The new sidecar
+  system does "fast-startup preferred-language auto-select" natively (plus several race-condition fixes),
+  which is what our flip existed to force. The **forced-subs OFF flip survives** (upstream never touched
+  `subtitleUseForcedSubtitlesKey ?: false`) — that's now the fork's only PlayerSettingsDataStore divergence.
+  Verify on-device that preferred-language subs still auto-enable.
+
+- **🛑 SERVER MIGRATION (same class as 0.7.16/0.8.1): new `ProviderCredentialSyncService`** syncs
+  debrid/MDBList/AnimeSkip API keys via THREE new RPCs — `sync_seed_provider_credentials` /
+  `sync_push_provider_credentials` (`p_profile_id`, `p_credentials` = array of
+  `{provider, credential_json}`, `p_origin_client_id`) and `sync_pull_provider_credentials`
+  (`p_profile_id`). None existed on prod (verified: 37 sync fns, zero provider ones — the 0.7.19-era
+  `sync_delete_provider_credentials` client call had been soft-failing against a nonexistent fn all
+  along; that caller `TraktCredentialCleanupService` is now deleted). Startup/foreground failures are
+  swallowed, **but `AccountViewModel`'s manual pull-from-cloud path calls it with `.getOrElse { throw it }`
+  — missing RPCs hard-abort the whole cloud restore**, the path our Stremio-import backfills use.
+  Fixed by **kevbox repo `supabase/migrations/0012_provider_credentials.sql`** (applied to prod +
+  probed 2026-08-10). Server rule that matters: **store only non-empty credentials** (blank → skipped on
+  seed, row-delete on push) — the client pushes its full provider list including blanks and pull-overwrites
+  local values, so stored-blank rows would let an empty device wipe a configured device's keys.
+  Also note: these keys are now **excluded from the profile-settings blob** (`credentialProfileSettingsKeys`)
+  — without the new table, credentials would silently stop syncing across devices entirely.
+
 ## Verify before shipping
 
 ```bash
