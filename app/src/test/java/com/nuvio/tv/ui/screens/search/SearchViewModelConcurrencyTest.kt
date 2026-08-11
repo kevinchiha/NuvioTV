@@ -142,6 +142,16 @@ class SearchViewModelConcurrencyTest {
         override suspend fun removeAddon(url: String) = error("unused")
         override suspend fun setAddonOrder(urls: List<String>) = error("unused")
         override suspend fun setAddonEnabled(url: String, enabled: Boolean) = error("unused")
+        // KevBox upstream-sync note (0.8.3 fallout, fixed 2026-08-11): upstream grew the
+        // AddonRepository interface; this fake must implement every new member or the whole
+        // unit-test source set fails to COMPILE — with zero merge conflict markers, and
+        // compileFullDebugKotlin does NOT catch it (tests are a separate source set). After
+        // each sync run :app:testFullDebugUnitTest (UPSTREAM-SYNC.md "invisible breakage #4").
+        override suspend fun applyRemoteAddonConfig(
+            orderedUrls: List<String>,
+            enabledByUrl: Map<String, Boolean>
+        ) = error("unused")
+        override suspend fun resetPrimaryAddonsToDefaults() = error("unused")
     }
 
     private class ImmediateCatalogRepository(

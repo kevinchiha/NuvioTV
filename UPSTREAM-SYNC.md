@@ -89,7 +89,7 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `app/build.gradle.kts` | `applicationId = "tv.kevbox"`, our `versionCode`/`versionName`, `UPDATE_BASE_URL`, `isUniversalApk = false`, debug id `tv.kevbox.debug`; **keep `SYNC_BACKEND_MANIFEST_URL` blank (`""`)** and **leave `NUVIO_SUPABASE_*` blank** (see "remote control plane" callout). **0.7.16 trap:** upstream **rebound `SUPABASE_URL`/`SUPABASE_ANON_KEY` to read the `NUVIO_SUPABASE_*` props** — do NOT take that; keep them reading our `SUPABASE_*` props (our family project). Also **keep the `resolveLocalProperty(...)` helper defined** — the merge dropped it (see "release-only breakage") | new dependencies, SDK/AGP bumps, native/player changes, AND new `buildConfigField`s that our code references — 0.7.16 needs `SENTRY_ENVIRONMENT` and `SUPABASE_FALLBACK_URL` **added to debug+release** (blank-sourced) or `SentryInitializer`/`AuthManager` won't compile |
 | `MainActivity.kt` (`onResume`/`onStart`) | our `FEATURE_ACCESS_CONTROL`/`FEATURE_DEVICE_LIMIT` catch-up blocks | take upstream's `requestForegroundSync()` — call it **exactly once**. (0.7.9–0.7.12 wrapped it in a coroutine alongside `syncBackendSwitchService.refreshSelection()`; **0.7.16 removed refreshSelection entirely** — `syncBackendSwitchService` no longer exists in MainActivity — so it's now a bare single call. Either way: one `requestForegroundSync()`, never two) |
 | `AccountScreen.kt` / `AccountSettingsContent.kt` | our `EmailPasswordForm` sign-in + `SHOW_SYNC_CODE_FEATURES` / `SHOW_SYNC_OVERVIEW = false` gating + the credential one-tap `LaunchedEffect` (keep it **above** any early-return so it still runs when auth flips to `FullAccount`) | take upstream's other additions, but **drop the read-only "Sync backend" `StatusCard`/`AccountInfoCard` AND the new `DebugSyncBackendSwitchCard`** (the 0.7.12 dev-only "local db switch" — never surface it to family). **0.7.16:** upstream extracted a clean `SignedInAccountSettingsContent` (StatusCard + sync note + sign-out **with a confirmation dialog**, no backend cards) and added an `initialFocusRequester` param the `SettingsScreen.kt` caller now passes — **adopt both** (the signature MUST accept `initialFocusRequester` or `SettingsScreen` won't compile), just gate its sync-overview behind `if (SHOW_SYNC_OVERVIEW)`. Note: `DebugSyncBackendSwitchCard`/`syncBackendName` copies auto-merge in with **no conflict** — grep and delete stragglers (leave the ones in the dead `AuthQrSignInScreen.kt`) |
-| `MainActivity.kt` | the `AuthEmailOnboardingScreen` first-run gate | everything else |
+| `MainActivity.kt` | the `AuthEmailOnboardingScreen` first-run gate, **and the access/device-limit lock gate** (the `// KevBox FORK DIVERGENCE` block: LockedOutScreen early-return + `LockRetryStatus` retry-feedback wiring, 2026-08-11). Watch the import block — `com.nuvio.tv.core.access.*` / `ui.screens.account.Lock*` are kevbox-only imports an auto-merge can silently drop | everything else |
 | `AddonPreferences.kt` | KevBox `getDefaultAddons()` list + `seedDefaultAddonsOrderIfFirstLaunch()` | other additions |
 | `NuvioApplication.kt` | the addon-seed `launch{}` block | other startup changes |
 | `app/src/full/java/.../updater/**` | the whole KevBox updater (version.json / SHA-256 / speed+ETA) — **0.8.1: upstream reworked THIS package (update banner) — see the "upstream's own updater" callout; it's now a guaranteed conflict zone every cycle** | nothing from upstream's updater |
@@ -464,10 +464,29 @@ pattern misses), and `PlayerSettingsDataStore.kt` — which **retired a fork div
   Also note: these keys are now **excluded from the profile-settings blob** (`credentialProfileSettingsKeys`)
   — without the new table, credentials would silently stop syncing across devices entirely.
 
+### ⚠️ Invisible breakage #4 — unit-test fakes lag upstream interface growth (0.8.3, found 2026-08-11)
+
+0.8.3 grew the `AddonRepository` interface (`applyRemoteAddonConfig`, `resetPrimaryAddonsToDefaults`).
+`SearchViewModelConcurrencyTest`'s hand-rolled `GatedAddonRepository` fake didn't implement them, so the
+**entire unit-test source set failed to compile** — zero conflict markers, and `compileFullDebugKotlin`
+can't see it (tests are a separate source set). It sat broken for a full day until the next unit-test run.
+Fix: add `error("unused")` overrides to the fake. Detector: the `testFullDebugUnitTest` line in the verify
+block below — treat a test-compile failure after a sync as this class of breakage and check every
+hand-rolled fake against the interfaces upstream touched.
+
+**Known-failure baseline (as of 0.9.3-beta / 2026-08-11): 13 pre-existing failures + 1 skipped** in
+unrelated areas (DolbyVisionBaseLayerPolicy, Matroska/AFR probes, TmdbMetadataService release ranges,
+Simkl reconciliation, CollectionsDataStore migration, ContinueWatchingAiringRules, ExoPlayer perf tiers,
+LocalhostZeroCopy 404). These predate the 0.8.3 merge fix. After a sync, compare against this list —
+only NEW failures implicate the merge. (Shrinking this baseline is separate housekeeping, not sync work.)
+
 ## Verify before shipping
 
 ```bash
 ./gradlew :app:compileFullDebugKotlin   # quick compile check — REQUIRED, catches most "invisible breakage"
+./gradlew :app:testFullDebugUnitTest    # unit tests — REQUIRED, catches test-source-set breaks the app
+                                        # compile can't see (see "invisible breakage #4" + its
+                                        # known-failure baseline; only NEW failures implicate the merge)
                                         # (also runs Hilt/KSP → catches missing/duplicate DI bindings)
 ./gradlew :app:assembleFullRelease --dry-run   # ALSO configure the RELEASE side — debug compile misses
                                                # release-only breaks (see "release-only breakage" callout)
