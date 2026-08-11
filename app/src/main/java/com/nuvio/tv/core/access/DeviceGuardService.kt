@@ -82,15 +82,16 @@ class DeviceGuardService @Inject constructor(
      * Re-evaluates this device's claim against the server. MUST NEVER THROW — an escaped exception
      * from the polling [androidx.compose.runtime.LaunchedEffect] body would cancel the poller for
      * the rest of the session and silently freeze the device limit. All work runs on
-     * [Dispatchers.IO].
+     * [Dispatchers.IO]. Returns the attempt's [RefreshOutcome] so the lock screen's Retry can give
+     * feedback; the poller ignores it.
      */
-    suspend fun refreshDeviceClaim() = withContext(Dispatchers.IO) {
+    suspend fun refreshDeviceClaim(): RefreshOutcome = withContext(Dispatchers.IO) {
         try {
             // Must be signed in with the member's OWN auth.uid() (never the effective/sync-owner id).
             // The RPC resolves auth.uid() server-side; we only use this as the signed-in gate.
             if (authManager.currentUserId == null) {
                 applyUnknown()
-                return@withContext
+                return@withContext RefreshOutcome.UNREACHABLE
             }
 
             val deviceId = deviceGuardDataStore.getOrCreateDeviceId()
@@ -110,7 +111,7 @@ class DeviceGuardService @Inject constructor(
                 // Network / JWT / 401 / unauthenticated → UNKNOWN (grace).
                 Log.w(TAG, "claim_device failed, routing to grace", e)
                 applyUnknown()
-                return@withContext
+                return@withContext RefreshOutcome.UNREACHABLE
             }
 
             if (ok) {
@@ -121,14 +122,17 @@ class DeviceGuardService @Inject constructor(
                 )
                 deviceGuardDataStore.setDeviceLockedOut(false)
                 _deviceLockedOut.value = false
+                RefreshOutcome.AUTHORIZED
             } else {
                 // DENIED (over the limit): lock, do NOT record success.
                 deviceGuardDataStore.setDeviceLockedOut(true)
                 _deviceLockedOut.value = true
+                RefreshOutcome.DENIED
             }
         } catch (e: Throwable) {
             // Catch-all: refreshDeviceClaim MUST NEVER THROW.
             Log.e(TAG, "refreshDeviceClaim failed unexpectedly", e)
+            RefreshOutcome.UNREACHABLE
         } finally {
             _initialized.value = true
         }

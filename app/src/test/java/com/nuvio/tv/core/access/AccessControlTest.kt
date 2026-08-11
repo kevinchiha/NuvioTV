@@ -10,8 +10,26 @@ class AccessControlTest {
 
     @Test
     fun `constants match the access control contract`() {
-        assertTrue(AccessControl.GRACE_MS == 5 * 60 * 1000L)
+        assertTrue(AccessControl.GRACE_MS == 24 * 60 * 60 * 1000L)
         assertTrue(AccessControl.CHECK_INTERVAL_MS == 2 * 60 * 1000L)
+    }
+
+    @Test
+    fun `a multi-minute internet blip stays in grace`() {
+        // Regression: with the old 5-minute grace, a ~10-minute wifi/DNS blip mid-playback
+        // hard-locked the device ("This device isn't authorized"). Transient outages must
+        // never expire grace.
+        val lastOkElapsed = 100_000L
+        val lastOkWall = 1_000_000L
+        val tenMinutes = 10 * 60 * 1000L
+        assertFalse(
+            AccessControl.graceExpired(
+                lastOkWallMs = lastOkWall,
+                lastOkElapsedMs = lastOkElapsed,
+                nowWallMs = lastOkWall + tenMinutes,
+                nowElapsedMs = lastOkElapsed + tenMinutes
+            )
+        )
     }
 
     @Test

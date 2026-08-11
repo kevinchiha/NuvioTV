@@ -79,18 +79,19 @@ class AccessControlService @Inject constructor(
      * Verdict mapping:
      *  - `ALLOWED` / `NO_ROW` → record success (stamp both clocks), `lockedOut = false`.
      *  - `LOCKED`            → `lockedOut = true` (do NOT record success, so a later offline
-     *                          re-enable doesn't sit in a fresh 5-min grace).
+     *                          re-enable doesn't sit in a fresh grace window).
      *  - exception / unknown → UNKNOWN: [lockedOut] is **monotonic** here (never cleared); lock only
      *                          if [AccessControl.graceExpired] is true (never-checked stays in-grace).
      *
-     * NEVER THROWS. All network/DataStore work runs on [Dispatchers.IO].
+     * NEVER THROWS. All network/DataStore work runs on [Dispatchers.IO]. Returns the attempt's
+     * [RefreshOutcome] so the lock screen's Retry can give feedback; the poller ignores it.
      */
-    suspend fun refreshAccess() = withContext(Dispatchers.IO) {
+    suspend fun refreshAccess(): RefreshOutcome = withContext(Dispatchers.IO) {
         try {
             // Must be signed in (member's own JWT) to even ask. Otherwise route to grace.
             if (authManager.currentUserId == null) {
                 applyUnknown()
-                return@withContext
+                return@withContext RefreshOutcome.UNREACHABLE
             }
 
             val verdict = try {
@@ -101,7 +102,7 @@ class AccessControlService @Inject constructor(
                 // Network / JWT / 401 / server `not authenticated` raise → UNKNOWN (grace).
                 Log.w(TAG, "get_access_verdict failed, routing to grace", e)
                 applyUnknown()
-                return@withContext
+                return@withContext RefreshOutcome.UNREACHABLE
             }
 
             when (verdict) {
@@ -112,21 +113,25 @@ class AccessControlService @Inject constructor(
                     )
                     accessControlDataStore.setLockedOut(false)
                     _lockedOut.value = false
+                    RefreshOutcome.AUTHORIZED
                 }
                 "LOCKED" -> {
                     // Do NOT record success.
                     accessControlDataStore.setLockedOut(true)
                     _lockedOut.value = true
+                    RefreshOutcome.DENIED
                 }
                 else -> {
                     // Unexpected verdict string → treat conservatively as UNKNOWN (grace).
                     Log.w(TAG, "Unexpected access verdict: $verdict")
                     applyUnknown()
+                    RefreshOutcome.UNREACHABLE
                 }
             }
         } catch (e: Throwable) {
             // Catch-all: refreshAccess MUST NEVER THROW.
             Log.e(TAG, "refreshAccess failed unexpectedly", e)
+            RefreshOutcome.UNREACHABLE
         } finally {
             _initialized.value = true
         }

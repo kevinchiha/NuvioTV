@@ -121,6 +121,7 @@ import com.nuvio.tv.R
 import com.nuvio.tv.core.access.AccessControl
 import com.nuvio.tv.core.access.AccessControlService
 import com.nuvio.tv.core.access.DeviceGuardService
+import com.nuvio.tv.core.access.RefreshOutcome
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.auth.DeviceSessionRegistration
 import com.nuvio.tv.core.build.AppFeaturePolicy
@@ -155,6 +156,7 @@ import com.nuvio.tv.ui.navigation.NuvioNavHost
 import com.nuvio.tv.ui.navigation.Screen
 import com.nuvio.tv.ui.screens.account.AuthEmailOnboardingScreen
 import com.nuvio.tv.ui.screens.account.LockReason
+import com.nuvio.tv.ui.screens.account.LockRetryStatus
 import com.nuvio.tv.ui.screens.account.LockedOutScreen
 import com.nuvio.tv.ui.screens.addon.EssentialAddonSetupScreen
 import com.nuvio.tv.ui.screens.profile.ProfileSelectionScreen
@@ -654,6 +656,13 @@ class MainActivity : ComponentActivity() {
                         return@Surface
                     }
 
+                    // KevBox FORK DIVERGENCE — this whole gate block (through the LockedOutScreen
+                    // early-return, incl. the LockRetryStatus retry-feedback wiring added 2026-08-11)
+                    // is KevBox-only; upstream has none of it. On merges keep ours wholesale, and
+                    // watch the import block: `com.nuvio.tv.core.access.*` / `LockRetryStatus` are
+                    // kevbox-only imports an auto-merge can silently drop (see UPSTREAM-SYNC.md
+                    // "invisible breakage").
+                    //
                     // KevBox TV access kill-switch / device-limit gate. Placed after the
                     // onboarding/profile/loading guards and before the scaffold render. The poller
                     // LaunchedEffect (outer level, above the Surface) keeps running while locked, so
@@ -685,12 +694,32 @@ class MainActivity : ComponentActivity() {
                         val accessLocked = BuildConfig.FEATURE_ACCESS_CONTROL && lockedOut
                         val deviceLocked = BuildConfig.FEATURE_DEVICE_LIMIT && deviceLockedOut
                         if (accessLocked || deviceLocked) {
+                            // Forgotten when the gate unmounts, so a later re-lock starts at IDLE.
+                            var retryStatus by remember { mutableStateOf(LockRetryStatus.IDLE) }
                             LockedOutScreen(
                                 reason = if (accessLocked) LockReason.ACCESS else LockReason.DEVICE,
+                                retryStatus = retryStatus,
                                 onRetry = {
                                     scope.launch {
-                                        if (BuildConfig.FEATURE_ACCESS_CONTROL) accessControlService.refreshAccess()
-                                        if (BuildConfig.FEATURE_DEVICE_LIMIT) deviceGuardService.refreshDeviceClaim()
+                                        retryStatus = LockRetryStatus.CHECKING
+                                        val accessOutcome =
+                                            if (BuildConfig.FEATURE_ACCESS_CONTROL) accessControlService.refreshAccess()
+                                            else null
+                                        val deviceOutcome =
+                                            if (BuildConfig.FEATURE_DEVICE_LIMIT) deviceGuardService.refreshDeviceClaim()
+                                            else null
+                                        // If either check couldn't reach the server the lock can't
+                                        // have been re-evaluated — tell the member it's connectivity.
+                                        // Otherwise the server answered; if we're still on this
+                                        // screen the verdict really is locked. (On success the lock
+                                        // flows flip false and the gate unmounts before this shows.)
+                                        retryStatus = if (accessOutcome == RefreshOutcome.UNREACHABLE ||
+                                            deviceOutcome == RefreshOutcome.UNREACHABLE
+                                        ) {
+                                            LockRetryStatus.UNREACHABLE
+                                        } else {
+                                            LockRetryStatus.STILL_LOCKED
+                                        }
                                     }
                                 }
                             )

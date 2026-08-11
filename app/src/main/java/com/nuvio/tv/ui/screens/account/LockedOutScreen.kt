@@ -42,6 +42,20 @@ enum class LockReason {
 }
 
 /**
+ * Feedback state for the Retry button. The lock is monotonic (an offline check can never clear
+ * it), so without explicit feedback Retry feels dead whenever the server is unreachable — the
+ * exact situation most likely to have caused the lock in the first place.
+ */
+enum class LockRetryStatus {
+    IDLE,
+    CHECKING,
+    /** Retry ran but couldn't reach the server (offline / auth error). */
+    UNREACHABLE,
+    /** Retry reached the server and the server still says locked. */
+    STILL_LOCKED
+}
+
+/**
  * Full-screen, navigation-blocking lockout gate. Rendered as an early-return guard in
  * MainActivity's Surface body when the server has disabled the member ([LockReason.ACCESS]) or
  * the device is over the per-member limit ([LockReason.DEVICE]).
@@ -53,7 +67,8 @@ enum class LockReason {
 @Composable
 fun LockedOutScreen(
     reason: LockReason,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    retryStatus: LockRetryStatus = LockRetryStatus.IDLE
 ) {
     // Back must not escape the lock screen.
     BackHandler { /* swallow back — the member is locked out */ }
@@ -67,7 +82,9 @@ fun LockedOutScreen(
 
     val message = when (reason) {
         LockReason.ACCESS -> "Access disabled — contact the administrator"
-        LockReason.DEVICE -> "This device isn't authorized — contact the administrator"
+        // Since the newest-device-wins server change, a device lock in the wild is almost always
+        // an offline-grace expiry (connectivity), not a real denial — lead with the internet hint.
+        LockReason.DEVICE -> "This device couldn't be verified. Check your internet connection, or contact the administrator."
     }
 
     Box(
@@ -116,11 +133,26 @@ fun LockedOutScreen(
                     .focusRequester(retryFocusRequester)
             ) {
                 Text(
-                    text = "Retry",
+                    text = if (retryStatus == LockRetryStatus.CHECKING) "Checking…" else "Retry",
                     modifier = Modifier.padding(vertical = 4.dp),
                     fontWeight = FontWeight.Medium
                 )
             }
+            val statusText = when (retryStatus) {
+                LockRetryStatus.IDLE -> "Checks again automatically every couple of minutes."
+                LockRetryStatus.CHECKING -> "Contacting the server…"
+                LockRetryStatus.UNREACHABLE ->
+                    "Couldn't reach the server — check your internet connection. " +
+                        "This clears on its own once you're back online."
+                LockRetryStatus.STILL_LOCKED -> "The server still reports this as locked — contact the administrator."
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = NuvioColors.TextSecondary,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
