@@ -16,7 +16,6 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.domain.model.ExperienceMode
 import com.nuvio.tv.ui.screens.CatalogSeeAllScreen
@@ -43,8 +42,8 @@ import com.nuvio.tv.ui.screens.settings.TrackingSettingsScreen
 import com.nuvio.tv.ui.screens.settings.TmdbSettingsScreen
 import com.nuvio.tv.ui.screens.stream.StreamScreen
 import com.nuvio.tv.ui.screens.home.ContinueWatchingItem
-import com.nuvio.tv.ui.screens.account.AuthSignInScreen
 import com.nuvio.tv.ui.screens.account.AuthQrSignInScreen
+import com.nuvio.tv.ui.screens.account.AuthSignInScreen
 import com.nuvio.tv.ui.screens.cast.CastDetailScreen
 import com.nuvio.tv.ui.screens.profile.ProfileSelectionMode
 import com.nuvio.tv.ui.screens.profile.ProfileSelectionScreen
@@ -731,6 +730,11 @@ fun NuvioNavHost(
                     nullable = true
                     defaultValue = null
                 },
+                navArgument("cloudSessionToken") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
                 navArgument("launchStartedAtMs") {
                     type = NavType.StringType
                     nullable = true
@@ -1051,10 +1055,14 @@ fun NuvioNavHost(
                             contentType = "cloud",
                             contentName = info.item.name,
                             videoId = "${info.item.stableKey}:${info.file.stableKey}",
+                            season = 1,
+                            episode = info.sequenceIndex + 1,
+                            episodeTitle = filename,
                             filename = filename,
                             videoSize = info.videoSizeBytes,
                             addonName = info.item.providerName,
-                            streamDescription = info.item.name
+                            streamDescription = info.item.name,
+                            cloudSessionToken = info.sessionToken
                         )
                     )
                 }
@@ -1212,17 +1220,13 @@ fun NuvioNavHost(
         }
 
         composable(Screen.AuthSignIn.route) {
-            if (BuildConfig.SELF_HOSTED) {
-                AuthQrSignInScreen(
-                    onBackPress = { navController.popBackStack() }
-                )
-            } else {
-                AuthSignInScreen(
-                    onBackPress = { navController.popBackStack() },
-                    onNavigateToQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
-                    onSuccess = { navController.popBackStack() }
-                )
-            }
+            // KevBox: QR retired (its RPCs are removed server-side) — always email/password sign-in.
+            // Upstream 0.8.4+ routes this to AuthQrSignInScreen after retiring SELF_HOSTED; don't take that.
+            AuthSignInScreen(
+                onBackPress = { navController.popBackStack() },
+                onNavigateToQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
+                onSuccess = { navController.popBackStack() }
+            )
         }
 
         composable(Screen.AuthQrSignIn.route) {

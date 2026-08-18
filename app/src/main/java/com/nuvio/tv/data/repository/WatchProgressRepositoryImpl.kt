@@ -41,6 +41,9 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -58,6 +61,25 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.async
 import javax.inject.Inject
 import javax.inject.Singleton
+
+internal fun resolveProviderEpisodeProgress(
+    contentId: String,
+    season: Int,
+    episode: Int,
+    episodeProgress: Map<Pair<Int, Int>, WatchProgress>,
+    allProgress: List<WatchProgress>
+): WatchProgress? {
+    val liveProgress = allProgress
+        .asSequence()
+        .filter { progress ->
+            progress.contentId.equals(contentId, ignoreCase = true) &&
+                progress.season == season &&
+                progress.episode == episode
+        }
+        .maxByOrNull(WatchProgress::lastWatched)
+    return listOfNotNull(episodeProgress[season to episode], liveProgress)
+        .maxByOrNull(WatchProgress::lastWatched)
+}
 
 @Singleton
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -286,24 +308,28 @@ class WatchProgressRepositoryImpl @Inject constructor(
     ) { states -> states.toMap() }
     @Volatile private var activeProgressProviderId: TrackingProviderId? = null
 
-    init {
-        syncScope.launch {
-            activeProgressProviderFlow().collect { provider ->
-                activeProgressProviderId = provider?.providerId
-            }
-        }
-    }
-
     @OptIn(FlowPreview::class)
-    private fun activeProgressProviderFlow(): Flow<TrackingProgressProvider?> = combine(
+    private val activeProgressProviderState: StateFlow<TrackingProgressProvider?> = combine(
         traktSettingsDataStore.watchProgressSource,
         progressProviderConnections
     ) { requested, connections ->
         effectiveWatchProgressSource(requested) { providerId -> connections[providerId] == true }
             .providerId
             ?.let(trackingProgressProviders::provider)
-    }.debounce { provider -> if (provider == null) 300L else 0L }
-        .distinctUntilChanged()
+    }.debounce { provider ->
+        if (provider == null) 100L else 0L
+    }.distinctUntilChanged()
+        .stateIn(syncScope, SharingStarted.Eagerly, null)
+
+    init {
+        syncScope.launch {
+            activeProgressProviderState.collect { provider ->
+                activeProgressProviderId = provider?.providerId
+            }
+        }
+    }
+
+    private fun activeProgressProviderFlow(): Flow<TrackingProgressProvider?> = activeProgressProviderState
 
     private suspend fun activeProgressProvider(): TrackingProgressProvider? =
         activeProgressProviderFlow().first()
@@ -392,7 +418,18 @@ class WatchProgressRepositoryImpl @Inject constructor(
         return activeProgressProviderFlow()
             .flatMapLatest { provider ->
                 if (provider != null) {
-                    provider.episodeProgress(contentId).map { items -> items[season to episode] }
+                    combine(
+                        provider.episodeProgress(contentId),
+                        provider.allProgress
+                    ) { items, allProgress ->
+                        resolveProviderEpisodeProgress(
+                            contentId = contentId,
+                            season = season,
+                            episode = episode,
+                            episodeProgress = items,
+                            allProgress = allProgress
+                        )
+                    }
                 } else {
                     watchProgressPreferences.getEpisodeProgress(contentId, season, episode)
                 }

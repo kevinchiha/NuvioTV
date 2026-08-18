@@ -28,6 +28,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -333,25 +334,25 @@ fun ClassicHomeContent(
         return
     }
 
-    // Lazy catalog loading: trigger load after scroll settles
+    // Lazy catalog loading: trigger load when rows approach visibility
     val latestOnRequestLazyCatalogLoad = rememberUpdatedState(onRequestLazyCatalogLoad)
     val latestVisibleHomeRows = rememberUpdatedState(visibleHomeRows)
     LaunchedEffect(columnListState) {
         val prefetchAhead = 1
         snapshotFlow {
-            val scrolling = columnListState.isScrollInProgress
             val info = columnListState.layoutInfo
             val firstVisible = info.visibleItemsInfo.firstOrNull()?.index ?: -1
             val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            Triple(scrolling, firstVisible, lastVisible)
-        }.collect { (scrolling, firstVisible, lastVisible) ->
-            if (scrolling || lastVisible < 0) return@collect
-            delay(150)
-            if (columnListState.isScrollInProgress) return@collect
+            firstVisible to lastVisible
+        }.collectLatest { (firstVisible, lastVisible) ->
+            if (lastVisible < 0) return@collectLatest
+            // Debounce: restarts on every new emission during rapid scroll.
+            // Only fires when visible indices stabilize for 240ms.
+            delay(240)
             val rows = latestVisibleHomeRows.value
             // Offset for hero + CW sections that precede homeRows in LazyColumn
             val heroOffset = if (uiState.heroSectionEnabled && uiState.heroItems.isNotEmpty()) 1 else 0
-            val cwOffset = if (uiState.continueWatchingItems.isNotEmpty()) 1 else 0
+            val cwOffset = if (uiState.continueWatchingEnabled && uiState.continueWatchingItems.isNotEmpty()) 1 else 0
             val rowsOffset = heroOffset + cwOffset
             for (idx in firstVisible.coerceAtLeast(0)..(lastVisible + prefetchAhead)) {
                 val rowIdx = idx - rowsOffset
@@ -469,7 +470,7 @@ fun ClassicHomeContent(
             }
         }
 
-        if (uiState.continueWatchingItems.isNotEmpty()) {
+        if (uiState.continueWatchingEnabled && uiState.continueWatchingItems.isNotEmpty()) {
             item(key = "continue_watching", contentType = "continue_watching") {
                 val firstRowKey = visibleHomeRows.firstOrNull()?.let { row ->
                     when (row) {
@@ -544,7 +545,7 @@ fun ClassicHomeContent(
             }
         }
 
-        if (uiState.upcomingItems.isNotEmpty()) {
+        if (uiState.continueWatchingEnabled && uiState.upcomingItems.isNotEmpty()) {
             item(key = "upcoming_section", contentType = "upcoming_section") {
                 val firstRowKey = visibleHomeRows.firstOrNull()?.let { row ->
                     when (row) {
@@ -637,7 +638,7 @@ fun ClassicHomeContent(
                     val shouldInitialFocusFirstCatalogRow =
                         shouldRequestInitialFocus &&
                             !heroVisible &&
-                            uiState.continueWatchingItems.isEmpty() &&
+                            (!uiState.continueWatchingEnabled || uiState.continueWatchingItems.isEmpty()) &&
                             index == 0
                     val focusedItemIndex = when {
                         shouldRestoreFocus -> focusState.focusedItemIndex

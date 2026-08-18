@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.exoplayer.ExoPlayer
 import com.nuvio.tv.core.debrid.DirectDebridResolver
 import com.nuvio.tv.core.debrid.DirectDebridStreamPreparer
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackSessionStore
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackProgressStore
+import com.nuvio.tv.core.cloud.CloudLibraryRepository
 import com.nuvio.tv.core.plugin.PluginManager
 import com.nuvio.tv.core.telemetry.TelemetryRepository
 import com.nuvio.tv.core.tracking.TrackingScrobbleCoordinator
@@ -65,12 +68,16 @@ class PlayerViewModel @Inject constructor(
     private val trailerPlayerPool: com.nuvio.tv.core.player.TrailerPlayerPool,
     private val directDebridResolver: DirectDebridResolver,
     private val directDebridStreamPreparer: DirectDebridStreamPreparer,
+    private val cloudLibraryRepository: CloudLibraryRepository,
+    private val cloudPlaybackProgressStore: CloudLibraryPlaybackProgressStore,
+    private val cloudPlaybackSessionStore: CloudLibraryPlaybackSessionStore,
     private val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation,
     private val playbackIssueReportRepository: com.nuvio.tv.data.repository.PlaybackIssueReportRepository,
     private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
     private val telemetryRepository: TelemetryRepository,
     private val deviceGuardDataStore: DeviceGuardDataStore,
+    private val tvRecommendationManager: com.nuvio.tv.core.recommendations.TvRecommendationManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -110,8 +117,12 @@ class PlayerViewModel @Inject constructor(
         directDebridStreamPreparer = directDebridStreamPreparer,
         telemetryRepository = telemetryRepository,
         deviceGuardDataStore = deviceGuardDataStore,
+        cloudLibraryRepository = cloudLibraryRepository,
+        cloudPlaybackProgressStore = cloudPlaybackProgressStore,
+        cloudPlaybackSessionStore = cloudPlaybackSessionStore,
         streamBadgePresentation = streamBadgePresentation,
         playbackIssueReportRepository = playbackIssueReportRepository,
+        tvRecommendationManager = tvRecommendationManager,
         savedStateHandle = savedStateHandle,
         scope = viewModelScope
     )
@@ -214,7 +225,9 @@ class PlayerViewModel @Inject constructor(
             onResult(false)
             return
         }
-        val contentId = controller.contentId ?: run {
+        val contentId = controller.contentId
+            ?: controller.cloudPlaybackContext?.item?.stableKey
+            ?: run {
             onResult(false)
             return
         }
@@ -282,6 +295,7 @@ class PlayerViewModel @Inject constructor(
                     resumePositionMs = resumePositionMs,
                     subtitles = cachedSubtitles,
                     nextEpisodeSnapshot = nextEpisodeSnapshot,
+                    cloudSessionToken = controller.cloudSessionToken,
                     context = activityContext
                 )
             } catch (_: Exception) {

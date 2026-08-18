@@ -65,11 +65,6 @@ val doviExtractorHookReady = parseBooleanProperty(
 val doviEnableRealLink = parseBooleanProperty(
     resolveProperty(devProperties, localProperties, "DOVI_ENABLE_REAL_LINK")
 )
-val selfHosted = parseBooleanProperty(
-    providers.gradleProperty("SELF_HOSTED").orNull
-        ?: providers.environmentVariable("SELF_HOSTED").orNull
-        ?: resolveProperty(devProperties, localProperties, "SELF_HOSTED")
-)
 val doviStaticLibPath = resolveProperty(devProperties, localProperties, "DOVI_LIBDOVI_STATIC_LIB")
 val doviIncludeDirPath = resolveProperty(devProperties, localProperties, "DOVI_LIBDOVI_INCLUDE_DIR")
 val doviPrebuiltRootPath = resolveProperty(devProperties, localProperties, "DOVI_LIBDOVI_PREBUILT_ROOT")
@@ -117,8 +112,8 @@ android {
         applicationId = "tv.kevbox"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1045
-        versionName = "0.9.3.1-beta"
+        versionCode = 1046
+        versionName = "0.9.4-beta"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
         buildConfigField("String", "INTRODB_API_URL", "\"${localProperties.getProperty("INTRODB_API_URL", "")}\"")
@@ -135,7 +130,6 @@ android {
         buildConfigField("String", "TV_LOGIN_WEB_BASE_URL", "\"${localProperties.getProperty("TV_LOGIN_WEB_BASE_URL", "https://nuvio.tv/tv-login")}\"")
         buildConfigField("boolean", "DOVI_NATIVE_ENABLED", enableDoviNative.toString())
         buildConfigField("boolean", "DOVI_EXTRACTOR_HOOK_READY", doviExtractorHookReady.toString())
-        buildConfigField("boolean", "SELF_HOSTED", selfHosted.toString())
         if (enableDoviNative) {
             externalNativeBuild {
                 cmake {
@@ -179,6 +173,8 @@ android {
             // See plans/2026-06-09-member-activity-telemetry.md, sql/member/member_telemetry_setup.sql.
             buildConfigField("boolean", "FEATURE_TELEMETRY", "true")
             buildConfigField("boolean", "FEATURE_EXTERNAL_PLAYBACK_KEEP_ALIVE_ENABLED", "true")
+            // KevBox: no custom-server switching on family builds — always the KevBox backend.
+            buildConfigField("boolean", "FEATURE_CUSTOM_SERVER_CONNECTIONS_ENABLED", "false")
         }
         create("playstore") {
             dimension = "distribution"
@@ -194,6 +190,7 @@ android {
             // Public flavor never collects telemetry and never calls the family Supabase project.
             buildConfigField("boolean", "FEATURE_TELEMETRY", "false")
             buildConfigField("boolean", "FEATURE_EXTERNAL_PLAYBACK_KEEP_ALIVE_ENABLED", "false")
+            buildConfigField("boolean", "FEATURE_CUSTOM_SERVER_CONNECTIONS_ENABLED", "false")
         }
     }
 

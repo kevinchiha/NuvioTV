@@ -95,6 +95,7 @@ private const val WIDE_CARD_HEIGHT_RATIO = 0.4f
 @Composable
 fun ModernHomeContent(
     uiState: HomeUiState,
+    modernPresentation: ModernHomePresentationState = ModernHomePresentationState(),
     focusState: HomeScreenFocusState,
     enrichingItemId: String? = null,
     lastEnrichedPreview: MetaPreview? = null,
@@ -143,7 +144,7 @@ fun ModernHomeContent(
         effectiveExpandEnabled ||
             (effectiveAutoplayEnabled &&
                 trailerPlaybackTarget == FocusedPosterTrailerPlaybackTarget.HERO_MEDIA)
-    val presentation = uiState.modernHomePresentation
+    val presentation = modernPresentation
     val carouselRows = presentation.rows
 
     val hasCollections = remember(uiState.homeRows) {
@@ -363,7 +364,7 @@ fun ModernHomeContent(
 
         if (!restoredFromSavedState.value && focusState.hasSavedFocus) {
             val savedRowKey = focusState.focusedRowKey ?: when {
-                focusState.focusedRowIndex == -1 && uiState.continueWatchingItems.isNotEmpty() -> "continue_watching"
+                focusState.focusedRowIndex == -1 && uiState.continueWatchingEnabled && uiState.continueWatchingItems.isNotEmpty() -> "continue_watching"
                 focusState.focusedRowIndex >= 0 -> rowKeyByGlobalRowIndex.map[focusState.focusedRowIndex]
                 else -> null
             }

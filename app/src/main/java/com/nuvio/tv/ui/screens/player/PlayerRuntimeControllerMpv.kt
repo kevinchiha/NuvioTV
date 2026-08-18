@@ -116,6 +116,8 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         performPendingMpvHardRestartIfNeeded(view)
         view.applyHardwareDecodeMode(mpvHardwareDecodeModeSetting)
         val initialResumePosition = resolvePendingInitialResumePosition()
+            .takeIf { it > 0L }
+            ?: (_uiState.value.pendingSeekPosition?.coerceAtLeast(0L) ?: 0L)
         playbackAnalyticsDiagnostics.setStartupStartPosition(initialResumePosition)
         view.setMedia(url, headers, initialResumePosition)
         playbackAnalyticsDiagnostics.recordRawEventLine(
@@ -124,6 +126,7 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         )
         if (initialResumePosition > 0L) {
             clearPendingInitialResumePosition()
+            _uiState.update { it.copy(pendingSeekPosition = null) }
             updatePlaybackTimeline(currentPosition = initialResumePosition)
         }
         view.setPlaybackSpeed(_uiState.value.playbackSpeed)
