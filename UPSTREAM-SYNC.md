@@ -480,6 +480,40 @@ Simkl reconciliation, CollectionsDataStore migration, ContinueWatchingAiringRule
 LocalhostZeroCopy 404). These predate the 0.8.3 merge fix. After a sync, compare against this list —
 only NEW failures implicate the merge. (Shrinking this baseline is separate housekeeping, not sync work.)
 
+### 0.8.4 + 0.8.5 — SELF_HOSTED retired, sign-in route trap, upstream's own tests broken (2026-08-18)
+
+96 commits (`aa327f0e9`→`131fc2d8d`, dev tip a few past the 0.8.5-beta tag). Branch `sync0.8.5`,
+merge `49c1c4564` + build/test repair `d1cfab795`. 5 conflicts (version block, MainActivity sidebar +
+updater wiring, AccountSettingsContent sign-in block, both player files = constructor-param unions).
+**No server migration** — zero `.rpc()`/DDL changes in range; the `strip_hdr10plus_sei` settings-sync
+exclusion is client-side only. Generated baseline profiles untouched this cycle (no re-sed needed).
+
+- **🛑 Upstream retired `SELF_HOSTED`** (build flag → runtime `ServerConfigurationStore` + server
+  discovery). All its deletions auto-merge with **zero conflicts**, and the `NuvioNavHost` hunk flips
+  the `AuthSignIn` route from our `AuthSignInScreen` (email/password) to their `AuthQrSignInScreen` —
+  dead end for family (QR RPCs are removed server-side). Fix re-applied on the branch with a don't-take
+  comment; **re-check that route hunk every cycle now**. Our `BuildConfig.SELF_HOSTED` refs in
+  `NuvioNavHost`/`AuthQrSignInScreen` were upstream-rewritten away — do NOT re-add the flag when
+  resolving `build.gradle.kts` (take their deletion, keep only our version/identity lines).
+  Hardening applied: `FEATURE_CUSTOM_SERVER_CONNECTIONS_ENABLED=false` on the full flavor (their
+  default is `true`; the switch-server UI is unreachable in our build, this is belt-and-braces).
+  Default path is safe regardless: `ServerConfigurationStore.loadActive()` falls back to our
+  compiled-in `SUPABASE_URL`/anon key when nothing custom is stored.
+- **Upstream's playstore flavor is broken at their tip**: new subtitle-download code does
+  `response.body.bytes()` bare — full flavor resolves OkHttp 5.3.2 (non-null body), playstore stays on
+  4.12.0 (`ResponseBody?`). Fixed with `?.bytes() ?: ByteArray(0)`. We keep playstore compiling; they
+  don't build it.
+- **Upstream's own unit tests don't compile at their tip** (they don't run them): 3 tests stub
+  `TmdbSettingsDataStore.settings` with `flowOf` where it's now `StateFlow`, and
+  `SearchViewModelConcurrencyTest` wasn't given the new `metaRepository` param. Repaired on the branch
+  (stubs → `MutableStateFlow`, pass a relaxed mock) — same "invisible breakage #4" class.
+- **Known-failure baseline updated**: pre-merge baseline was 14 (incl. TmdbMetadata ×2 + TraktAuth,
+  which the sync fixed). Post-merge 12 = the 11 host-environment stragglers + **1 new:
+  `DefaultAllocatorTest.testLateReleasedAllocationsMemoryLeak`** (expects 0 retained, gets 196608).
+  Caused by upstream's own `b9172d13f` "Update ExoPlayer AAR" — a vendored media3 test vs their new
+  player binary, not merge logic. Verify playback on-device; leave the test red until upstream
+  re-baselines it (or fix the expectation when we next understand the new allocator's pooling).
+
 ## Verify before shipping
 
 ```bash
