@@ -110,3 +110,11 @@ git -C "$REPO" push origin HEAD
 
 note "Release $VER (versionCode $NEW_CODE) is live at $BASE_URL/$REMOTE_APK"
 note "Manifest: $BASE_URL/version.json"
+
+# --- 6. Free build daemons (non-fatal) -------------------------------------------
+# assembleFullRelease leaves the Gradle daemon + Kotlin compile daemon parked holding
+# ~10+ GB RSS. Nothing is building after a release, so stop them. Never let cleanup
+# fail a finished release.
+note "Stopping Gradle/Kotlin build daemons…"
+(cd "$REPO" && ./gradlew --stop >/dev/null 2>&1) || true
+pkill -f "org.jetbrains.kotlin.daemon.KotlinCompileDaemon" 2>/dev/null || true
