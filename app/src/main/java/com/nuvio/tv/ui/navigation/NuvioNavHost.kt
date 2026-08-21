@@ -1136,10 +1136,12 @@ fun NuvioNavHost(
             )
         }
 
-        composable(Screen.SupportersContributors.route) {
-            SupportersContributorsScreen(
-                onBackPress = { navController.popBackStack() }
-            )
+        if (AppFeaturePolicy.supportNuvioEnabled) {
+            composable(Screen.SupportersContributors.route) {
+                SupportersContributorsScreen(
+                    onBackPress = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(Screen.LicensesAttributions.route) {

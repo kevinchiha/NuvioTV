@@ -9,7 +9,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,9 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -43,6 +40,7 @@ import androidx.tv.material3.Text
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.R
 import com.nuvio.tv.core.build.AppFeaturePolicy
+import com.nuvio.tv.ui.components.MemberBrandWordmark
 import com.nuvio.tv.updater.UpdateViewModel
 
 @Composable
@@ -98,13 +96,9 @@ fun AboutSettingsContent(
             ) {
                 Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
 
-                Image(
-                    painter = painterResource(id = R.drawable.app_logo_wordmark),
-                    contentDescription = stringResource(R.string.cd_nuvio_logo),
-                    modifier = Modifier
-                        .width(180.dp)
-                        .height(40.dp),
-                    contentScale = ContentScale.Fit
+                MemberBrandWordmark(
+                    height = 40.dp,
+                    contentDescription = stringResource(R.string.cd_nuvio_logo)
                 )
 
                 Text(
@@ -174,14 +168,17 @@ fun AboutSettingsContent(
                 //     onClick = { /* opened Nuvio's privacy policy URL */ }
                 // )
 
-                // KevBox: upstream "Supporters & Contributors" (donations / Ko-fi / sponsors)
-                // hidden for the private family build. Screen + route left intact (hide, don't delete).
-                // SettingsActionRow(
-                //     title = stringResource(R.string.about_supporters_contributors),
-                //     subtitle = stringResource(R.string.about_supporters_contributors_subtitle),
-                //     trailingIcon = Icons.Default.ChevronRight,
-                //     onClick = onNavigateToSupportersContributors
-                // )
+                // KevBox: upstream now gates this row behind AppFeaturePolicy.supportNuvioEnabled,
+                // which we keep false on the full flavor (family build) — dead row, no local
+                // divergence needed anymore.
+                if (AppFeaturePolicy.supportNuvioEnabled) {
+                    SettingsActionRow(
+                        title = stringResource(R.string.support_nuvio_name),
+                        subtitle = stringResource(R.string.about_supporters_contributors_subtitle),
+                        trailingIcon = Icons.Default.ChevronRight,
+                        onClick = onNavigateToSupportersContributors
+                    )
+                }
 
                 // Temporarily hidden while validating the About screen layout.
                 // The licenses screen and navigation route remain intact.

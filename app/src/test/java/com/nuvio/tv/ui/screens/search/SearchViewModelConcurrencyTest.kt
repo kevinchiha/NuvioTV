@@ -135,14 +135,12 @@ class SearchViewModelConcurrencyTest {
         return SearchViewModel(
             addonRepository = addonRepository,
             catalogRepository = catalogRepository,
+            metaRepository = mockk(relaxed = true),
             layoutPreferenceDataStore = layoutPreferences,
             searchHistoryDataStore = history,
             watchProgressRepository = watchProgress,
             watchedSeriesStateHolder = watchedSeries,
             posterOptions = mockk<PosterOptionsController>(relaxed = true),
-            // KevBox sync note: required param upstream added in 0.8.4 prefetch work without
-            // updating this test — their test source set is broken at their own tip.
-            metaRepository = mockk(relaxed = true),
             context = mockk<Context>(relaxed = true)
         )
     }

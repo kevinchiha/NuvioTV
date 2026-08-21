@@ -65,12 +65,14 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
@@ -139,21 +141,27 @@ import com.nuvio.tv.data.local.ExperienceModeDataStore
 import com.nuvio.tv.data.local.LayoutPreferenceDataStore
 import com.nuvio.tv.data.local.StartupAuthNotice
 import com.nuvio.tv.data.local.ThemeDataStore
+import com.nuvio.tv.data.repository.MemberAccessRepository
 import com.nuvio.tv.data.remote.supabase.AvatarRepository
 import com.nuvio.tv.domain.model.AppFont
 import com.nuvio.tv.domain.model.AppTheme
 import com.nuvio.tv.domain.model.AuthState
 import com.nuvio.tv.domain.model.CardDepthStyle
+import com.nuvio.tv.domain.model.CosmeticEntitlement
 import com.nuvio.tv.domain.model.DiscoverLocation
 import com.nuvio.tv.domain.model.ExperienceMode
+import com.nuvio.tv.domain.model.MemberAccess
 import com.nuvio.tv.domain.model.SettingsUiStyle
+import com.nuvio.tv.domain.model.resolveAppTheme
 import com.nuvio.tv.domain.deeplink.AppDeepLink
 import com.nuvio.tv.domain.repository.AddonRepository
 import com.nuvio.tv.ui.components.NuvioScrollDefaults
+import com.nuvio.tv.ui.components.BrandWordmark
 import com.nuvio.tv.ui.components.LocalCardDepthStyle
 import com.nuvio.tv.ui.components.ProfileAvatarCircle
 import com.nuvio.tv.ui.navigation.NuvioNavHost
 import com.nuvio.tv.ui.navigation.Screen
+import com.nuvio.tv.ui.membership.LocalMemberAccess
 import com.nuvio.tv.ui.screens.account.AuthEmailOnboardingScreen
 import com.nuvio.tv.ui.screens.account.LockReason
 import com.nuvio.tv.ui.screens.account.LockRetryStatus
@@ -168,6 +176,8 @@ import com.nuvio.tv.ui.theme.NuvioPrimitives
 import com.nuvio.tv.ui.theme.NuvioRadii
 import com.nuvio.tv.ui.theme.NuvioStrokes
 import com.nuvio.tv.ui.theme.NuvioTheme
+import com.nuvio.tv.ui.theme.ThemeColors
+import com.nuvio.tv.ui.theme.accentBrush
 import com.nuvio.tv.ui.util.LocalFastHorizontalNavigationEnabled
 import com.nuvio.tv.ui.util.LocalRecompositionHighlighterEnabled
 import com.nuvio.tv.ui.util.rememberDrawerItemFocusRequesters
@@ -199,6 +209,7 @@ data class DrawerItem(
 
 private data class MainUiPrefs(
     val theme: AppTheme = AppTheme.OCEAN,
+    val memberAccess: MemberAccess = MemberAccess.None,
     val font: AppFont = AppFont.INTER,
     val amoledMode: Boolean = false,
     val amoledSurfacesMode: Boolean = false,
@@ -228,6 +239,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var experienceModeDataStore: ExperienceModeDataStore
+
+    @Inject
+    lateinit var memberAccessRepository: MemberAccessRepository
 
     @Inject
     lateinit var addonRepository: AddonRepository
@@ -333,6 +347,15 @@ class MainActivity : ComponentActivity() {
         // Extract extras set by the Continue Watching launcher channel preview programs.
         val launchContentId = intent?.getStringExtra("contentId")
         val launchContentType = intent?.getStringExtra("contentType")
+        val launchMode = intent?.getStringExtra("launchMode")
+        val launchVideoId = intent?.getStringExtra("videoId")
+        val launchName = intent?.getStringExtra("name")
+        val launchPoster = intent?.getStringExtra("poster")
+        val launchBackdrop = intent?.getStringExtra("backdrop")
+        val launchLogo = intent?.getStringExtra("logo")
+        val launchSeason = intent?.getIntExtra("season", -1)?.takeIf { it >= 0 }
+        val launchEpisode = intent?.getIntExtra("episode", -1)?.takeIf { it >= 0 }
+        val launchEpisodeTitle = intent?.getStringExtra("episodeTitle")
         captureDeepLinkIntent(intent)
 
         setContent {
@@ -429,9 +452,14 @@ class MainActivity : ComponentActivity() {
             }
 
             var avatarCatalog by remember { mutableStateOf(emptyList<com.nuvio.tv.data.remote.supabase.AvatarCatalogItem>()) }
+            val avatarMemberAccess by memberAccessRepository.access.collectAsState()
+            val hasProfileAvatarAccess = avatarMemberAccess.entitlements
+                .includes(CosmeticEntitlement.PROFILE_AVATARS)
 
-            LaunchedEffect(Unit) {
-                avatarCatalog = runCatching { avatarRepository.getAvatarCatalog() }
+            LaunchedEffect(hasProfileAvatarAccess) {
+                avatarCatalog = runCatching {
+                    avatarRepository.getAvatarCatalog(hasProfileAvatarAccess)
+                }
                     .getOrDefault(emptyList())
             }
 
@@ -440,19 +468,31 @@ class MainActivity : ComponentActivity() {
                     ?: activeProfile?.avatarId?.let { avatarRepository.getAvatarImageUrl(it, avatarCatalog) }
             }
 
-            val mainUiPrefsFlow = remember(themeDataStore, layoutPreferenceDataStore, experienceModeDataStore) {
+            val mainUiPrefsFlow = remember(
+                themeDataStore,
+                layoutPreferenceDataStore,
+                experienceModeDataStore,
+                memberAccessRepository
+            ) {
+                val activeThemeFlow = combine(
+                    themeDataStore.selectedThemePreference,
+                    memberAccessRepository.access
+                ) { selectedTheme, memberAccess ->
+                    resolveAppTheme(selectedTheme, memberAccess.entitlements) to memberAccess
+                }
                 // Group flows into two batches to reduce intermediate flow allocations.
                 // Each batch uses a single combine() instead of chaining .combine() calls,
                 // which avoids N intermediate flow objects and redundant emissions on startup.
                 val themeAndExperienceFlow = combine(
-                    themeDataStore.selectedTheme,
+                    activeThemeFlow,
                     themeDataStore.selectedFont,
                     themeDataStore.amoledMode,
                     themeDataStore.amoledSurfacesMode,
                     experienceModeDataStore.mode,
-                ) { theme, font, amoledMode, amoledSurfacesMode, experienceMode ->
+                ) { themeAndAccess, font, amoledMode, amoledSurfacesMode, experienceMode ->
                     MainUiPrefs(
-                        theme = theme,
+                        theme = themeAndAccess.first,
+                        memberAccess = themeAndAccess.second,
                         font = font,
                         amoledMode = amoledMode,
                         amoledSurfacesMode = amoledSurfacesMode,
@@ -535,6 +575,7 @@ class MainActivity : ComponentActivity() {
                     LocalFastHorizontalNavigationEnabled provides mainUiPrefs.fastHorizontalNavigationEnabled,
                     LocalRecompositionHighlighterEnabled provides (BuildConfig.IS_DEBUG_BUILD && mainUiPrefs.composeHighlighterEnabled),
                     LocalCardDepthStyle provides mainUiPrefs.cardDepthStyle,
+                    LocalMemberAccess provides mainUiPrefs.memberAccess,
                     com.nuvio.tv.core.player.LocalTrailerPlayerPool provides trailerPlayerPool
                 ) {
                 Surface(
@@ -790,12 +831,32 @@ class MainActivity : ComponentActivity() {
                     // Navigate to content when launched from the Continue Watching channel row.
                     LaunchedEffect(navController) {
                         if (launchContentId != null && launchContentType != null && layoutChosen) {
-                            navController.navigate(
-                                Screen.Detail.createRoute(
-                                    itemId = launchContentId,
-                                    itemType = launchContentType
+                            if (launchMode == "stream" && launchVideoId != null && launchName != null) {
+                                navController.navigate(
+                                    Screen.Stream.createRoute(
+                                        videoId = launchVideoId,
+                                        contentType = launchContentType,
+                                        title = launchName,
+                                        poster = launchPoster,
+                                        backdrop = launchBackdrop,
+                                        logo = launchLogo,
+                                        season = launchSeason,
+                                        episode = launchEpisode,
+                                        episodeName = launchEpisodeTitle,
+                                        contentId = launchContentId,
+                                        contentName = launchName,
+                                        returnToDetailOnBack = launchContentType.equals("series", ignoreCase = true),
+                                        returnToHomeOnBack = true
+                                    )
                                 )
-                            )
+                            } else {
+                                navController.navigate(
+                                    Screen.Detail.createRoute(
+                                        itemId = launchContentId,
+                                        itemType = launchContentType
+                                    )
+                                )
+                            }
                         }
                     }
 
@@ -1032,6 +1093,7 @@ class MainActivity : ComponentActivity() {
         }
         // KevBox upstream-sync note: keep upstream's single foreground-sync trigger, exactly once
         // (inside the lifecycleScope block below). Do NOT add a second call.
+        memberAccessRepository.refreshIfStale()
         lifecycleScope.launch {
             deviceSessionRegistration.requestForegroundRegistration()
             startupSyncService.requestForegroundSync()
@@ -1297,8 +1359,7 @@ private fun LegacySidebarScaffold(
                                     }
                                 }
                             } else {
-                                Image(
-                                    painter = painterResource(id = R.drawable.app_logo_wordmark),
+                                BrandWordmark(
                                     contentDescription = stringResource(R.string.app_name),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1433,6 +1494,11 @@ private fun LegacySidebarButton(
         },
         label = "legacySidebarItemIconTint"
     )
+    val selectedCollapsedIconBrush = if (selected && !expanded) {
+        ThemeColors.getColorPalette(NuvioTheme.currentTheme).accentBrush()
+    } else {
+        null
+    }
     val itemScale by animateFloatAsState(
         targetValue = if (isFocused && expanded) 1.1f else 1f,
         animationSpec = tween(durationMillis = NuvioMotion.tokens.durations.fast, easing = NuvioMotion.tokens.easings.standard),
@@ -1469,6 +1535,7 @@ private fun LegacySidebarButton(
             iconRes = iconRes,
             icon = icon,
             tint = iconTint,
+            brush = selectedCollapsedIconBrush,
             modifier = Modifier
                 .size(NuvioComponents.tokens.sidebar.iconSize)
                 .align(Alignment.CenterStart)
@@ -2052,21 +2119,35 @@ private fun DrawerItemIcon(
     iconRes: Int?,
     icon: ImageVector?,
     modifier: Modifier = Modifier,
-    tint: Color = androidx.tv.material3.LocalContentColor.current
+    tint: Color = androidx.tv.material3.LocalContentColor.current,
+    brush: Brush? = null
 ) {
+    val iconModifier = if (brush == null) {
+        modifier
+    } else {
+        modifier
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithCache {
+                onDrawWithContent {
+                    drawContent()
+                    drawRect(brush = brush, blendMode = BlendMode.SrcIn)
+                }
+            }
+    }
+    val iconTint = if (brush == null) tint else Color.White
     when {
         icon != null -> Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = tint,
-            modifier = modifier
+            tint = iconTint,
+            modifier = iconModifier
         )
 
         iconRes != null -> Icon(
             painter = rememberRawSvgPainter(iconRes),
             contentDescription = null,
-            tint = tint,
-            modifier = modifier
+            tint = iconTint,
+            modifier = iconModifier
         )
     }
 }
