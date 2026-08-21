@@ -514,6 +514,50 @@ exclusion is client-side only. Generated baseline profiles untouched this cycle 
   player binary, not merge logic. Verify playback on-device; leave the test red until upstream
   re-baselines it (or fix the expectation when we next understand the new allocator's pooling).
 
+### 0.8.6 + 0.8.7 — supporter perks; theme default moved; no server migration (2026-08-21)
+
+50 commits (`131fc2d8d`→`0cbfb551a`, dev tip at the 0.8.7-beta tag). Branch `sync0.8.7`, merge
+`d535f72f3`. 6 conflicts (version block, MainActivity imports+MainUiPrefs+onResume, ThemeDataStore,
+ThemeSettingsViewModel, SubtitleTiming, AboutScreen). Player telemetry-hook files auto-merged clean
+despite the Bluetooth-audio-route rework. **No server migration** — see below.
+
+- **Supporter perks v1 is the headline.** New `MemberAccessRepository` (Supabase RPC
+  `get_my_member_access`, retries 1s/2s/4s then settles on `MemberAccess.None`), supporter themes
+  (`ThemeAccess.kt`, `SupporterThemeColors`), profile backgrounds (`get_member_profile_background_catalog`),
+  member avatars (`get_member_profile_avatar_catalog`). **All soft-fail against our Supabase** (missing
+  RPC → caught → None/empty), so the whole perk surface self-disables — no migration needed. Cost: ~4
+  silent 404s per foreground (`refreshIfStale`, 15-min staleness). Optional cleanup: 3 stub RPCs in the
+  kevbox repo returning empty would silence the spam. `DebugMemberTierCard` only surfaces via
+  `SettingsCategory.DEBUG` (`IS_DEBUG_BUILD`-gated) — no strip needed.
+- **🛑 New hardcoded data-sending defaults blanked:** `DONATIONS_*` was replaced by
+  `SUPPORTERS_API_BASE_URL` (default `https://nuvio.tv/`) and `SUPPORT_URL` (`https://nuvio.tv/support`)
+  in all 3 buildConfig blocks — blanked per the standing URL rule. Plus we set
+  **`AppFeaturePolicy.supportNuvioEnabled = false`** on the full flavor (upstream gates the Supporters
+  screen route + About row behind it; false = `SupportersApi` never fires, row dead — and our old
+  commented-out About-row hack was retired in favor of upstream's own gate).
+- **Theme default moved:** upstream made the theme preference nullable (`ThemeDataStore.selectedTheme`
+  → `Flow<AppTheme?>`) and moved fallback resolution into the new `resolveAppTheme()` in
+  `ThemeAccess.kt`. Our OCEAN flip moved there (both fallbacks; `ThemeAccessTest` updated to expect
+  OCEAN). `ThemeSettingsViewModel` keeps `selectedTheme = AppTheme.OCEAN` initial state. **Re-check
+  both spots after future syncs that touch theming.**
+- **`ProfileSyncService` push now includes `profile_background_id/url`** — inside the entries JSON
+  (NOT named RPC args), DTO defaults `null` both directions → our prod functions tolerate it;
+  backgrounds just don't persist server-side. Add columns in the kevbox repo only if we ever want
+  cross-device background sync.
+- **SubtitleTiming conflict was a wash:** upstream made the same nullable-body fix we shipped in
+  0.8.4/0.8.5 (`?.bytes()`), theirs with a better error path — took theirs, divergence retired.
+- **Test-source dedupe (invisible breakage #4 variant):** upstream fixed the same two broken tests we
+  patched last cycle (`86b67be76`) → auto-merge produced a duplicate `MutableStateFlow` import
+  (`TmdbCollectionSourceResolverTest`) and a duplicate `metaRepository` ctor arg
+  (`SearchViewModelConcurrencyTest`). Both deduped. **When both sides fix the same upstream test break,
+  expect silent duplicates, not conflicts.**
+- Untouched this cycle: updater package, manifest, `SettingsScreen.kt` (suppressions survive as-is),
+  `WatchedItemsSyncService`/`LibrarySyncReducer` patches, generated baseline profiles (no sed),
+  `sync_push_*`/`sync_delete_*` signatures. New dep: `supabase-storage` (+`install(Storage)` in
+  SupabaseModule — auto-merged). Baseline still 12 known failures (921 tests).
+- Emulator-verified: home renders (OCEAN), CW sync live, manual stream picker intact, ExoPlayer
+  playback + subtitles confirmed.
+
 ## Verify before shipping
 
 ```bash
