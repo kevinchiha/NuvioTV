@@ -219,6 +219,12 @@ fun PlaybackSettingsContent(
                 onShowStreamRegexDialog = { openDialog { showStreamRegexDialog = true } },
                 onShowNextEpisodeThresholdModeDialog = { openDialog { showNextEpisodeThresholdModeDialog = true } },
                 onShowReuseLastLinkCacheDialog = { openDialog { showReuseLastLinkCacheDialog = true } },
+                onSetPostPlayRecommendationsEnabled = { enabled ->
+                    coroutineScope.launch { viewModel.setPostPlayRecommendationsEnabled(enabled) }
+                },
+                onSetPostPlayMovieThresholdPercent = { percent ->
+                    coroutineScope.launch { viewModel.setPostPlayMovieThresholdPercent(percent) }
+                },
                 onSetStreamAutoPlayNextEpisodeEnabled = { enabled ->
                     coroutineScope.launch { viewModel.setStreamAutoPlayNextEpisodeEnabled(enabled) }
                 },

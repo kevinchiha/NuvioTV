@@ -41,9 +41,15 @@ class WatchedItemsPreferences @Inject constructor(
         return prefs[lastSuccessfulPushMsKey] ?: 0L
     }
 
-    suspend fun setLastSuccessfulPushMs(timestampMs: Long, profileId: Int = profileManager.activeProfileId.value) {
+    /**
+     * Advances the stored push point, never lowering it. The comparison happens inside
+     * the edit, so two pushes finishing out of order cannot leave the older one on disk.
+     * Nothing needs to lower it: deleting a profile removes the whole store.
+     */
+    suspend fun advanceLastSuccessfulPushMs(timestampMs: Long, profileId: Int = profileManager.activeProfileId.value) {
         store(profileId).edit { prefs ->
-            prefs[lastSuccessfulPushMsKey] = timestampMs
+            val stored = prefs[lastSuccessfulPushMsKey] ?: 0L
+            prefs[lastSuccessfulPushMsKey] = maxOf(stored, timestampMs)
         }
     }
 
@@ -223,7 +229,7 @@ class WatchedItemsPreferences @Inject constructor(
         remoteItems: List<WatchedItem>,
         lastSuccessfulPushMs: Long = 0L,
         profileId: Int = profileManager.activeProfileId.value,
-        unionWhenNeverSynced: Boolean = false
+        unionWhenNeverSynced: Boolean = true
     ): Boolean {
         var preservedLocalItems = false
         store(profileId).edit { preferences ->
@@ -236,9 +242,13 @@ class WatchedItemsPreferences @Inject constructor(
             val localItems = current.mapNotNull { json ->
                 runCatching { gson.fromJson(json, WatchedItem::class.java) }.getOrNull()
             }
-            // rev 4 Option B — union all local not in remote ONLY when never-synced AND the caller opted in
-            // (the restore snapshot path). Synced devices keep the newer-than-push rule; other callers (default
-            // unionWhenNeverSynced=false) keep today's pure replace.
+            // rev 4 Option B — when the device has never pushed, union all local items the remote doesn't
+            // return instead of dropping them; a device that never pushed cannot read remote absence as a
+            // deletion. Synced devices keep the newer-than-push rule.
+            // 0.8.11: upstream converged on the same rule (it dropped its own `if (lastSuccessfulPushMs > 0L)`
+            // gate and added WatchedItemsPullPreservationTest to pin it), so the default flipped from false to
+            // true to match. The flag stays because the restore path passes it explicitly and SyncMergeLogicTest
+            // pins both sides of it.
             val (merged, preserved) = unionWatchedSnapshot(localItems, remoteItems, lastSuccessfulPushMs, unionWhenNeverSynced)
             preservedLocalItems = preserved
             preferences[watchedItemsKey] = merged.map { gson.toJson(it) }.toSet()

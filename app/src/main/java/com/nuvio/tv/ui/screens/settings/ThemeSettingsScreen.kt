@@ -7,6 +7,7 @@ import com.nuvio.tv.ui.theme.NuvioTheme
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Process
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
@@ -62,6 +63,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.LocaleCache
 import com.nuvio.tv.R
+import com.nuvio.tv.domain.model.AppIconOption
 import com.nuvio.tv.domain.model.AppTheme
 import com.nuvio.tv.domain.model.SettingsUiStyle
 import com.nuvio.tv.ui.components.NuvioDialog
@@ -71,6 +73,12 @@ import com.nuvio.tv.ui.theme.accentBrush
 import com.nuvio.tv.ui.theme.getFontFamily
 import kotlinx.coroutines.delay
 import java.util.Locale
+
+/**
+ * KevBox: false hides the launcher icon/banner picker row in Appearance. See the FORK DIVERGENCE
+ * comment at the call site — the five alternate launcher icons are Nuvio artwork we don't override.
+ */
+private const val SHOW_LAUNCHER_ARTWORK_PICKER = false
 
 @Composable
 fun ThemeSettingsScreen(
@@ -93,8 +101,11 @@ fun ThemeSettingsContent(
     initialFocusRequester: FocusRequester? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val appIconState by viewModel.appIconState.collectAsStateWithLifecycle()
     var showFontDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
+    var showAppIconDialog by remember { mutableStateOf(false) }
+    var appIconConfirmation by remember { mutableStateOf<AppIconOption?>(null) }
     var pendingLanguageRestart by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
@@ -102,7 +113,7 @@ fun ThemeSettingsContent(
     val supportedLocales = remember(strLanguageSystem) {
         val tags = listOf(
             "en", "ru", "ar", "bg", "bs", "da", "de", "el", "es", "es-419", "hu", "fr", "in", "it",
-            "no", "pl", "pt-PT", "pt-BR", "tr", "uk", "cs", "sk", "sl", "sv", "ta", "ro", "ja",
+            "no", "pl", "pt-PT", "pt-BR", "tr", "uk", "cs", "sk", "sl", "sq", "sv", "ta", "ro", "ja",
             "nl", "vi", "hi", "lt", "he", "zh-CN", "zh-TW"
         )
         listOf(null to strLanguageSystem) + tags.map { tag ->
@@ -242,6 +253,30 @@ fun ThemeSettingsContent(
                 }
             }
 
+            // KevBox FORK DIVERGENCE: hide upstream's launcher icon/banner picker (added 0.8.11).
+            // Upstream ships six launcher activity-aliases under .launcher; the full flavor only overrides
+            // ic_launcher + banner with KevBox artwork, so the five alternates (arctic blue, emerald,
+            // rose gold, copper, graphite) are Nuvio-branded. Picking one puts a Nuvio logo on a family
+            // TV's home row until they change it back. Flip this to true once we ship our own variants.
+            if (SHOW_LAUNCHER_ARTWORK_PICKER) {
+                SettingsGroupCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = stringResource(R.string.appearance_launcher_artwork),
+                    subtitle = stringResource(R.string.appearance_launcher_artwork_subtitle)
+                ) {
+                    SettingsActionRow(
+                        title = stringResource(R.string.appearance_app_icon_and_banner),
+                        subtitle = stringResource(R.string.appearance_app_icon_and_banner_subtitle),
+                        value = appIconState.selected.localizedName(),
+                        enabled = appIconState.pending == null,
+                        onClick = {
+                            viewModel.onEvent(ThemeSettingsEvent.DismissAppIconFailure)
+                            showAppIconDialog = true
+                        }
+                    )
+                }
+            }
+
             SettingsGroupCard(
                 modifier = Modifier.fillMaxWidth(),
                 title = stringResource(R.string.appearance_font_and_language),
@@ -303,6 +338,36 @@ fun ThemeSettingsContent(
             onDismiss = { showLanguageDialog = false },
             width = 400.dp,
             maxHeight = 280.dp
+        )
+    }
+
+    if (showAppIconDialog && appIconConfirmation == null) {
+        AppIconPickerDialog(
+            state = appIconState,
+            onSelected = { option ->
+                viewModel.onEvent(ThemeSettingsEvent.DismissAppIconFailure)
+                if (option != appIconState.selected) {
+                    appIconConfirmation = option
+                }
+            },
+            onDismiss = {
+                viewModel.onEvent(ThemeSettingsEvent.DismissAppIconFailure)
+                showAppIconDialog = false
+            }
+        )
+    }
+
+    appIconConfirmation?.let { option ->
+        AppIconChangeConfirmationDialog(
+            option = option,
+            onConfirm = {
+                appIconConfirmation = null
+                if (viewModel.selectAppIcon(option)) {
+                    context.findActivity()?.finishAffinity()
+                    Process.killProcess(Process.myPid())
+                }
+            },
+            onDismiss = { appIconConfirmation = null }
         )
     }
 }

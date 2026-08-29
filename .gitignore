@@ -65,9 +65,10 @@ avatars/
 local-assets/supporter-profile-backgrounds/
 logs
 AGENTS.md
+/PR.md
+docs/
 status-page/
 memories/
 # Kimi Code local data
 .kimi-code/memory/
 .kimi-code/local.toml
-docs/

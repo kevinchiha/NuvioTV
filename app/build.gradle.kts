@@ -128,6 +128,9 @@ android {
         buildConfigField("String", "SIMKL_APP_NAME", buildConfigString(resolveProperty(devProperties, localProperties, "SIMKL_APP_NAME", "nuvio")))
         buildConfigField("String", "TMDB_API_KEY", "\"${localProperties.getProperty("TMDB_API_KEY", "")}\"")
         buildConfigField("String", "TV_LOGIN_WEB_BASE_URL", "\"${localProperties.getProperty("TV_LOGIN_WEB_BASE_URL", "https://nuvio.tv/tv-login")}\"")
+        // KevBox: blank default (upstream ships https://nuvio.tv/link). Standing rule — no NuvioMedia host
+        // as a hardcoded buildConfigField default. Only the QR device-login flow reads it; we use email/password.
+        buildConfigField("String", "DEVICE_LOGIN_WEB_BASE_URL", "\"${localProperties.getProperty("DEVICE_LOGIN_WEB_BASE_URL", "")}\"")
         buildConfigField("boolean", "DOVI_NATIVE_ENABLED", enableDoviNative.toString())
         buildConfigField("boolean", "DOVI_EXTRACTOR_HOOK_READY", doviExtractorHookReady.toString())
         if (enableDoviNative) {
@@ -242,6 +245,9 @@ android {
             buildConfigField("String", "NUVIO_SUPABASE_ANON_KEY", "\"${resolveProperty(devProperties, localProperties, "NUVIO_SUPABASE_ANON_KEY")}\"")
             buildConfigField("String", "NUVIO_AVATAR_PUBLIC_BASE_URL", "\"${resolveProperty(devProperties, localProperties, "NUVIO_AVATAR_PUBLIC_BASE_URL")}\"")
             buildConfigField("String", "TV_LOGIN_WEB_BASE_URL", "\"${devProperties.getProperty("TV_LOGIN_WEB_BASE_URL", "https://app.nuvio.tv/tv-login")}\"")
+            // KevBox: field must exist (ServerConfigurationStore reads it) but stays blank — upstream
+            // defaults it to https://nuvio.tv/link. QR device-login is the only consumer and we don't use it.
+            buildConfigField("String", "DEVICE_LOGIN_WEB_BASE_URL", "\"${devProperties.getProperty("DEVICE_LOGIN_WEB_BASE_URL", "")}\"")
             buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${devProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
             buildConfigField("String", "INTRODB_API_URL", "\"${devProperties.getProperty("INTRODB_API_URL", "")}\"")
             buildConfigField("String", "TRAILER_API_URL", "\"${devProperties.getProperty("TRAILER_API_URL", "")}\"")
@@ -287,6 +293,9 @@ android {
             buildConfigField("String", "NUVIO_SUPABASE_ANON_KEY", "\"${resolveLocalProperty(localProperties, "NUVIO_SUPABASE_ANON_KEY")}\"")
             buildConfigField("String", "NUVIO_AVATAR_PUBLIC_BASE_URL", "\"${resolveLocalProperty(localProperties, "NUVIO_AVATAR_PUBLIC_BASE_URL")}\"")
             buildConfigField("String", "TV_LOGIN_WEB_BASE_URL", "\"${localProperties.getProperty("TV_LOGIN_WEB_BASE_URL", "https://app.nuvio.tv/tv-login")}\"")
+            // KevBox: field must exist (ServerConfigurationStore reads it) but stays blank — upstream
+            // defaults it to https://nuvio.tv/link. QR device-login is the only consumer and we don't use it.
+            buildConfigField("String", "DEVICE_LOGIN_WEB_BASE_URL", "\"${localProperties.getProperty("DEVICE_LOGIN_WEB_BASE_URL", "")}\"")
             buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
             buildConfigField("String", "INTRODB_API_URL", "\"${localProperties.getProperty("INTRODB_API_URL", "")}\"")
             buildConfigField("String", "TRAILER_API_URL", "\"${localProperties.getProperty("TRAILER_API_URL", "")}\"")

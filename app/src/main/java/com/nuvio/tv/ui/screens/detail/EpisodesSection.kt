@@ -74,11 +74,14 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
+import coil3.imageLoader
+import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.request.transformations
 import com.nuvio.tv.R
 import com.nuvio.tv.domain.model.Video
+import com.nuvio.tv.domain.model.EpisodeOptionsOverlayStyle
 import com.nuvio.tv.ui.components.FocusMarqueeText
 import com.nuvio.tv.ui.components.ImdbRatingSourceLabel
 import com.nuvio.tv.ui.components.NuvioDialog
@@ -99,6 +102,7 @@ import com.nuvio.tv.ui.util.rememberLongPressKeyTracker
 private const val EPISODE_CARD_CONTENT_TYPE = "episode_card"
 private const val EPISODE_SCROLL_REPEAT_THROTTLE_MS = 80L
 private const val EPISODE_RESTORE_FALLBACK_MS = 250L
+private const val EPISODE_OVERLAY_PREFETCH_DELAY_MS = 120L
 
 @OptIn(ExperimentalTvMaterial3Api::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
@@ -136,6 +140,14 @@ fun SeasonTabs(
     val lazyListState = rememberLazyListState(initialFirstVisibleItemIndex = initialSeasonIndex)
 
     var suppressFocusSwitch by remember { mutableStateOf(false) }
+    var lastAppliedSeason by remember { mutableStateOf(selectedSeason) }
+    // Clear suppress whenever selectedSeason actually settles (composition runs
+    // with the new value). This guarantees reset even if the scroll coroutine is cancelled.
+    if (lastAppliedSeason != selectedSeason) {
+        lastAppliedSeason = selectedSeason
+        suppressFocusSwitch = false
+    }
+
     var pendingSeason by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(pendingSeason) {
         val target = pendingSeason ?: return@LaunchedEffect
@@ -257,6 +269,8 @@ fun EpisodesRow(
     watchedEpisodes: Set<Pair<Int, Int>> = emptySet(),
     episodeWatchedPendingKeys: Set<String> = emptySet(),
     blurUnwatchedEpisodes: Boolean = false,
+    episodeOptionsOverlayStyle: EpisodeOptionsOverlayStyle = EpisodeOptionsOverlayStyle.ARTWORK,
+    posterCardCornerRadiusDp: Int = 12,
     onEpisodeClick: (Video) -> Unit,
     onEpisodeManualPlayClick: (Video) -> Unit = onEpisodeClick,
     onEpisodeStartFromBeginningClick: (Video) -> Unit = onEpisodeClick,
@@ -282,7 +296,8 @@ fun EpisodesRow(
     val dedupedEpisodes = remember(episodes) { episodes.distinctBy { it.id } }
     val restoreTargetRequester = restoreEpisodeId?.let { episodeFocusRequesters[it] }
     var optionsEpisode by remember { mutableStateOf<Video?>(null) }
-    val cardMetrics = rememberEpisodeCardMetrics()
+    val isOverlayOpen = optionsEpisode != null
+    val cardMetrics = rememberEpisodeCardMetrics(posterCardCornerRadiusDp)
     val density = LocalDensity.current
     val rowPrefetchStrategy = remember { LazyListPrefetchStrategy(nestedPrefetchItemCount = 2) }
     val initialEpisodeIndex = remember(dedupedEpisodes, restoreEpisodeId, scrollToEpisodeId) {
@@ -384,6 +399,7 @@ fun EpisodesRow(
                 imdbRating = imdbRating,
                 isMarkedWatched = isMarkedWatched,
                 blurUnwatched = blurUnwatchedEpisodes,
+                suppressMarquee = isOverlayOpen,
                 cardMetrics = cardMetrics,
                 onClick = episodeOnClick,
                 onLongPress = episodeOnLongPress,
@@ -416,6 +432,8 @@ fun EpisodesRow(
                 selectedEpisode.episode?.let { episode -> episodeRatings[season to episode] }
             },
             isWatched = selectedWatched,
+            blurUnwatchedEpisodes = blurUnwatchedEpisodes,
+            style = episodeOptionsOverlayStyle,
             isPending = isPending,
             isSeasonFullyWatched = isSeasonFullyWatched,
             hasPreviousEpisodes = hasPreviousEpisodes,
@@ -473,6 +491,7 @@ private fun EpisodeCard(
     imdbRating: Double? = null,
     isMarkedWatched: Boolean = false,
     blurUnwatched: Boolean = false,
+    suppressMarquee: Boolean = false,
     cardMetrics: EpisodeCardMetrics,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
@@ -485,6 +504,7 @@ private fun EpisodeCard(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
     val formattedDate = remember(episode.released) {
         episode.released?.let(::formatEpisodeCardDate).orEmpty()
     }
@@ -585,6 +605,56 @@ private fun EpisodeCard(
                 }
             }
             .build()
+    }
+    val overlayBackdropUrl = remember(episode.thumbnail) {
+        episodeOverlayBackdropUrl(episode.thumbnail)
+    }
+    val overlayBackdropWidthPx = remember(configuration, density) {
+        with(density) { configuration.screenWidthDp.dp.roundToPx() }
+    }
+    val overlayBackdropHeightPx = remember(configuration, density) {
+        with(density) { configuration.screenHeightDp.dp.roundToPx() }
+    }
+    val imageLoader = context.imageLoader
+    val overlayPrefetchUrl = remember(episode.thumbnail, shouldBlur) {
+        if (shouldBlur) {
+            episode.thumbnail?.takeIf { it.isNotBlank() }
+        } else {
+            overlayBackdropUrl
+        }
+    }
+    LaunchedEffect(
+        isFocused,
+        overlayPrefetchUrl,
+        overlayBackdropWidthPx,
+        overlayBackdropHeightPx,
+        shouldBlur
+    ) {
+        if (!isFocused) return@LaunchedEffect
+        val url = overlayPrefetchUrl ?: return@LaunchedEffect
+        if (overlayBackdropWidthPx <= 0 || overlayBackdropHeightPx <= 0) return@LaunchedEffect
+        delay(EPISODE_OVERLAY_PREFETCH_DELAY_MS)
+        val (decodeWidthPx, decodeHeightPx) = episodeOverlayBackdropDecodeSize(
+            overlayBackdropWidthPx,
+            overlayBackdropHeightPx,
+            shouldBlur
+        )
+        val cacheKey = episodeOverlayBackdropMemoryCacheKey(
+            url,
+            decodeWidthPx,
+            decodeHeightPx,
+            shouldBlur
+        )
+        if (imageLoader.memoryCache?.get(MemoryCache.Key(cacheKey)) != null) return@LaunchedEffect
+        imageLoader.enqueue(
+            episodeOverlayBackdropRequest(
+                context,
+                url,
+                overlayBackdropWidthPx,
+                overlayBackdropHeightPx,
+                blur = shouldBlur
+            )
+        )
     }
     val strEpisode = stringResource(R.string.episodes_episode)
     val strUnavailable = stringResource(R.string.episodes_unavailable)
@@ -758,7 +828,7 @@ private fun EpisodeCard(
 
                 FocusMarqueeText(
                     text = episode.title.localizeEpisodeTitle(context),
-                    focused = isFocused,
+                    focused = isFocused && !suppressMarquee,
                     style = titleStyle,
                     color = textPrimary,
                 )
@@ -995,9 +1065,10 @@ private data class EpisodeCardMetrics(
 )
 
 @Composable
-private fun rememberEpisodeCardMetrics(): EpisodeCardMetrics {
+private fun rememberEpisodeCardMetrics(posterCardCornerRadiusDp: Int = 12): EpisodeCardMetrics {
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    return remember(screenWidthDp) {
+    val userCornerRadius = posterCardCornerRadiusDp.dp
+    return remember(screenWidthDp, userCornerRadius) {
         when {
             screenWidthDp >= 1300 -> EpisodeCardMetrics(
                 rowHorizontalPadding = NuvioTheme.spacing.huge,
@@ -1005,7 +1076,7 @@ private fun rememberEpisodeCardMetrics(): EpisodeCardMetrics {
                 itemSpacing = 20.dp,
                 cardWidth = 400.dp,
                 cardHeight = 263.dp,
-                cornerRadius = 20.dp,
+                cornerRadius = userCornerRadius,
                 contentPadding = 20.dp,
                 contentBottomPadding = NuvioTheme.spacing.xl,
                 episodeBadgeHorizontalPadding = 10.dp,
@@ -1030,7 +1101,7 @@ private fun rememberEpisodeCardMetrics(): EpisodeCardMetrics {
                 itemSpacing = 18.dp,
                 cardWidth = 360.dp,
                 cardHeight = 235.dp,
-                cornerRadius = 18.dp,
+                cornerRadius = userCornerRadius,
                 contentPadding = 18.dp,
                 contentBottomPadding = 22.dp,
                 episodeBadgeHorizontalPadding = 9.dp,
@@ -1055,7 +1126,7 @@ private fun rememberEpisodeCardMetrics(): EpisodeCardMetrics {
                 itemSpacing = NuvioTheme.spacing.lg,
                 cardWidth = 320.dp,
                 cardHeight = 207.dp,
-                cornerRadius = NuvioTheme.spacing.lg,
+                cornerRadius = userCornerRadius,
                 contentPadding = NuvioTheme.spacing.lg,
                 contentBottomPadding = 20.dp,
                 episodeBadgeHorizontalPadding = NuvioTheme.spacing.sm,
@@ -1080,7 +1151,7 @@ private fun rememberEpisodeCardMetrics(): EpisodeCardMetrics {
                 itemSpacing = 14.dp,
                 cardWidth = 280.dp,
                 cardHeight = 179.dp,
-                cornerRadius = NuvioTheme.spacing.lg,
+                cornerRadius = userCornerRadius,
                 contentPadding = 14.dp,
                 contentBottomPadding = NuvioTheme.spacing.lg,
                 episodeBadgeHorizontalPadding = 7.dp,
