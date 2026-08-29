@@ -24,7 +24,10 @@ updater** (upstream added a GitHub-release "update banner" that would phone home
 rewrote **library sync** into a delta/event model (**server migration REQUIRED**, same class as the
 0.7.16 RPC break), **deleted the whole Supabase realtime sync** (dependency included), added a Simkl
 tracking provider, and renamed `SettingsCategory.TRAKT`→`TRACKING` (silently breaks our suppression
-line). See the 0.8.1 callouts.
+line). See the 0.8.1 callouts. The **0.8.11 sync** (304 commits) added a whole new failure class:
+upstream moved the launcher entry onto six activity-aliases and shipped an **icon picker** that hands
+family members five Nuvio-branded logos we don't override. Nothing was unlocked and nothing phoned
+home; the app just stops looking like KevBox. See the 0.8.11 callouts.
 Expect **30–45 min** then, with conflicts in the player files, `Theme.kt`, `AboutScreen.kt`,
 `AuthSignInScreen.kt`, the `Account*` screens, `AndroidManifest.xml`, and `WatchedItemsSyncService.kt`.
 See the expanded table below. The merge markers are
@@ -63,10 +66,10 @@ git merge upstream/dev
 
 # 4. Publish a new release (bumps versionCode +1, builds signed armeabi-v7a, uploads, writes version.json,
 #    commits, and pushes the CURRENT branch to your fork — so be ON kevbox when you run it, having
-#    fast-forwarded it to your isolation branch first: `git switch kevbox && git merge --ff-only sync0.7.16`).
+#    fast-forwarded it to your isolation branch first: `git switch kevbox && git merge --ff-only sync0.8.11`).
 #    KevBox runs its OWN version line: since 0.7.16 we mirror upstream's patch number into ours
-#    (upstream 0.7.16-beta → KevBox 0.8.16-beta) so the base is legible at a glance. Bump YOUR name:
-./release.sh 0.8.16-beta "Bug fixes and improvements"
+#    (upstream 0.8.11-beta → KevBox 0.9.11-beta) so the base is legible at a glance. Bump YOUR name:
+./release.sh 0.9.11-beta "Bug fixes and improvements"
 ```
 
 > ⚠️ **Let `release.sh` do the push — don't use VS Code's "Sync Changes" button.** `kevbox` carries
@@ -175,6 +178,24 @@ addon-install path that bypasses every door we'd already shut (sidebar, `CONTENT
 both `LaunchedEffect`s + dropping the `stremio://` filter (see the two 0.7.18 table rows above) — the
 `Meta`/title deeplink is kept. So the post-sync policy grep must also cover **manifest intent-filters and
 deeplink handlers**, not just `navigate(...)` call sites.
+
+**0.8.11 did it a third way — through branding, not access.** The new launcher icon picker let a family
+member swap the home-row tile to one of five *Nuvio-branded* icons we don't override (see the 0.8.11
+callout). Nothing was unlocked and nothing phoned home; the app just stops looking like KevBox. So the
+policy sweep isn't only "can they reach a screen we hid" — it's also **"can they reach a setting that
+undoes the rebrand"**. New Settings rows touching icons, banners, themes, or app name deserve the same
+look as new navigation routes.
+
+**Standing post-sync policy greps (run all of these):**
+```bash
+grep -rn "navigate(Screen.AddonManager\|navigate(Screen.Plugins" app/src --include=*.kt   # want: empty
+grep -n "stremio" app/src/main/AndroidManifest.xml                                        # want: comment only
+grep -n "CONTENT_DISCOVERY ->\|TRACKING ->" app/src/.../SettingsScreen.kt                 # want: -> false
+grep -rn "SHOW_LAUNCHER_ARTWORK_PICKER" app/src --include=*.kt                            # want: still false
+grep -rn "supportNuvioEnabled" app/src/full/.../AppFeaturePolicy.kt                       # want: false
+grep -rn "UpdateBannerHost\|AbiSelector\|VersionUtils" app/src --include=*.kt             # want: empty
+grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                             # want: 6 hits, not 4
+```
 
 ### 🛑 Remote control plane — upstream can switch our backend / force-logout the fleet (0.7.9-beta)
 
@@ -558,7 +579,105 @@ despite the Bluetooth-audio-route rework. **No server migration** — see below.
 - Emulator-verified: home renders (OCEAN), CW sync live, manual stream picker intact, ExoPlayer
   playback + subtitles confirmed.
 
+### 0.8.8 → 0.8.11 — launcher-icon branding leak; forced-subs divergence retired; no migration (2026-08-30)
+
+304 commits (`0cbfb551a`→`fa8e7266c`, dev tip a few past the `0.8.11-beta` tag `eb30fbf91`). Branch
+`sync0.8.11`, merge `e52026f7f`, released as **0.9.11-beta**. 295 files, +22.9k lines, but roughly a
+quarter of that is Albanian and Vietnamese translations, so the real code change is moderate. Nine
+conflicts: `.gitignore`, `build.gradle.kts` (3 hunks), `MainActivity`, `WatchedItemsSyncService`,
+`PlayerSettingsDataStore`, `WatchedItemsPreferences`, both player files, `StreamScreen`.
+The player took ~30 commits (parallel range data source, chunked playback for non-faststart MP4s,
+Bluetooth audio routing, a subtitle charset rewrite, a post-play recommendations overlay).
+
+- **🛑 Launcher-icon branding leak (the real find this cycle).** Upstream moved the launcher entry off
+  `MainActivity` onto six new activities under `com.nuvio.tv.launcher` and added an icon picker in
+  Settings → Appearance. Our `full` flavor only overrides `ic_launcher` + `banner`, so the five
+  alternates (arctic blue, emerald, rose gold, copper, graphite) are **Nuvio artwork with no KevBox
+  override** and would put a Nuvio logo on a family TV's home row. Fixed by hiding the picker row:
+  `SHOW_LAUNCHER_ARTWORK_PICKER = false` in `ThemeSettingsScreen.kt`, same pattern as
+  `SHOW_SYNC_OVERVIEW`. **Add to the standing post-sync grep list.** Reassuring detail found while
+  checking: the five alternates ship `android:enabled="false"`, so only the KevBox tile ever appears;
+  the picker was the *only* leak. Nothing else sets `showAppIconDialog`, the choice is not in the
+  synced profile-settings blob, and no startup path applies an alternate. Note `MainActivity` lost its
+  `MAIN`/`LEANBACK_LAUNCHER` filter (it now lives on `.launcher.AppIconDefault`) — Android TV home
+  tiles can duplicate or vanish when the launcher component changes across an update, so **verify the
+  tile still works after installing over an existing build**.
+- **`PlayerSettingsDataStore`: one divergence retired, another nearly lost silently.** Upstream
+  independently adopted `?: false` for `subtitleUseForcedSubtitlesKey`, so that flip is **retired** —
+  take theirs. But the same conflict hunk also carried our `secondaryPreferredLanguage ?: "fr"`
+  (French secondary subtitle default, from `2d5a321f6`), which upstream's side does **not** have.
+  Taking their block wholesale would have silently reset it for every new install. Re-applied with a
+  `KevBox FORK DIVERGENCE` comment. The file now differs from upstream by exactly the three install
+  defaults from that commit: `autoSwitchInternalPlayerOnError ?: true`,
+  `secondaryPreferredAudioLanguage ?: "fr"`, `secondaryPreferredLanguage ?: "fr"`.
+  **Lesson: "take theirs wholesale" is only safe once you've diffed the whole hunk, not just the line
+  that motivated it.** Also note the preferred-language default moved from a hardcoded `"en"` to the
+  device locale via the new `SubtitleLanguageOption.DEVICE`.
+- **`WatchedItemsPreferences`: upstream converged on our rev-4 Option B, so the default flipped.**
+  Upstream dropped its own `if (lastSuccessfulPushMs > 0L)` gate — a device that never pushed cannot
+  read remote absence as a deletion — and added `WatchedItemsPullPreservationTest` to pin it. That
+  test fails against our opt-in flag. Resolution: keep our tested `unionWatchedSnapshot` helper and the
+  `unionWhenNeverSynced` parameter, but **flip its default `false` → `true`**. One word, and it keeps
+  both test suites green: upstream's new test passes, `SyncMergeLogicTest` still passes because it sets
+  the flag explicitly on both sides, and the restore path is unchanged. Only two callers exist:
+  `pullSnapshotFromRemote` (explicit `true`) and `TrackingSourceController.repopulateWatchedItemsFromNuvioSync`
+  (now stops discarding local marks when a member switches their watch source back to cloud sync).
+  Also take upstream's `setLastSuccessfulPushMs` → `advanceLastSuccessfulPushMs` rename (monotonic
+  `maxOf`, so out-of-order pushes can't lower the point) and per-profile `syncPointFor(profileId)`.
+- **🛑 New hardcoded URL default blanked: `DEVICE_LOGIN_WEB_BASE_URL`** (upstream ships
+  `https://nuvio.tv/link`), in **all three** buildConfig blocks. The field must *exist* because
+  `ServerConfigurationStore.kt:70` reads it, but only the QR device-login flow consumes it and we use
+  email/password. Same standing rule that caught `SUPPORTERS_API_BASE_URL` last cycle: the merge
+  auto-adds the `defaultConfig` copy with no conflict, so **blank all three, not just the two in the
+  conflict**.
+- **No server migration.** The complete `rpc(...)` inventory across `app/src` gained exactly two names
+  versus upstream's base: `get_access_verdict` (ours, already live) and `get_my_membership_overview`
+  (supporter perks, soft-fails like `get_my_member_access`). One new named arg, `p_device_type`, goes
+  to `start_device_login_session` — the QR path we don't use, and it already handles a missing function.
+  No new `sync_push_*`/`sync_delete_*` wire keys. The new `BackendRateLimit` OkHttp plugin only reacts
+  to HTTP 429 and 503, so our supporter-RPC 404s never trip it.
+- **Invisible breakage #4, third occurrence.** Upstream's new `SearchViewModelSuggestionsTest` has an
+  `AddonRepository` fake missing our two KevBox-only members (`applyRemoteAddonConfig`,
+  `resetPrimaryAddonsToDefaults`), which broke the **whole test source set** while
+  `compileFullDebugKotlin` stayed green. Fixed with `error("unused")` overrides. **Standing check that
+  catches it cheaply:** `grep -rln ": AddonRepository" app/src/test | while read f; do grep -q applyRemoteAddonConfig "$f" || echo "MISSING: $f"; done`
+- **⚠️ Check gradle's output, not the shell exit code.** `./gradlew … 2>&1 | tail` reports `tail`'s
+  exit status, so a failed build looks like success. The verify block below is written as piped
+  commands; run them with `set -o pipefail` or grep the output for `BUILD FAILED`.
+- **Known-failure baseline is now 13** (1103 tests, 1 skipped): the 12 from 0.8.5, plus
+  **`TrackSelectionInvestigationTest.testBuildStreamInfoDataWithActiveVideoFormat`**. That one is
+  upstream's own test against upstream's own new stats-overlay code — both files are byte-identical to
+  their tip, and it's a mockk gap (an unstubbed `playbackTimeline` on a relaxed mock hits
+  `PlayerBitrateEstimator.fileBitrateBps(..., playbackTimeline.value.duration)` and throws
+  `ClassCastException`). Not merge logic, not a playback bug. Same class as the 0.8.4/0.8.5 finding
+  that upstream doesn't run its own tests.
+- **Divergences confirmed surviving, verified by diffing each file against `fa8e7266c`** rather than by
+  assumption: every buildConfigField upstream added is present in all three blocks (none dropped);
+  `MainActivity` passes byte-identical argument sets to both sidebar scaffolds and an identical
+  `handleExitApp`; `StreamScreen` differs only by the external-stream swap; the sync service by one
+  line. Also re-checked: the **forced stream picker** (`manualSelection = true` ×2 in `NuvioNavHost`,
+  from `fd33dc3f9`) survived, and upstream's new `StreamAutoPlayPolicy` cannot override it because
+  `manualSelection` short-circuits before the settings path runs.
+- **Take from upstream in `MainActivity`:** the confirm-exit toast (`handleExitApp` +
+  `confirmExitEnabled` + `backPressedOnce`) and the new `longPressBackHeld` param, which both scaffolds
+  now require. **Drop** upstream's `UpdateBannerHost` wrapper and its `Box` — that's the 0.8.1 updater
+  callout, still live — and keep our `UpdatePromptDialog` gate below it.
+- Untouched this cycle: the **updater package** (upstream didn't touch it, no re-fight), generated
+  baseline profiles (no sed needed), `SettingsScreen.kt` suppressions, `LibrarySyncReducer` patch,
+  `AndroidManifest` beyond the launcher move. The only new exported components are the six launcher
+  activities. `gradle.properties` heap went 4096m → 6144m + 1024m metaspace (upstream's change).
+- **⚠️ `.gitignore` now ignores `docs/`** (taken from upstream) while the repo tracks eleven files
+  under it, including the superpowers plans. Tracked files keep working, but a **new** file written to
+  `docs/` is silently skipped by `git add`. Add `!docs/superpowers/` if that bites.
+- Not emulator-verified this cycle: build + install + launch succeeded on `kevbox_tv`, but real
+  playback was **not** exercised. Given ~30 upstream player commits, **play a stream on a real TV
+  before trusting this build**.
+
 ## Verify before shipping
+
+> **Run these with `set -o pipefail`.** Piping gradle into `tail`/`grep` reports the *pipe's* exit
+> status, so a failed build reads as success (bit me in 0.8.11). Either use `pipefail` or grep the
+> output for `BUILD FAILED` before believing it.
 
 ```bash
 ./gradlew :app:compileFullDebugKotlin   # quick compile check — REQUIRED, catches most "invisible breakage"
