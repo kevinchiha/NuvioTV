@@ -11,8 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -50,16 +48,18 @@ class MemberConfigService @Inject constructor(
      * Begin observing auth. Idempotent enough for a @Singleton (called once from PluginManager.init).
      * Applies whenever auth becomes [AuthState.FullAccount] (app open with a restored session, or a
      * fresh sign-in). No Realtime/websockets in v1 — apply-on-open only.
+     *
+     * Every state goes to [MemberConfigApplyGate], which owns the "apply or skip" rule. Do NOT
+     * reintroduce a `filterIsInstance<FullAccount>()` here: the gate needs to SEE the sign-out to
+     * know the addon store was wiped, otherwise the same member signing back in looks like a
+     * duplicate and never gets their addons back. Rationale in full on the gate.
      */
     fun start() {
+        val gate = MemberConfigApplyGate()
         scope.launch {
-            authManager.authState
-                .filterIsInstance<AuthState.FullAccount>()
-                // Apply once per member, not on every auth re-emission (e.g. a transient
-                // Loading -> FullAccount(same user) cycle on token refresh). A real account
-                // switch changes userId and still re-applies.
-                .distinctUntilChangedBy { it.userId }
-                .collect { state -> applyForMember(state.userId) }
+            authManager.authState.collect { state ->
+                gate.onAuthState(state)?.let { userId -> applyForMember(userId) }
+            }
         }
     }
 

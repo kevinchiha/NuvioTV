@@ -46,6 +46,17 @@ import javax.inject.Inject
 
 private const val TAG = "StreamRepositoryImpl"
 
+/**
+ * KevBox TV: how long a stream search waits for every enabled addon's manifest to arrive before
+ * searching with whatever has resolved. Generous because it is only ever paid once per cold cache
+ * (a fresh install, or the first Play after a sign-in) — once manifests are cached the wait
+ * returns immediately. The cap matters for the opposite case: an addon whose host is down never
+ * resolves, and this is the most it can add to a Play. Measured cost in the real failure was
+ * ~200ms; upstream's equivalent on the meta path is 750ms, but a stream search already runs for
+ * seconds so it can afford to be patient rather than lose a source.
+ */
+private const val RESOLVE_ADDONS_TIMEOUT_MS = 2_000L
+
 class StreamRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val api: AddonApi,
@@ -138,7 +149,13 @@ class StreamRepositoryImpl @Inject constructor(
     private suspend fun captureSourceConfiguration(): StreamSourceConfigurationSnapshot {
         while (true) {
             val profileId = profileManager.activeProfileId.value
-            val addons = addonRepository.getInstalledAddons().first().enabledAddons()
+            // KevBox FORK DIVERGENCE: upstream reads `getInstalledAddons().first()` here. Keep
+            // this call on merge — that flow publishes a partial list before the complete one, so
+            // the plain read drops any addon whose manifest is still being fetched and quietly
+            // searches fewer sources. Rationale on awaitResolvedInstalledAddons.
+            val addons = addonRepository
+                .awaitResolvedInstalledAddons(RESOLVE_ADDONS_TIMEOUT_MS)
+                .enabledAddons()
             val pluginsEnabled = pluginManager.pluginsEnabled.first()
             val enabledScrapers = if (pluginsEnabled) pluginManager.enabledScrapers.first() else emptyList()
             val groupPluginsByRepository = pluginsEnabled && pluginManager.groupStreamsByRepository.first()

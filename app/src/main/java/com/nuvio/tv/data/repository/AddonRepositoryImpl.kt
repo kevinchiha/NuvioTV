@@ -33,8 +33,23 @@ import kotlinx.coroutines.launch
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.sync.AddonSyncService
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
+// KevBox FORK DIVERGENCE: upstream leaves this class unscoped and only scopes the INTERFACE
+// binding (`@Binds @Singleton` in RepositoryModule). Keep this annotation on merge.
+//
+// WHY: StartupSyncService, SubtitleRepositoryImpl and AccountViewModel inject the CONCRETE type,
+// which the interface's scope does not cover, so each of them was getting its own instance. Every
+// instance loads the manifest cache from disk in `init`, keeps that cache private, and starts
+// installedAddonsFlow eagerly — which fetches every enabled addon's manifest. One sign-in
+// therefore fired the same manifest request four-plus times within milliseconds.
+//
+// Observed 2026-08-30: the member's AIOStreams host served the first request and returned HTTP 429
+// Too Many Requests to the next five. The instance behind the stream search was one of the losers,
+// so it never cached the manifest and the member's ONLY stream source silently disappeared from
+// the search. Guarded by AddonRepositorySingletonScopeTest.
+@Singleton
 class AddonRepositoryImpl @Inject constructor(
     private val api: AddonApi,
     private val preferences: AddonPreferences,
@@ -216,6 +231,44 @@ class AddonRepositoryImpl @Inject constructor(
         .stateIn(syncScope, SharingStarted.Eagerly, emptyList<Addon>())
 
     override fun getInstalledAddons(): Flow<List<Addon>> = installedAddonsFlow
+
+    // ========================= KevBox FORK DIVERGENCE =========================
+    // KevBox upstream-sync note: this override and its helper are kevbox-only; upstream has
+    // neither. Keep both on merge — deleting them silently shortens every stream search that
+    // happens before manifests are cached.
+    //
+    // WHY: installedAddonsFlow emits TWICE on a cold cache — the partial list built from cached
+    // manifests, then the full list once the outstanding fetches land. Callers that need the whole
+    // set (the stream search) were reading `.first()` and getting the partial one, so an addon
+    // still being fetched was dropped with no error and no log. Observed 2026-08-30: a member
+    // signed in, pressed Play 9s later, and the search ran without their only stream addon whose
+    // manifest arrived 175ms after the search was assembled.
+    //
+    // Costs nothing when everything is cached — the predicate is already true, so this returns on
+    // the current StateFlow value without suspending. Upstream fixed the same class of bug on the
+    // META path in 0.8.11 (MetaRepositoryImpl.INSTALLED_ADDONS_WAIT_MS) but left streams alone.
+    override suspend fun awaitResolvedInstalledAddons(timeoutMs: Long): List<Addon> =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            installedAddonsFlow.first { !hasUnresolvedEnabledAddon() }
+        } ?: installedAddonsFlow.first()
+
+    /**
+     * True while some enabled addon has no cached manifest yet. Same condition the flow uses to
+     * decide it must fetch (`hasCacheMiss`), so this stops being true exactly when the flow has
+     * finished filling the cache — and the flow re-emits on `manifestCacheRevision`, so the
+     * predicate above is re-evaluated as each manifest lands.
+     */
+    private suspend fun hasUnresolvedEnabledAddon(): Boolean {
+        val urls = preferences.installedAddonUrls.first()
+        if (urls.isEmpty()) return false
+        val enabledByUrl = preferences.addonEnabledStates.first()
+            .mapKeys { (url, _) -> canonicalizeUrl(url) }
+        return urls.any { url ->
+            val canonical = canonicalizeUrl(url)
+            (enabledByUrl[canonical] ?: true) && getCachedManifest(canonical) == null
+        }
+    }
+    // ======================= END KevBox FORK DIVERGENCE =======================
 
     override suspend fun fetchAddon(baseUrl: String): NetworkResult<Addon> {
         val cleanBaseUrl = canonicalizeUrl(baseUrl)

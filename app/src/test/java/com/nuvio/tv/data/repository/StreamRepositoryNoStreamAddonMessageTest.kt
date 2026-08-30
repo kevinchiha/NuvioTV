@@ -82,6 +82,7 @@ class StreamRepositoryNoStreamAddonMessageTest {
     private fun newRepository(authState: MutableStateFlow<AuthState>): StreamRepositoryImpl {
         val addonRepository = mockk<AddonRepository>()
         every { addonRepository.getInstalledAddons() } returns flowOf(listOf(metaOnlyAddon()))
+        coEvery { addonRepository.awaitResolvedInstalledAddons(any()) } returns listOf(metaOnlyAddon())
 
         val pluginManager = mockk<PluginManager>(relaxed = true)
         every { pluginManager.enabledScrapers } returns flowOf(emptyList())

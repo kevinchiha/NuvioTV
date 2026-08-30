@@ -108,6 +108,9 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `StreamScreen.kt` (external-stream tap) | **replace upstream's `openExternalInBrowser(playbackInfo)` with our `consumeExternalStreamClick(playbackInfo)` = `return playbackInfo.isExternal`** — launch NO intent. External-URL entries in the stream list are AIOStreams info cards ("Removal Reasons"/"Statistics", externalUrl set + url == null); upstream's `Intent.ACTION_VIEW`/`CATEGORY_BROWSABLE` gets hijacked by the sideloaded Downloader app and traps the user (force-close required). Same contract (true == consumed), so the two callers (`routePlayback`/`routeAutoPlay`) only need the rename. **Also re-remove the imports it drags back:** `android.content.Intent`, `android.net.Uri`, `com.nuvio.tv.core.player.ExternalPlayerLauncher`. Full rationale is in the `// KevBox FORK DIVERGENCE` block on the function | take upstream's other stream-list changes; this is the only line that matters |
 | `MainActivity.kt` (deeplinks, 0.7.18) | in **both** deeplink `LaunchedEffect`s, **neutralize the `AppDeepLink.AddonInstall` branch** — no `deepLinkHandler.installAddon(...)`, no `navController.navigate(Screen.AddonManager.route)`; just `pendingDeepLinkUrl.value = null`. This is a **policy regression** guard: a `stremio://…/manifest`/`nuvio://…addon` link (browser/QR/other app) would otherwise install an arbitrary addon AND drop the user into the (suppressed) Addon Manager — addons are operator-managed (`member_addon`). `deepLinkHandler` stays `@Inject`ed (unused) purely to keep the branch mergeable. See the `// KevBox FORK DIVERGENCE` blocks | **keep** the `AppDeepLink.Meta` branch (opens a Detail screen — harmless, lets a `tv.kevbox.dev` title link deep-link in) and everything else upstream added (card-depth, `pendingDeepLinkUrl`, `onNewIntent`) |
 | `StreamRepositoryImpl.kt` (no-stream-source wording, 2026-08-30) | **keep the `authManager` constructor param and the `when (authManager.authState.value)` block** in `buildAggregateFailureMessage`'s `attemptedAddonNames.isEmpty()` branch. Upstream returns the single `error_stream_no_supported_addon` string there; taking theirs re-hides the most common member-facing failure behind addon jargon (see the "member can't tell they're signed out" callout). Also keep the two kevbox-only strings `error_stream_signed_out` / `error_stream_no_source_configured` in `values/strings.xml` — a strings-file merge can drop them **independently** of the Kotlin change, which compiles fine and only breaks at runtime | take upstream's other changes to this file — the addon fan-out, plugin/debrid merging and `buildAddonFailure` wording are all upstream's and we track them |
+| `AddonRepositoryImpl.kt` (2026-08-30) | **keep the `@Singleton` on the class** and **keep `awaitResolvedInstalledAddons()` + its `hasUnresolvedEnabledAddon()` helper**. Upstream has neither. Losing the annotation re-creates the duplicate-instance manifest storm that gets members HTTP 429'd off their own addon host (see the callout); losing the method silently shortens every cold-cache stream search. Both are marked with `KevBox FORK DIVERGENCE` blocks and guarded by `AddonRepositorySingletonScopeTest` / `AddonRepositoryResolvedAddonsTest` | take upstream's other changes to the manifest cache, fetch and flow |
+| `AddonRepository.kt` (interface, 2026-08-30) | **keep the `awaitResolvedInstalledAddons(timeoutMs)` declaration and its default body.** The default (`getInstalledAddons().first()`) exists so upstream/test fakes keep compiling — do not "simplify" it away, and do not make it abstract | take upstream's new interface members |
+| `MemberConfigService.kt` (kevbox-only file, 2026-08-30) | **`start()` must feed EVERY auth state to `MemberConfigApplyGate`.** Do not reintroduce `filterIsInstance<AuthState.FullAccount>()` + `distinctUntilChangedBy { it.userId }` — the gate has to see `SignedOut` to know the addon store was wiped, otherwise the same member signing back in looks like a duplicate and never gets their addons back until the app restarts. Guarded by `MemberConfigApplyGateTest` | n/a — upstream has neither this file nor `MemberConfigApplyGate.kt` |
 | `AndroidManifest.xml` (deeplinks, 0.7.18) | **drop the `<data android:scheme="stremio" />` intent-filter** — that scheme resolves ONLY to addon-install deeplinks (`DeepLinkParser`), so registering it makes the TV advertise as a Stremio-addon handler we then refuse. A `// KevBox FORK DIVERGENCE` comment marks where it was removed | **keep** the `nuvio://` filter (serves harmless Meta/title deeplinks) and `launchMode="singleTop"` |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
@@ -153,6 +156,75 @@ grep -q "fun resolveLocalProperty" app/build.gradle.kts && echo OK || echo "MISS
 `release.sh` itself runs the real `assembleFullRelease` (R8 + signing), so it *is* the ultimate gate —
 but you don't want to discover a break there, because it fails *after* the versionCode bump (re-running
 then double-bumps; resume by hand instead — see the note at the bottom of this doc).
+
+### ⚠️ Sign-out wipes the addon store, so member config MUST re-apply on the next sign-in (2026-08-30)
+
+`AuthManager.signOut()` and `handleUnexpectedSignedOut()` both call
+`AccountLocalDataResetService.clearAfterSignOut()` → `ProfileDataStoreFactory.clearProfileScopedData()`,
+which clears **every** profile-scoped DataStore. `addon_preferences` is not in
+`retainedStandaloneDataStoreNames`, so **signing out deletes the member's addons** and drops them to
+the four baked-in defaults, none of which serves streams.
+
+`MemberConfigService` originally watched auth as
+`filterIsInstance<FullAccount>().distinctUntilChangedBy { it.userId }`. Because `SignedOut` was
+filtered out, a sign-out / sign-in round trip inside one app session looked like
+`FullAccount(X), FullAccount(X)` — a duplicate — so the apply was skipped and **the addons never came
+back until the app was restarted.** That is what the account screen's "Restart this device after
+signing in" has been papering over.
+
+Now every auth state goes through `MemberConfigApplyGate` (kevbox-only), which treats `SignedOut` as
+a reset and ignores `Loading` so token refreshes still don't cause repeat applies.
+
+If a future sync tempts you to "clean up" that collect back into a filter + dedupe: don't. Verify
+with `./gradlew :app:testFullDebugUnitTest --tests "*MemberConfigApplyGateTest"`, and on-device by
+signing out and back in **without** restarting, then confirming a second
+`MemberConfigService: Applied N member_addon row(s)` line.
+
+### 🛑 `@Binds @Singleton` scopes the INTERFACE, not the class — duplicate repositories DDoS our own addon host (2026-08-30)
+
+The nastiest bug of this cycle, and the one most likely to come back, because the code that causes
+it looks completely normal.
+
+`RepositoryModule` does `@Binds @Singleton bindAddonRepository(impl: AddonRepositoryImpl)`. That
+scopes the **`AddonRepository` interface binding**. It does NOT scope `AddonRepositoryImpl`. Three
+classes inject the **concrete** type — `StartupSyncService`, `SubtitleRepositoryImpl` and
+`AccountViewModel` — and each of those got a **fresh instance**. Every instance:
+
+- runs `loadManifestCacheFromDisk()` in its `init`,
+- keeps its own private `manifestCache`,
+- starts `installedAddonsFlow` with `SharingStarted.Eagerly`, which **fetches every enabled addon's
+  manifest**.
+
+So one sign-in fired the same manifest request four-plus times within milliseconds. AIOStreams
+answered the first and returned **HTTP 429 Too Many Requests** to the rest. The instance backing the
+stream search was one of the losers, cached nothing, and **the member's only stream source vanished
+from the search** — no error dialog, no red text, just a suspiciously short stream list. Fixed by
+putting `@Singleton` on the class itself.
+
+Why this matters beyond one bug: we point ~300 boxes at our own AIOStreams host. Any accidental
+instance multiplication is a self-inflicted load multiplier against a host that rate-limits, and the
+symptom is "streams are worse today", which nobody reports as a bug.
+
+**The tell in the logs** (`adb logcat | grep AddonRepository`): the same manifest URL appearing
+several times within a second, or `Loaded N cached manifests from disk` printing more than once per
+launch — that line runs in `init`, so more than one means more than one instance.
+
+```bash
+# want: exactly 1 line per URL (the pre-fix run showed 6 for the member's own addon)
+adb -s emulator-5554 logcat -d | grep -E "(Updated addon manifest cache|Failed to fetch addon manifest for) url=" \
+  | sed 's/.*url=\(https:\/\/[^/]*\).*/\1/' | sort | uniq -c | sort -rn
+
+# want: never MORE than 1. Clear logcat BEFORE launching or this reads 0 — the line runs in init,
+# so it only appears in a buffer that covers app startup.
+adb -s emulator-5554 logcat -d | grep -c "Loaded .* cached manifests from disk"
+
+# want: 0
+adb -s emulator-5554 logcat -d | grep "Failed to fetch addon manifest" | grep -c 429
+```
+
+**Generalise it.** After a sync, for any repository that owns a cache, a connection or an eager
+flow, check that the CLASS is scoped and not just its `@Binds`. `grep -rn ": <Name>Impl" app/src`
+finds the concrete injections; if there are any, the class needs its own `@Singleton`.
 
 ### ⚠️ Member-facing wording is a fork feature — "no stream source" must not revert to addon jargon (2026-08-30)
 
