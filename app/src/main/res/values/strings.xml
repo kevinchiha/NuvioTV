@@ -132,6 +132,12 @@
     <string name="error_meta_tried_generic">Tried meta addons: %1$s. Metadata could not be loaded for id=%2$s (type=%3$s).</string>
     <string name="error_meta_tried_issues">Tried meta addons: %1$s. Metadata could not be loaded for id=%2$s (type=%3$s). Issues: %4$s.</string>
     <string name="error_stream_no_supported_addon">No installed addon supports streams for \"%1$s\".</string>
+    <!-- KevBox FORK DIVERGENCE: kevbox-only strings, upstream has neither. Keep on merge.
+         They replace error_stream_no_supported_addon above when NO addon can serve streams at
+         all; see the divergence block in StreamRepositoryImpl.buildAggregateFailureMessage.
+         Written for a family member, not an operator: no "addon", no "manifest", no jargon. -->
+    <string name="error_stream_signed_out">You\'re signed out, so there is nothing to play from. Open Settings → Account and sign in to start watching.</string>
+    <string name="error_stream_no_source_configured">No streaming source is set up for this account yet. Ask Kevin to check your setup.</string>
     <string name="error_stream_tried_none">Tried stream addons: %1$s. None of them returned streams for id=%2$s (type=%3$s).</string>
     <string name="error_stream_tried_generic">Tried stream addons: %1$s. Streams could not be loaded for id=%2$s (type=%3$s).</string>
     <string name="error_stream_tried_issues">Tried stream addons: %1$s. Streams could not be loaded for id=%2$s (type=%3$s). Issues: %4$s.</string>

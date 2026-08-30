@@ -1,6 +1,7 @@
 package com.nuvio.tv.data.repository
 
 import android.content.Context
+import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.debrid.DebridStreamPresentation
 import com.nuvio.tv.core.debrid.LocalDebridAvailabilityService
 import com.nuvio.tv.core.network.NetworkResult
@@ -130,7 +131,8 @@ class StreamRepositoryPluginIsolationTest {
                 debridSettingsDataStore = debridSettingsDataStore,
                 tmdbService = tmdbService,
                 debridStreamPresentation = presentation,
-                localDebridAvailabilityService = availability
+                localDebridAvailabilityService = availability,
+                authManager = mockk<AuthManager>(relaxed = true)
             ),
             api = api,
             tmdbService = tmdbService

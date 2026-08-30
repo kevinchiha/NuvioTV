@@ -107,6 +107,7 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `WatchedItemsSyncService.kt` (0.7.16) | our **rev-4 Option B union** — the first cloud-restore snapshot for a never-synced profile must `replaceWithRemoteItems(..., unionWhenNeverSynced = true)` so it doesn't wipe a family member's existing watch history. Upstream extracted a shared `pullSnapshotFromRemote(...)` helper — **put the `unionWhenNeverSynced = true` INSIDE that helper** so all restore paths inherit it (the flag is a no-op for already-synced profiles, so it's safe universally) | take upstream's delta-cursor resilience refactor (the `try { fetchDeltaCursor } catch { snapshot fallback }`) |
 | `StreamScreen.kt` (external-stream tap) | **replace upstream's `openExternalInBrowser(playbackInfo)` with our `consumeExternalStreamClick(playbackInfo)` = `return playbackInfo.isExternal`** — launch NO intent. External-URL entries in the stream list are AIOStreams info cards ("Removal Reasons"/"Statistics", externalUrl set + url == null); upstream's `Intent.ACTION_VIEW`/`CATEGORY_BROWSABLE` gets hijacked by the sideloaded Downloader app and traps the user (force-close required). Same contract (true == consumed), so the two callers (`routePlayback`/`routeAutoPlay`) only need the rename. **Also re-remove the imports it drags back:** `android.content.Intent`, `android.net.Uri`, `com.nuvio.tv.core.player.ExternalPlayerLauncher`. Full rationale is in the `// KevBox FORK DIVERGENCE` block on the function | take upstream's other stream-list changes; this is the only line that matters |
 | `MainActivity.kt` (deeplinks, 0.7.18) | in **both** deeplink `LaunchedEffect`s, **neutralize the `AppDeepLink.AddonInstall` branch** — no `deepLinkHandler.installAddon(...)`, no `navController.navigate(Screen.AddonManager.route)`; just `pendingDeepLinkUrl.value = null`. This is a **policy regression** guard: a `stremio://…/manifest`/`nuvio://…addon` link (browser/QR/other app) would otherwise install an arbitrary addon AND drop the user into the (suppressed) Addon Manager — addons are operator-managed (`member_addon`). `deepLinkHandler` stays `@Inject`ed (unused) purely to keep the branch mergeable. See the `// KevBox FORK DIVERGENCE` blocks | **keep** the `AppDeepLink.Meta` branch (opens a Detail screen — harmless, lets a `tv.kevbox.dev` title link deep-link in) and everything else upstream added (card-depth, `pendingDeepLinkUrl`, `onNewIntent`) |
+| `StreamRepositoryImpl.kt` (no-stream-source wording, 2026-08-30) | **keep the `authManager` constructor param and the `when (authManager.authState.value)` block** in `buildAggregateFailureMessage`'s `attemptedAddonNames.isEmpty()` branch. Upstream returns the single `error_stream_no_supported_addon` string there; taking theirs re-hides the most common member-facing failure behind addon jargon (see the "member can't tell they're signed out" callout). Also keep the two kevbox-only strings `error_stream_signed_out` / `error_stream_no_source_configured` in `values/strings.xml` — a strings-file merge can drop them **independently** of the Kotlin change, which compiles fine and only breaks at runtime | take upstream's other changes to this file — the addon fan-out, plugin/debrid merging and `buildAddonFailure` wording are all upstream's and we track them |
 | `AndroidManifest.xml` (deeplinks, 0.7.18) | **drop the `<data android:scheme="stremio" />` intent-filter** — that scheme resolves ONLY to addon-install deeplinks (`DeepLinkParser`), so registering it makes the TV advertise as a Stremio-addon handler we then refuse. A `// KevBox FORK DIVERGENCE` comment marks where it was removed | **keep** the `nuvio://` filter (serves harmless Meta/title deeplinks) and `launchMode="singleTop"` |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
@@ -152,6 +153,52 @@ grep -q "fun resolveLocalProperty" app/build.gradle.kts && echo OK || echo "MISS
 `release.sh` itself runs the real `assembleFullRelease` (R8 + signing), so it *is* the ultimate gate —
 but you don't want to discover a break there, because it fails *after* the versionCode bump (re-running
 then double-bumps; resume by hand instead — see the note at the bottom of this doc).
+
+### ⚠️ Member-facing wording is a fork feature — "no stream source" must not revert to addon jargon (2026-08-30)
+
+Upstream writes error copy for people who install their own addons. We ship to family members who have
+never heard the word "addon", and our whole stream supply is remote and invisible to them. So a couple of
+upstream strings are **load-bearing support tooling** for us, and reverting one is a silent regression:
+compile-green, test-green if you also drop the tests, and it costs a phone call per member.
+
+The live case: `StreamRepositoryImpl.buildAggregateFailureMessage`, `attemptedAddonNames.isEmpty()`
+branch. Reaching it means **zero addons were eligible to be asked at all**, and on KevBox that has one
+dominant cause — **the member is signed out**:
+
+- `AddonPreferences.getDefaultAddons()` ships Cinemeta + two OpenSubtitles + a catalog addon. **None
+  declares a `stream` resource.** They cannot play anything, by design — the real source is the member's
+  per-member AIOStreams row in Supabase `member_addon`.
+- `MemberConfigService` applies that row only once auth reaches `FullAccount`.
+- Signing out **wipes the addon store**: `AuthManager.signOut()` / `handleUnexpectedSignedOut()` call
+  `AccountLocalDataResetService.clearAfterSignOut()` → `ProfileDataStoreFactory.clearProfileScopedData()`,
+  and `addon_preferences` is **not** in `retainedStandaloneDataStoreNames`.
+
+So a signed-out box falls back to four streamless addons and shows upstream's
+`No installed addon supports streams for "movie".` on every Play. Diagnosed 2026-08-30 after a member
+sat on that screen for days; his session had ended and nothing in the app said so. (The one existing
+signal, the `MainActivity` Toast at line ~374, fires once at startup, is consumed immediately, and is
+unreadable from a sofa.)
+
+We now branch the message on auth state — signed out / signed in with no source / still loading. See the
+`KevBox FORK DIVERGENCE` block on that function and the conflict-table row.
+
+**After every sync, verify:**
+
+```bash
+# 1. The branch survived (want: the three-way when, not a bare getString)
+grep -n "AuthState.SignedOut ->" app/src/main/java/com/nuvio/tv/data/repository/StreamRepositoryImpl.kt
+
+# 2. The strings survived — a strings.xml merge can drop these INDEPENDENTLY of the Kotlin,
+#    which still compiles and only breaks at runtime (want: both present)
+grep -c "error_stream_signed_out\|error_stream_no_source_configured" app/src/main/res/values/strings.xml
+
+# 3. The behaviour survived (want: 3 passing)
+./gradlew :app:testFullDebugUnitTest --tests "*StreamRepositoryNoStreamAddonMessageTest"
+```
+
+Generalise it: **whenever upstream adds or rewords a failure message on a path a family member can
+reach, read it as if you had never seen the codebase.** If it names an internal concept (addon,
+manifest, scraper, resource, debrid) it is wrong for our audience, and the fix belongs on the fork.
 
 ### ⚠️ Invisible *policy* regression — upstream re-exposing a feature we deliberately hid
 

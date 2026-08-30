@@ -5,6 +5,7 @@ import android.util.Log
 import com.nuvio.tv.R
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.network.safeApiCall
+import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.debrid.DebridStreamPresentation
 import com.nuvio.tv.core.debrid.LocalDebridAvailabilityService
 import com.nuvio.tv.core.plugin.PluginManager
@@ -15,6 +16,7 @@ import com.nuvio.tv.data.local.DebridSettingsDataStore
 import com.nuvio.tv.data.mapper.toDomain
 import com.nuvio.tv.data.remote.api.AddonApi
 import com.nuvio.tv.domain.model.Addon
+import com.nuvio.tv.domain.model.AuthState
 import com.nuvio.tv.domain.model.AddonStreams
 import com.nuvio.tv.domain.model.DebridSettings
 import com.nuvio.tv.domain.model.LocalScraperResult
@@ -53,7 +55,12 @@ class StreamRepositoryImpl @Inject constructor(
     private val debridSettingsDataStore: DebridSettingsDataStore,
     private val tmdbService: TmdbService,
     private val debridStreamPresentation: DebridStreamPresentation,
-    private val localDebridAvailabilityService: LocalDebridAvailabilityService
+    private val localDebridAvailabilityService: LocalDebridAvailabilityService,
+    // KevBox FORK DIVERGENCE — upstream has no authManager here. Keep BOTH on merge: take
+    // upstream's params and keep this one last. It is read in exactly one place
+    // (buildAggregateFailureMessage) and nowhere else, so an auto-merge that drops it fails the
+    // build loudly rather than silently changing behaviour. Rationale on that function.
+    private val authManager: AuthManager
 ) : StreamRepository {
     private val streamSearchSessions = StreamSearchSessionCache()
     private val localPluginSearchPaused = MutableStateFlow(false)
@@ -727,7 +734,40 @@ class StreamRepositoryImpl @Inject constructor(
         failures: List<StreamAttemptFailure>
     ): String? {
         if (attemptedAddonNames.isEmpty()) {
-            return context.getString(R.string.error_stream_no_supported_addon, type)
+            // ======================== KevBox FORK DIVERGENCE ========================
+            // KevBox upstream-sync note: upstream returns the single
+            // `error_stream_no_supported_addon` string here. DO NOT take upstream's version on
+            // merge — restoring that one-liner silently reintroduces the support bug below.
+            //
+            // WHY: reaching here means ZERO addons were even eligible to be asked (see
+            // supportsStreamResource). For KevBox that has one overwhelmingly common cause:
+            // the member is signed out. AddonPreferences.getDefaultAddons() ships Cinemeta,
+            // two OpenSubtitles and a catalog addon — NONE declares a `stream` resource — and
+            // the member's only real stream source (their per-member AIOStreams row in Supabase
+            // `member_addon`) is applied by MemberConfigService only once auth reaches
+            // FullAccount. Sign-out also wipes the addon store, because
+            // AccountLocalDataResetService.clearAfterSignOut() clears every profile-scoped
+            // DataStore and `addon_preferences` is not in the retained set. So a signed-out box
+            // drops back to four streamless addons and this branch fires on every Play.
+            //
+            // Diagnosed 2026-08-30 from a member who sat on the upstream wording for days with
+            // no idea he was signed out. The wording matters more than the mechanism: it is the
+            // only thing standing between a family member and a support message.
+            //
+            // The two live cases need different actions, so name whichever one this is rather
+            // than describing addons to someone who has never heard the word:
+            //   SignedOut    -> tell them to sign in (they can fix it themselves)
+            //   FullAccount  -> their member_addon config is missing; the OPERATOR must fix it
+            //   Loading      -> auth has not resolved; keep upstream's neutral wording rather
+            //                   than wrongly accusing someone of being signed out
+            // Covered by StreamRepositoryNoStreamAddonMessageTest (one test per branch) — if a
+            // merge reverts this, those three tests fail.
+            return when (authManager.authState.value) {
+                is AuthState.SignedOut -> context.getString(R.string.error_stream_signed_out)
+                is AuthState.FullAccount -> context.getString(R.string.error_stream_no_source_configured)
+                is AuthState.Loading -> context.getString(R.string.error_stream_no_supported_addon, type)
+            }
+            // ====================== END KevBox FORK DIVERGENCE ======================
         }
 
         val triedAddons = attemptedAddonNames.joinToString(", ")
