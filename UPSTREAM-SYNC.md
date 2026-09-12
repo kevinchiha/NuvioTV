@@ -812,7 +812,9 @@ Bluetooth audio routing, a subtitle charset rewrite, a post-play recommendations
 ### 0.8.12 → 0.9.2 — Play gate, updater channels, never-synced union, splash wordmark (2026-09-12)
 
 301 commits (205 non-merge, `fa8e7266c`→`e54a74904`, dev tip = the `0.9.2-beta` tag, cut the same day).
-Branch `sync0.9.2`, merge `719a1fa19`. 254 files, +22.6k/-4.8k. Sixteen conflicts: build.gradle (version
+Branch `sync0.9.2`, merge `719a1fa19`, docs `06588e6df`, released as **0.10.2-beta / versionCode 1050**
+(bump `d39e9e479`, sha256 `bf9d0811…`, 70 MB; the big push was pre-staged through a temp ref, no 408). 254
+files, +22.6k/-4.8k. Sixteen conflicts: build.gradle (version
 line only), updater ×4 (`UpdateBanner.kt` modify/delete), `MainActivity` (4 hunks), `NuvioNavHost`,
 `PlayerRuntimeControllerInitialization`, `WatchedItemsSyncService` + `WatchedItemsPreferences`,
 `AddonRepositoryImpl`, `AboutScreen`, `ThemeSettingsViewModel`, `StreamScreen`, `strings.xml`, playstore
@@ -882,8 +884,9 @@ rendition fallback, ASS styling under libass, cross-domain subtitle headers).
   divergence diffed against `upstream/dev` (PlayerSettingsDataStore, StreamRepositoryImpl, ThemeAccess,
   NuvioApplication, ThemeSettingsScreen, SettingsScreen suppressions, manifest identical to kevbox).
   Emulator: full-debug installs and launches to the KevBox email gate, no crash, updater worker runs.
-  **Sign-in, home, and real playback were NOT exercised in the automated run** (no test account on this
-  box) — do them by hand before release; the player churn alone warrants it.
+  There is no test account on this box, so the automated run stops at the gate; Kevin signed in and
+  played a stream on the emulator by hand before giving the go for the release. Keep doing that: the
+  player churn alone warrants it every cycle.
 
 ## Verify before shipping
 
