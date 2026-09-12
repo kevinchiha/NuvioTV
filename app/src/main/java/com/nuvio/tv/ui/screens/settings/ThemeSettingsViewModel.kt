@@ -8,9 +8,11 @@ import com.nuvio.tv.domain.model.AppFont
 import com.nuvio.tv.domain.model.AppIconOption
 import com.nuvio.tv.domain.model.AppTheme
 import com.nuvio.tv.domain.model.CosmeticEntitlements
+import com.nuvio.tv.domain.model.CustomThemeColors
 import com.nuvio.tv.domain.model.SettingsUiStyle
 import com.nuvio.tv.domain.model.availableAppThemes
 import com.nuvio.tv.domain.model.resolveAppTheme
+import com.nuvio.tv.domain.model.resolveCustomThemeColors
 import com.nuvio.tv.launcher.AppIconManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +29,8 @@ data class ThemeSettingsUiState(
     val themesLoaded: Boolean = false,
     // KevBox FORK DIVERGENCE: default OCEAN, not WHITE.
     val selectedTheme: AppTheme = AppTheme.OCEAN,
+    val customThemeColors: CustomThemeColors = CustomThemeColors.solid(CustomThemeColors.Default.second),
+    val customThemeGradientEnabled: Boolean = false,
     val availableThemes: List<AppTheme> = availableAppThemes(CosmeticEntitlements.None),
     val selectedFont: AppFont = AppFont.INTER,
     val availableFonts: List<AppFont> = AppFont.entries.toList(),
@@ -38,6 +42,7 @@ data class ThemeSettingsUiState(
 
 sealed class ThemeSettingsEvent {
     data class SelectTheme(val theme: AppTheme) : ThemeSettingsEvent()
+    data class SaveCustomTheme(val colors: CustomThemeColors) : ThemeSettingsEvent()
     data class SelectFont(val font: AppFont) : ThemeSettingsEvent()
     data class ToggleAmoledMode(val enabled: Boolean) : ThemeSettingsEvent()
     data class ToggleAmoledSurfacesMode(val enabled: Boolean) : ThemeSettingsEvent()
@@ -48,7 +53,7 @@ sealed class ThemeSettingsEvent {
 @HiltViewModel
 class ThemeSettingsViewModel @Inject constructor(
     private val themeDataStore: ThemeDataStore,
-    memberAccessRepository: MemberAccessRepository,
+    private val memberAccessRepository: MemberAccessRepository,
     private val appIconManager: AppIconManager
 ) : ViewModel() {
 
@@ -67,18 +72,27 @@ class ThemeSettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             combine(
-                themeDataStore.selectedThemePreference,
+                themeDataStore.themeSelection,
                 memberAccessRepository.access
-            ) { selectedTheme, memberAccess ->
+            ) { selection, memberAccess ->
                 val entitlements = memberAccess.entitlements
-                resolveAppTheme(selectedTheme, entitlements) to availableAppThemes(entitlements)
+                Triple(
+                    selection.copy(
+                        theme = resolveAppTheme(selection.theme, entitlements),
+                        customColors = resolveCustomThemeColors(selection.customColors, memberAccess.tier)
+                    ),
+                    availableAppThemes(entitlements),
+                    memberAccess.tier != null
+                )
             }
                 .distinctUntilChanged()
-                .collectLatest { (theme, availableThemes) ->
+                .collectLatest { (selection, availableThemes, gradientEnabled) ->
                     _uiState.update { state ->
                         state.copy(
                             themesLoaded = true,
-                            selectedTheme = theme,
+                            selectedTheme = selection.theme ?: AppTheme.WHITE,
+                            customThemeColors = selection.customColors,
+                            customThemeGradientEnabled = gradientEnabled,
                             availableThemes = availableThemes
                         )
                     }
@@ -129,6 +143,7 @@ class ThemeSettingsViewModel @Inject constructor(
     fun onEvent(event: ThemeSettingsEvent) {
         when (event) {
             is ThemeSettingsEvent.SelectTheme -> selectTheme(event.theme)
+            is ThemeSettingsEvent.SaveCustomTheme -> saveCustomTheme(event.colors)
             is ThemeSettingsEvent.SelectFont -> selectFont(event.font)
             is ThemeSettingsEvent.ToggleAmoledMode -> setAmoledMode(event.enabled)
             is ThemeSettingsEvent.ToggleAmoledSurfacesMode -> setAmoledSurfacesMode(event.enabled)
@@ -142,7 +157,16 @@ class ThemeSettingsViewModel @Inject constructor(
     private fun selectTheme(theme: AppTheme) {
         if (currentTheme() == theme) return
         viewModelScope.launch {
+            val access = memberAccessRepository.access.value
+            if (theme !in availableAppThemes(access.entitlements)) return@launch
             themeDataStore.setTheme(theme)
+        }
+    }
+
+    private fun saveCustomTheme(colors: CustomThemeColors) {
+        viewModelScope.launch {
+            val access = memberAccessRepository.access.value
+            themeDataStore.setCustomTheme(resolveCustomThemeColors(colors, access.tier))
         }
     }
 

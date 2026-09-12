@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.nuvio.tv.core.profile.ProfileManager
 import com.google.gson.Gson
 import com.nuvio.tv.domain.model.WatchedItem
+import com.nuvio.tv.domain.model.WatchedMutationKey
+import com.nuvio.tv.domain.model.mutationKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -72,7 +74,11 @@ class WatchedItemsPreferences @Inject constructor(
     }
 
     internal val allItems: Flow<List<WatchedItem>> = profileManager.activeProfileId.flatMapLatest { pid ->
-        factory.get(pid, FEATURE).data.map { preferences ->
+        observeAllItems(pid)
+    }
+
+    fun observeAllItems(profileId: Int): Flow<List<WatchedItem>> {
+        return store(profileId).data.map { preferences ->
             val raw = preferences[watchedItemsKey] ?: emptySet()
             raw.mapNotNull { json ->
                 runCatching { gson.fromJson(json, WatchedItem::class.java) }.getOrNull()
@@ -90,8 +96,11 @@ class WatchedItemsPreferences @Inject constructor(
         }
     }
 
-    fun getWatchedEpisodesForContent(contentId: String): Flow<Set<Pair<Int, Int>>> {
-        return allItems.map { items ->
+    fun getWatchedEpisodesForContent(
+        contentId: String,
+        profileId: Int = profileManager.activeProfileId.value
+    ): Flow<Set<Pair<Int, Int>>> {
+        return observeAllItems(profileId).map { items ->
             items.filter { it.contentId == contentId && it.season != null && it.episode != null }
                 .map { it.season!! to it.episode!! }
                 .toSet()
@@ -194,6 +203,8 @@ class WatchedItemsPreferences @Inject constructor(
     suspend fun applyRemoteChanges(
         upserts: List<WatchedItem>,
         deletes: List<Triple<String, Int?, Int?>>,
+        pendingUpsertKeys: Set<WatchedMutationKey> = emptySet(),
+        pendingDeleteKeys: Set<WatchedMutationKey> = emptySet(),
         profileId: Int = profileManager.activeProfileId.value
     ) {
         if (upserts.isEmpty() && deletes.isEmpty()) {
@@ -211,11 +222,22 @@ class WatchedItemsPreferences @Inject constructor(
             }.forEach { item ->
                 itemsByKey[Triple(item.contentId, item.season, item.episode)] = item
             }
-            deletes.forEach { key ->
-                itemsByKey.remove(key)
+            deletes.forEach { (contentId, season, episode) ->
+                val mutationKey = WatchedMutationKey(contentId, season, episode)
+                if (mutationKey !in pendingUpsertKeys) {
+                    itemsByKey.remove(Triple(contentId, season, episode))
+                }
             }
             upserts.forEach { item ->
-                itemsByKey[Triple(item.contentId, item.season, item.episode)] = item
+                val mutationKey = item.mutationKey()
+                when {
+                    mutationKey in pendingDeleteKeys -> itemsByKey.remove(
+                        Triple(item.contentId, item.season, item.episode)
+                    )
+                    mutationKey !in pendingUpsertKeys -> itemsByKey[
+                        Triple(item.contentId, item.season, item.episode)
+                    ] = item
+                }
             }
             preferences[watchedItemsKey] = itemsByKey.values
                 .map { gson.toJson(it) }
@@ -227,32 +249,51 @@ class WatchedItemsPreferences @Inject constructor(
 
     suspend fun replaceWithRemoteItems(
         remoteItems: List<WatchedItem>,
-        lastSuccessfulPushMs: Long = 0L,
+        pendingUpsertKeys: Set<WatchedMutationKey> = emptySet(),
+        pendingDeleteKeys: Set<WatchedMutationKey> = emptySet(),
+        lastSuccessfulPushMs: Long? = null,
         profileId: Int = profileManager.activeProfileId.value,
-        unionWhenNeverSynced: Boolean = true
+        // KevBox FORK DIVERGENCE (rev-4 Option B): a profile that has NEVER pushed cannot read remote absence
+        // as a deletion, so the restore path unions local-only marks into the snapshot instead of dropping
+        // them. Upstream 0.9.x moved to a pending-mutation store, but that store is new and nothing seeds
+        // pre-existing local marks into it, so without this flag the first restore after an upgrade would
+        // silently discard a member's never-synced watch history. Default false keeps upstream's own unit
+        // tests (WatchedItemsPreferencesSyncTest / WatchedItemsPullPreservationTest) on upstream semantics;
+        // only WatchedItemsSyncService.pullSnapshotFromRemote sets it, and only when the profile never pushed.
+        unionWhenNeverSynced: Boolean = false
     ): Boolean {
         var preservedLocalItems = false
         store(profileId).edit { preferences ->
             val current = preferences[watchedItemsKey] ?: emptySet()
-            Log.d(TAG, "replaceWithRemoteItems: profile=$profileId current=${current.size} remote=${remoteItems.size} lastPush=$lastSuccessfulPushMs")
-            if (remoteItems.isEmpty() && current.isNotEmpty()) {
-                Log.w(TAG, "replaceWithRemoteItems: remote list empty while local has ${current.size} entries; preserving local watched items")
-                return@edit
+            Log.d(TAG, "replaceWithRemoteItems: profile=$profileId current=${current.size} remote=${remoteItems.size}")
+            val deduped = linkedMapOf<Triple<String, Int?, Int?>, WatchedItem>()
+            remoteItems.filterNot { it.mutationKey() in pendingDeleteKeys }.forEach { item ->
+                deduped[Triple(item.contentId, item.season, item.episode)] = item
             }
             val localItems = current.mapNotNull { json ->
                 runCatching { gson.fromJson(json, WatchedItem::class.java) }.getOrNull()
             }
-            // rev 4 Option B — when the device has never pushed, union all local items the remote doesn't
-            // return instead of dropping them; a device that never pushed cannot read remote absence as a
-            // deletion. Synced devices keep the newer-than-push rule.
-            // 0.8.11: upstream converged on the same rule (it dropped its own `if (lastSuccessfulPushMs > 0L)`
-            // gate and added WatchedItemsPullPreservationTest to pin it), so the default flipped from false to
-            // true to match. The flag stays because the restore path passes it explicitly and SyncMergeLogicTest
-            // pins both sides of it.
-            val (merged, preserved) = unionWatchedSnapshot(localItems, remoteItems, lastSuccessfulPushMs, unionWhenNeverSynced)
-            preservedLocalItems = preserved
-            preferences[watchedItemsKey] = merged.map { gson.toJson(it) }.toSet()
-            Log.d(TAG, "replaceWithRemoteItems: profile=$profileId stored=${merged.size} preservedLocal=$preservedLocalItems (unionWhenNeverSynced=$unionWhenNeverSynced neverSynced=${lastSuccessfulPushMs <= 0L})")
+            localItems.forEach { localItem ->
+                val mutationKey = localItem.mutationKey()
+                val itemKey = Triple(localItem.contentId, localItem.season, localItem.episode)
+                val preservePendingUpsert = mutationKey in pendingUpsertKeys
+                val preserveAfterPush = mutationKey !in pendingDeleteKeys &&
+                    itemKey !in deduped &&
+                    lastSuccessfulPushMs != null &&
+                    localItem.watchedAt > lastSuccessfulPushMs
+                // KevBox rev-4 Option B: never-synced profile keeps every local mark the remote lacks.
+                val preserveNeverSynced = unionWhenNeverSynced &&
+                    mutationKey !in pendingDeleteKeys &&
+                    itemKey !in deduped
+                if (preservePendingUpsert || preserveAfterPush || preserveNeverSynced) {
+                    deduped[itemKey] = localItem
+                    preservedLocalItems = true
+                }
+            }
+            preferences[watchedItemsKey] = deduped.values
+                .map { gson.toJson(it) }
+                .toSet()
+            Log.d(TAG, "replaceWithRemoteItems: profile=$profileId stored=${deduped.size} preservedLocal=$preservedLocalItems unionWhenNeverSynced=$unionWhenNeverSynced")
         }
         return preservedLocalItems
     }

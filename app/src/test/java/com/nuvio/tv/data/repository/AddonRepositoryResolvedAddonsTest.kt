@@ -38,12 +38,16 @@ class AddonRepositoryResolvedAddonsTest {
         // Nothing can complete the slow manifest until this test does, so a plain
         // getInstalledAddons().first() here cannot contain SLOW_NAME — that is the read the
         // stream search used to do, and why it lost the member's only stream addon.
-        val resolved = async { repository.awaitResolvedInstalledAddons(timeoutMs = 5_000) }
+        // Generous budgets on purpose: the flow runs on Dispatchers.IO, and inside the full suite that
+        // pool can be starved by neighbouring tests for whole seconds. With a 5s inner budget this test
+        // flaked in the 0.9.2 sync run (the inner timeout fell back to the empty initial value) while
+        // passing every time on its own. Normal runs still finish in milliseconds.
+        val resolved = async { repository.awaitResolvedInstalledAddons(timeoutMs = 30_000) }
         slowManifest.complete(Response.success(manifestDto(SLOW_NAME)))
 
         assertEquals(
             listOf(FAST_NAME, SLOW_NAME),
-            withTimeout(5_000) { resolved.await() }.map { it.name }
+            withTimeout(60_000) { resolved.await() }.map { it.name }
         )
     }
 

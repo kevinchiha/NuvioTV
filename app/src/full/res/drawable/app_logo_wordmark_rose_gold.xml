@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- KevBox: upstream ships a Nuvio-branded wordmark per premium theme (ThemeBranding.kt maps
+     GOLD/JADE/ROSE_GOLD/ARCTIC_BLUE/GRAPHITE to app_logo_wordmark_<theme>). The profile screen
+     and the 0.9.1 startup splash draw that resource directly, so without this override a member
+     picking one of those themes sees a Nuvio logo on every launch. Alias every themed wordmark
+     to the single KevBox wordmark; this full-flavor override survives upstream merges untouched. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/app_logo_wordmark" />
