@@ -66,10 +66,12 @@ git merge upstream/dev
 
 # 4. Publish a new release (bumps versionCode +1, builds signed armeabi-v7a, uploads, writes version.json,
 #    commits, and pushes the CURRENT branch to your fork — so be ON kevbox when you run it, having
-#    fast-forwarded it to your isolation branch first: `git switch kevbox && git merge --ff-only sync0.8.11`).
-#    KevBox runs its OWN version line: since 0.7.16 we mirror upstream's patch number into ours
-#    (upstream 0.8.11-beta → KevBox 0.9.11-beta) so the base is legible at a glance. Bump YOUR name:
-./release.sh 0.9.11-beta "Bug fixes and improvements"
+#    fast-forwarded it to your isolation branch first: `git switch kevbox && git merge --ff-only sync0.9.2`).
+#    KevBox runs its OWN version line: since 0.7.16 we mirror upstream's patch number into ours and sit
+#    one minor ahead (upstream 0.8.11-beta → KevBox 0.9.11-beta, upstream 0.9.2-beta → KevBox 0.10.2-beta)
+#    so the base is legible at a glance. The updater compares versionCode only, so the name is cosmetic,
+#    but keep it monotonic in semver terms (0.10.2 > 0.9.11). Bump YOUR name:
+./release.sh 0.10.2-beta "Bug fixes and improvements"
 ```
 
 > ⚠️ **Let `release.sh` do the push — don't use VS Code's "Sync Changes" button.** `kevbox` carries
@@ -89,7 +91,7 @@ blocks, reset lines), the answer is almost always **keep both**.
 
 | File | Keep the KevBox side | Take upstream's side |
 |---|---|---|
-| `app/build.gradle.kts` | `applicationId = "tv.kevbox"`, our `versionCode`/`versionName`, `UPDATE_BASE_URL`, `isUniversalApk = false`, debug id `tv.kevbox.debug`; **keep `SYNC_BACKEND_MANIFEST_URL` blank (`""`)** and **leave `NUVIO_SUPABASE_*` blank** (see "remote control plane" callout). **0.7.16 trap:** upstream **rebound `SUPABASE_URL`/`SUPABASE_ANON_KEY` to read the `NUVIO_SUPABASE_*` props** — do NOT take that; keep them reading our `SUPABASE_*` props (our family project). Also **keep the `resolveLocalProperty(...)` helper defined** — the merge dropped it (see "release-only breakage") | new dependencies, SDK/AGP bumps, native/player changes, AND new `buildConfigField`s that our code references — 0.7.16 needs `SENTRY_ENVIRONMENT` and `SUPABASE_FALLBACK_URL` **added to debug+release** (blank-sourced) or `SentryInitializer`/`AuthManager` won't compile |
+| `app/build.gradle.kts` | **Resolve ONLY the conflict hunk — never `git checkout --ours` this file.** The 0.9.2 cycle did that (the hunk was just the version line) and silently threw away upstream's non-conflicting hunks in the same file (the haze 0.7.3→1.7.2 bump), so the compile failed on `hazeEffect`/`HazeInputScale` with no marker anywhere. After resolving, `git diff upstream/dev -- app/build.gradle.kts` must show only the KevBox divergences listed here. Keep: `applicationId = "tv.kevbox"`, our `versionCode`/`versionName`, `UPDATE_BASE_URL`, `isUniversalApk = false`, debug id `tv.kevbox.debug`; **keep `SYNC_BACKEND_MANIFEST_URL` blank (`""`)** and **leave `NUVIO_SUPABASE_*` blank** (see "remote control plane" callout). **0.7.16 trap:** upstream **rebound `SUPABASE_URL`/`SUPABASE_ANON_KEY` to read the `NUVIO_SUPABASE_*` props** — do NOT take that; keep them reading our `SUPABASE_*` props (our family project). Also **keep the `resolveLocalProperty(...)` helper defined** — the merge dropped it (see "release-only breakage") | new dependencies, SDK/AGP bumps, native/player changes, AND new `buildConfigField`s that our code references — 0.7.16 needs `SENTRY_ENVIRONMENT` and `SUPABASE_FALLBACK_URL` **added to debug+release** (blank-sourced) or `SentryInitializer`/`AuthManager` won't compile |
 | `MainActivity.kt` (`onResume`/`onStart`) | our `FEATURE_ACCESS_CONTROL`/`FEATURE_DEVICE_LIMIT` catch-up blocks | take upstream's `requestForegroundSync()` — call it **exactly once**. (0.7.9–0.7.12 wrapped it in a coroutine alongside `syncBackendSwitchService.refreshSelection()`; **0.7.16 removed refreshSelection entirely** — `syncBackendSwitchService` no longer exists in MainActivity — so it's now a bare single call. Either way: one `requestForegroundSync()`, never two) |
 | `AccountScreen.kt` / `AccountSettingsContent.kt` | our `EmailPasswordForm` sign-in + `SHOW_SYNC_CODE_FEATURES` / `SHOW_SYNC_OVERVIEW = false` gating + the credential one-tap `LaunchedEffect` (keep it **above** any early-return so it still runs when auth flips to `FullAccount`) | take upstream's other additions, but **drop the read-only "Sync backend" `StatusCard`/`AccountInfoCard` AND the new `DebugSyncBackendSwitchCard`** (the 0.7.12 dev-only "local db switch" — never surface it to family). **0.7.16:** upstream extracted a clean `SignedInAccountSettingsContent` (StatusCard + sync note + sign-out **with a confirmation dialog**, no backend cards) and added an `initialFocusRequester` param the `SettingsScreen.kt` caller now passes — **adopt both** (the signature MUST accept `initialFocusRequester` or `SettingsScreen` won't compile), just gate its sync-overview behind `if (SHOW_SYNC_OVERVIEW)`. Note: `DebugSyncBackendSwitchCard`/`syncBackendName` copies auto-merge in with **no conflict** — grep and delete stragglers (leave the ones in the dead `AuthQrSignInScreen.kt`) |
 | `MainActivity.kt` | the `AuthEmailOnboardingScreen` first-run gate, **and the access/device-limit lock gate** (the `// KevBox FORK DIVERGENCE` block: LockedOutScreen early-return + `LockRetryStatus` retry-feedback wiring, 2026-08-11). Watch the import block — `com.nuvio.tv.core.access.*` / `ui.screens.account.Lock*` are kevbox-only imports an auto-merge can silently drop | everything else |
@@ -98,7 +100,7 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `app/src/full/java/.../updater/**` | the whole KevBox updater (version.json / SHA-256 / speed+ETA) — **0.8.1: upstream reworked THIS package (update banner) — see the "upstream's own updater" callout; it's now a guaranteed conflict zone every cycle** | nothing from upstream's updater |
 | `app/src/full/res/**` and new files (`EmailPasswordForm`, `CredentialCrypto`, `LastSignInDataStore`, `DefaultContent`, `Checksum`, `release.sh`) | yours — upstream has none of these | n/a |
 | `Theme.kt` | our default `LocalAppTheme = AppTheme.OCEAN` (NOT upstream's `WHITE`) | upstream's new lines, e.g. `LocalNuvioTextStyles` and design-token additions |
-| `PlayerRuntimeController.kt`, `PlayerViewModel.kt`, `PlayerRuntimeControllerInitialization.kt`, `...Lifecycle.kt`, `...Mpv.kt` | **keep BOTH** — our `telemetryRepository`/`deviceGuardDataStore` injection + telemetry `launch{}`/`telemetrySessionStarted` reset + the `heartbeatScheduler.stop()` calls (in `onPlayerError`, `STATE_ENDED`, and `releasePlayer`). **EXCEPTION (0.7.12+):** in the `STATE_ENDED` branch, keep our **commented-out** `emitCompletionScrobbleStop(...)` — do NOT take upstream's active call. Trakt completion already fires exactly once from `PlayerRuntimeControllerPlaybackEvents.kt`'s `if (ended && !wasEnded)` path; uncommenting here double-scrobbles (and the fn is idempotent via `hasSentCompletionScrobbleForCurrentItem`, so a stray call is masked — verify by grep, not by testing) | **keep BOTH** — upstream's `streamBadgePresentation`, trakt-CW `launch{}`, `hasMarkedCurrentEpisodeCompleted` reset; **0.7.16:** in `onPlayerError` adopt `error.toDisplayMessage(context)` (replaces our old `buildString` block) but keep our telemetry block above it; in `...Mpv.kt`/`...Lifecycle.kt` these are pure keep-both import/line adds |
+| `PlayerRuntimeController.kt`, `PlayerViewModel.kt`, `PlayerRuntimeControllerInitialization.kt`, `...Lifecycle.kt`, `...Mpv.kt` | **keep BOTH** — our `telemetryRepository`/`deviceGuardDataStore` injection + telemetry `launch{}`/`telemetrySessionStarted` reset + the `heartbeatScheduler.stop()` calls (in `onPlayerError`, `STATE_ENDED`, and `releasePlayer`). **RETIRED (0.9.2):** the old `STATE_ENDED` scrobble exception is gone — upstream itself removed the `emitCompletionScrobbleStop(99.5f)` call there (completion fires once from `PlayerRuntimeControllerPlaybackEvents.kt`), so our commented-out copy was dropped. If a future sync re-adds an active call in `STATE_ENDED`, that is the double-scrobble again: refuse it | **keep BOTH** — upstream's `streamBadgePresentation`, trakt-CW `launch{}`, `hasMarkedCurrentEpisodeCompleted` reset; **0.7.16:** in `onPlayerError` adopt `error.toDisplayMessage(context)` (replaces our old `buildString` block) but keep our telemetry block above it; in `...Mpv.kt`/`...Lifecycle.kt` these are pure keep-both import/line adds |
 | `AboutScreen.kt` | our `if (BuildConfig.FEATURE_TELEMETRY)` §11 privacy-notice block | upstream's added imports + tokenized spacer (`NuvioTheme.spacing.xxs`) |
 | `AuthSignInScreen.kt` | our `EmailPasswordForm(...)` sign-in body + `AuthEmailOnboardingScreen` + the `androidx.compose.runtime.*` and **`import androidx.hilt.navigation.compose.hiltViewModel`** imports — **discard** upstream's QR `Button`/`Text` header (we replaced that flow) | nothing here — but **0.7.16 trap:** the import-block auto-merge takes upstream's version (which doesn't use `hiltViewModel`) and **silently drops that import** while our body calls `hiltViewModel()` twice → compile break, no marker (see "release-only breakage" — same class as the `NuvioColors` one). Re-add the import; also drop the now-unused `Button`/`ButtonDefaults` imports |
 | `NuvioNavHost.kt` (Settings block) | route the dormant account entry to `Screen.AuthSignIn` (QR retired); **force `onNavigateToAddons`/`onNavigateToPlugins` to no-op `{}`** (see policy-regression callout) | **keep both** — take upstream's new `onNavigateToPlugins` param and any other added route callbacks |
@@ -112,6 +114,15 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `AddonRepository.kt` (interface, 2026-08-30) | **keep the `awaitResolvedInstalledAddons(timeoutMs)` declaration and its default body.** The default (`getInstalledAddons().first()`) exists so upstream/test fakes keep compiling — do not "simplify" it away, and do not make it abstract | take upstream's new interface members |
 | `MemberConfigService.kt` (kevbox-only file, 2026-08-30) | **`start()` must feed EVERY auth state to `MemberConfigApplyGate`.** Do not reintroduce `filterIsInstance<AuthState.FullAccount>()` + `distinctUntilChangedBy { it.userId }` — the gate has to see `SignedOut` to know the addon store was wiped, otherwise the same member signing back in looks like a duplicate and never gets their addons back until the app restarts. Guarded by `MemberConfigApplyGateTest` | n/a — upstream has neither this file nor `MemberConfigApplyGate.kt` |
 | `AndroidManifest.xml` (deeplinks, 0.7.18) | **drop the `<data android:scheme="stremio" />` intent-filter** — that scheme resolves ONLY to addon-install deeplinks (`DeepLinkParser`), so registering it makes the TV advertise as a Stremio-addon handler we then refuse. A `// KevBox FORK DIVERGENCE` comment marks where it was removed | **keep** the `nuvio://` filter (serves harmless Meta/title deeplinks) and `launchMode="singleTop"` |
+| `PlaybackAvailability.kt` + `ui/components/PlaybackAvailabilityProvider.kt` (0.9.2) | **keep the `allowUnverifiedPlayback` field + its early return in `canStream()`, and the `.copy(allowUnverifiedPlayback = true)` in the provider composable.** Upstream's new Play gate reads the live addon list; an addon whose manifest has not resolved carries no resources, so on the first Play after a sign-in it toasts "Playback isn't available… with your current setup" and hides the member's own source (the 2026-08-30 symptom, back through a new door), and a signed-out member gets that toast instead of the "sign in" wording from `StreamRepositoryImpl`. The flag lives on the data class but is set only in the provider, so upstream's `PlaybackAvailabilityTest` / `PlaybackAvailabilityViewModelTest` keep their expectations untouched | take everything else (the gate's call sites in `NuvioNavHost`, `MetaDetailsScreen`, `ContinueWatchingSection` are fine — they become no-ops) |
+| `app/src/main/java/com/nuvio/tv/updater/**` + `ui/screens/settings/UpdateChannelSettings.kt` (0.9.2) | **delete on merge**: upstream moved `VersionUtils`/`ReleaseSelector`/`UpdateChannel` into the SHARED source set (plus `ReleaseSelectorTest`/`VersionUtilsTest`) and added an `UpdateChannelSettings` composable that calls upstream's `UpdateViewModel` API (`updateChannel`, `setUpdateBannerEnabled`, `dismissBanner`). Against our `UpdateViewModel` that file does not compile, and the three shared files are dead code for KevBox. Post-sync: `ls app/src/main/java/com/nuvio/tv/updater/` must not exist and `grep -rn UpdateChannelSettings app/src --include=*.kt` must hit comments only | nothing — the `update_channel_*` / `about_update_channel_*` strings may stay (translations reference them; unused strings are harmless) |
+| `AboutScreen.kt` (0.9.2) | keep our rows (telemetry notice, single "Check for updates" row on our `UpdateViewModel` via `hiltViewModel(context as ComponentActivity)`, hidden privacy + licenses rows) **inside upstream's new `BringIntoViewSpec` scroll wrapper**, and give our first row `firstRowModifier` so upstream's scroll-to-top fix still works. **Re-add the imports the auto-merge drops** (`androidx.activity.ComponentActivity`, `com.nuvio.tv.updater.UpdateViewModel`, keep `hiltViewModel`) | the wrapper + `MemberBrandWordmark` (draws our wordmark; the gradient is supporter-only) — but NOT the `UpdateChannelSettings(...)` call |
+| `WatchedItemsPreferences.kt` / `WatchedItemsSyncService.kt` (0.9.2) | upstream replaced the last-push timestamp heuristic with a **pending-mutation store** and its `pullSnapshotFromRemote` no longer passes `lastSuccessfulPushMs` (null → only queued local changes survive a snapshot). The store is new and nothing seeds pre-existing local marks into it, so a never-synced profile would lose them on the first restore. **Keep the KevBox `unionWhenNeverSynced: Boolean = false` parameter on `replaceWithRemoteItems` + its `preserveNeverSynced` clause, and pass `unionWhenNeverSynced = watchedItemsPreferences.getLastSuccessfulPushMs(profileId) <= 0L` from `pullSnapshotFromRemote`.** Default false keeps upstream's `WatchedItemsPreferencesSyncTest` ("empty snapshot clears non-pending") and `WatchedItemsPullPreservationTest` on upstream semantics; `SyncMergeLogicTest` still pins the pure helper in `SyncMergeLogic.kt` | take the pending-upsert/delete logic, the delta-cursor fallbacks and `WatchStateMutationStore` wholesale |
+| `AddonRepositoryImpl.kt` (0.9.2) | keep `awaitResolvedInstalledAddons` + `hasUnresolvedEnabledAddon` (unchanged). **Upstream converged on our `@Singleton`** (cf7ee078d, same fix, same day) so the annotation now comes from both sides — take upstream's primary constructor with the injectable `dispatcher`/`clock` and the `@Inject` secondary (our tests use the 5-arg form and keep compiling). Upstream also added placeholder addons on fetch failure; they carry no resources, which is exactly why the Play gate above had to be neutralised | everything else |
+| `app/src/full/res/drawable/app_logo_wordmark_{gold,jade,rose_gold,arctic_blue,graphite}.xml` (0.9.2) | ours — five `<bitmap>` aliases to `@drawable/app_logo_wordmark`. `ThemeBranding.kt` maps the premium themes to Nuvio-branded wordmark PNGs in `main/res`, and both the profile screen and the 0.9.1 startup splash draw that resource directly. Without the aliases a member on the Gold theme sees a Nuvio play-triangle logo on every launch. Keep the folder; it never conflicts | n/a |
+| `ThemeAccessTest.kt` / `ThemeSettingsViewModel.kt` (0.9.2) | our OCEAN fallback now has a THIRD assertion to flip: upstream's new `customThemesAreAvailableWithoutMembership` asserts `resolveAppTheme(null, None) == WHITE` → make it OCEAN. In `ThemeSettingsViewModel` keep `selectedTheme = AppTheme.OCEAN` and take upstream's new `customThemeColors` / `customThemeGradientEnabled` fields beside it | the custom-theme editor (`AppTheme.CUSTOM`) is free for everyone and maps to our default wordmark — nothing to hide |
+| `MainActivity.kt` (0.9.2 splash + profile switch) | as before (email onboarding, access gate, `UpdatePromptDialog`, no `UpdateBannerHost`), but the tail of `onCreate` is now upstream's shape: take `startupDestination = StartupDestination.Setup` before our `AuthEmailOnboardingScreen(`, the `} else {` that replaced the essential-addon-setup `return@Surface`, upstream's `handleSwitchProfile` (resets the splash state; both scaffolds take it), the `Box { scaffolds + autoNextOverlay }`, and the `StartupSplashScreen` block after the scaffolds. Our `UpdatePromptDialog` block goes where the `UpdateBannerHost` lambda used to close. The auto-merge left BOTH copies of the scaffolds in the file (ours bare + upstream's inside the banner host) — rebuild that region from upstream's text rather than patching the interleaving; the brace balance must match upstream's file | everything else |
+| `AddonRepositoryResolvedAddonsTest.kt` (0.9.2) | our test; its inner `awaitResolvedInstalledAddons(timeoutMs)` budget is 30 s and the outer `withTimeout` 60 s **on purpose**. With 5 s/5 s it flaked inside the full suite (IO pool starved by neighbours, inner timeout fell back to the empty initial value) while passing alone. Do not "tidy" the numbers back down | n/a |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -314,6 +325,12 @@ grep -rn "SHOW_LAUNCHER_ARTWORK_PICKER" app/src --include=*.kt                  
 grep -rn "supportNuvioEnabled" app/src/full/.../AppFeaturePolicy.kt                       # want: false
 grep -rn "UpdateBannerHost\|AbiSelector\|VersionUtils" app/src --include=*.kt             # want: empty
 grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                             # want: 6 hits, not 4
+grep -rn "allowUnverifiedPlayback = true" app/src --include=*.kt                        # want: 1 (PlaybackAvailabilityProvider)
+ls app/src/full/res/drawable/app_logo_wordmark_*.xml | wc -l                              # want: 5 (themed wordmark aliases)
+ls app/src/main/java/com/nuvio/tv/updater/ 2>/dev/null                                    # want: no such directory
+grep -rn "UpdateChannelSettings(" app/src --include=*.kt                                  # want: empty
+grep -c "unionWhenNeverSynced" app/src/.../core/sync/WatchedItemsSyncService.kt          # want: >= 1
+git diff upstream/dev -- app/build.gradle.kts | grep -c haze                              # want: 0 (dep bumps taken)
 ```
 
 ### 🛑 Remote control plane — upstream can switch our backend / force-logout the fleet (0.7.9-beta)
@@ -791,6 +808,82 @@ Bluetooth audio routing, a subtitle charset rewrite, a post-play recommendations
 - Not emulator-verified this cycle: build + install + launch succeeded on `kevbox_tv`, but real
   playback was **not** exercised. Given ~30 upstream player commits, **play a stream on a real TV
   before trusting this build**.
+
+### 0.8.12 → 0.9.2 — Play gate, updater channels, never-synced union, splash wordmark (2026-09-12)
+
+301 commits (205 non-merge, `fa8e7266c`→`e54a74904`, dev tip = the `0.9.2-beta` tag, cut the same day).
+Branch `sync0.9.2`, merge `719a1fa19`. 254 files, +22.6k/-4.8k. Sixteen conflicts: build.gradle (version
+line only), updater ×4 (`UpdateBanner.kt` modify/delete), `MainActivity` (4 hunks), `NuvioNavHost`,
+`PlayerRuntimeControllerInitialization`, `WatchedItemsSyncService` + `WatchedItemsPreferences`,
+`AddonRepositoryImpl`, `AboutScreen`, `ThemeSettingsViewModel`, `StreamScreen`, `strings.xml`, playstore
+`UpdateViewModel`. **No server migration**: the whole-app `rpc()` inventory gained one name,
+`sync_copy_profile_setup` (copy settings into a newly created profile, wrapped in `Result.failure` →
+the profile still gets created); the `p_keys` argument only moved into `deleteKeysFromRemoteLocked`.
+Manifest, `.gitignore`, Gradle toolchain and generated baseline profiles untouched; the one dependency
+bump is haze 0.7.3 → 1.7.2. Player took 43 files / +1.7k lines (Hi10P software fallback, VC-1 error
+surfacing + "switch to MPV", in-memory moov cache for non-faststart MP4, sidecar subtitles, HLS 404
+rendition fallback, ASS styling under libass, cross-domain subtitle headers).
+
+- **🛑 New Play gate re-created the 2026-08-30 bug through a new door.** `PlaybackAvailability.canStream`
+  (called from `NuvioNavHost` ×3, `MetaDetailsScreen` ×4, `ContinueWatchingSection`) reads
+  `addonRepository.getInstalledAddons()` and refuses Play with a toast when no enabled addon lists a
+  stream resource. Upstream's own new placeholder addons (emitted when a manifest cannot be fetched or
+  has not been fetched yet) carry no resources, so the first Play after a sign-in toasts "Playback isn't
+  available for this title with your current setup" instead of reaching the stream screen and our
+  `awaitResolvedInstalledAddons` wait. A signed-out member gets the same toast instead of the "sign in"
+  wording. Both are member-facing regressions with zero conflict markers (the call sites auto-merge).
+  Fix = `allowUnverifiedPlayback` on the data class, set only by the provider composable (see table);
+  upstream's two gate tests keep passing because they construct the class directly.
+- **🛑 Upstream's updater moved into shared code.** Stable/beta channels: three new files under
+  `app/src/main/java/com/nuvio/tv/updater/` and an `UpdateChannelSettings` composable in Settings that
+  calls upstream's `UpdateViewModel` API. Deleted all of them plus their two tests; `AboutScreen` keeps
+  our single check-for-updates row. Standing rule unchanged: nothing from upstream's updater.
+- **⚠️ Watched-history restore lost its never-synced protection.** Upstream's pending-mutation store is
+  the right model, but it starts empty and `pullSnapshotFromRemote` dropped the timestamp argument, so
+  local marks that were never pushed (or were marked on the old build before upgrading) would vanish on
+  the first snapshot. Kept the rev-4 union as an opt-in flag the sync service sets only when the
+  profile's last successful push is 0 (see table). `WatchProgressSyncService` has the same shape but no
+  KevBox divergence — continue-watching entries are always pushed promptly, so left as upstream.
+- **⚠️ Branding: the splash draws the theme's wordmark.** `ThemeBranding.kt` already mapped
+  GOLD/JADE/ROSE_GOLD/ARCTIC_BLUE/GRAPHITE to Nuvio wordmark PNGs with no full-flavor override (checked
+  the gold one: Nuvio's play triangle), which the profile screen has shown all along and the new
+  startup splash now shows on every launch. Fixed with five `<bitmap>` alias drawables in
+  `app/src/full/res/drawable/` — zero-divergence, survives merges. Same lesson as the icon picker: the
+  policy sweep includes "which drawable does a new screen reach for".
+- **🛑 `git checkout --ours app/build.gradle.kts` is a trap** (new to this cycle's notes, see the table
+  row): the conflict was one hunk, but "ours" is whole-file and dropped the haze bump → `Unresolved
+  reference 'hazeEffect'` across `MainActivity`, `StreamScreen`, `ModernSidebarBlurPanel`. Caught by the
+  compile gate, fixed by re-applying the two upstream lines; `git diff upstream/dev -- app/build.gradle.kts`
+  is now the check. The updater files are the ONLY ones where whole-file "ours" is correct by design.
+- **Retired / converged:** upstream added the same `@Singleton` to `AddonRepositoryImpl` (cf7ee078d);
+  upstream already removed the `STATE_ENDED` scrobble call our comment guarded (it was gone at the
+  0.8.11 base — the comment was stale); forced-subs / libass / strip-SDH flipped to `true` only in the
+  `PlayerSettings` data-class defaults while every stored-preference fallback stays `?: false`, so no
+  behaviour change for installs and our three "fr"/auto-switch defaults are intact.
+- **ℹ️ TLS is now validated on first-party traffic.** `NetworkModule`'s default `OkHttpClient` lost the
+  trust-all socket factory; addon/Retrofit traffic moved to a `@Named("addonPermissive")` client, and
+  the HTTP cache dir became `http_cache_v2`. Our updater (`ApkDownloader`, `UpdateRepository`) injects
+  the default client, so tv.kevbox.dev must keep a valid chain (Let's Encrypt, checked) — **verify an
+  update download on a real TV after this release.** `Checksum.kt`'s "trust-all" comment is now wrong
+  in spirit but harmless.
+- **ℹ️ Simkl replaced the ARM anime-ID lookup** for skip-intro (`SimklIdResolver`, existing
+  `SIMKL_CLIENT_ID`); no new URL surface. `DEVICE_LOGIN_WEB_BASE_URL` and friends unchanged upstream.
+- **Invisible breakage #4, fourth occurrence:** new `SearchViewModelPaginationTest` fake lacked the two
+  KevBox `AddonRepository` members. `StreamRepositoryPluginIsolationTest` uses a mockk mock, not a fake,
+  and kept its `awaitResolvedInstalledAddons` stub + `authManager` ctor arg.
+- **Known-failure baseline is now 12** (1268 tests, 1 skipped): ten of the previous thirteen still fail
+  (one ExoPlayer-tier straggler now passes), plus **two new upstream-own failures**
+  `PostPlayRecommendationStateTest.{loaded recommendation holds natural completion until overlay evaluation,
+  post play returns to player only while its window is available}` — test and source byte-identical to
+  upstream's tip, same class as `TrackSelectionInvestigationTest`. `ThemeAccessTest` needed the OCEAN
+  flip; `AddonRepositoryResolvedAddonsTest` flaked once under suite load and got wider budgets.
+- **Verified:** `compileFullDebugKotlin` green (after the haze fix), `testFullDebugUnitTest` at the
+  12-failure baseline, `assembleFullRelease --dry-run` green, all standing greps pass, every anchored
+  divergence diffed against `upstream/dev` (PlayerSettingsDataStore, StreamRepositoryImpl, ThemeAccess,
+  NuvioApplication, ThemeSettingsScreen, SettingsScreen suppressions, manifest identical to kevbox).
+  Emulator: full-debug installs and launches to the KevBox email gate, no crash, updater worker runs.
+  **Sign-in, home, and real playback were NOT exercised in the automated run** (no test account on this
+  box) — do them by hand before release; the player churn alone warrants it.
 
 ## Verify before shipping
 
