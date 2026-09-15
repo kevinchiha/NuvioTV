@@ -151,6 +151,24 @@ internal fun PlaybackException.findInvalidResponseCodeException(): HttpDataSourc
     return null
 }
 
+/**
+ * Message sent to the telemetry `record_error` RPC (KevBox). For a bad-HTTP-status error (2004)
+ * the top-level [PlaybackException.message] is always "Source error"; the status the stream host
+ * answered with lives in the cause chain, and without it every 2004 row looks the same. Still
+ * sends no URL, title or position (the server also scrubs URL-ish tokens and caps at 120 chars).
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun PlaybackException.toTelemetryMessage(): String {
+    val base = message ?: "playback error"
+    val http = findInvalidResponseCodeException() ?: return base
+    val statusText = http.responseMessage?.takeIf { it.isNotBlank() }
+    return buildString {
+        append("HTTP ").append(http.responseCode)
+        statusText?.let { append(' ').append(it) }
+        append(": ").append(base)
+    }
+}
+
 @androidx.annotation.OptIn(UnstableApi::class)
 internal fun PlaybackException.toDisplayMessage(context: android.content.Context): String {
     val responseException = findInvalidResponseCodeException()

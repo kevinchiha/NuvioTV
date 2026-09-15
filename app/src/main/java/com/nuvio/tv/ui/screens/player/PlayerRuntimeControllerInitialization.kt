@@ -1434,7 +1434,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                                         telemetryRepository.error(
                                             dev,
                                             error.errorCode.toString(),
-                                            error.message ?: "playback error"
+                                            error.toTelemetryMessage()
                                         )
                                     }
                                 }
