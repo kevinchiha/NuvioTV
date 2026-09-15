@@ -8,7 +8,7 @@
 # What it does:
 #   1. Bumps versionCode (+1) and versionName in app/build.gradle.kts.
 #   2. Builds the SIGNED, flavored release: ./gradlew assembleFullRelease
-#      (reads NUVIO_RELEASE_* signing creds from ~/kevbox-keys/release.env).
+#      (reads NUVIO_RELEASE_* signing creds from ~/secrets/kevbox-keys/release.env).
 #   3. Publishes the selected ABI's apk (default arm64-v8a; set KEVBOX_TV_APK_ABI):
 #         app/build/outputs/apk/full/release/app-full-<abi>-release.apk
 #      scp'd to persovps, installed under /var/www/kevbox-tv/, and pointed to by the
@@ -19,7 +19,7 @@
 #   5. Optionally commits the version bump (set KEVBOX_COMMIT=1).
 #
 # ⚠️ Same-key invariant: every release MUST be signed with the SAME keystore
-#    (~/kevbox-keys/kevboxtv.jks) or installs fail with "signatures don't match".
+#    (~/secrets/kevbox-keys/kevboxtv.jks) or installs fail with "signatures don't match".
 #    Never debug-sign a family release.
 # ⚠️ KevBox TV APKs are LARGE (~80–150 MB: bundled FFmpeg/ExoPlayer/mpv/native libs).
 #    Prune old versions on the VPS to mind storage and family download bandwidth.
@@ -38,7 +38,7 @@ NOTES="${*:-Bug fixes and improvements.}"
 
 REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 GRADLE="$REPO/app/build.gradle.kts"
-KEYENV="$HOME/kevbox-keys/release.env"
+KEYENV="$HOME/secrets/kevbox-keys/release.env"
 
 # persovps connection + deploy target (mirror the kevbox-support deploy).
 SSH_ALIAS="${KEVBOX_SSH_ALIAS:-persovps}"
