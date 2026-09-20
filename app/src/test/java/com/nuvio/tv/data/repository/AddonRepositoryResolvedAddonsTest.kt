@@ -1,18 +1,26 @@
 package com.nuvio.tv.data.repository
 
 import android.content.Context
+import android.content.SharedPreferences
+import com.google.gson.Gson
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.sync.AddonSyncService
 import com.nuvio.tv.data.local.AddonPreferences
+import com.nuvio.tv.data.mapper.toDomain
 import com.nuvio.tv.data.remote.api.AddonApi
 import com.nuvio.tv.data.remote.dto.AddonManifestDto
+import com.nuvio.tv.domain.model.Addon
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -63,7 +71,40 @@ class AddonRepositoryResolvedAddonsTest {
         assertEquals(listOf(FAST_NAME), resolved.map { it.name })
     }
 
-    private fun newRepository(slowManifest: CompletableDeferred<Response<AddonManifestDto>>): AddonRepositoryImpl {
+    /**
+     * The race the 2026-09-20 sync exposed. `fetchAddon` and the disk load both fill
+     * `manifestCache` BEFORE `installedAddonsFlow` publishes the matching list. A caller that
+     * checks the cache in that gap sees "everything resolved" while the published list is still
+     * the initial empty value, and gets `[]` back in a few milliseconds. In the full unit suite the
+     * scheduling landed in that gap every run; alone it never did, which is why the earlier
+     * "IO starvation" note on the first test was wrong.
+     *
+     * Pinned here with a shared test scheduler: both manifests are on disk, so `init` fills the
+     * cache first, the flow's collectors are queued behind the caller, and the caller evaluates
+     * its predicate on `[]` with a full cache.
+     */
+    @Test
+    fun `resolved addons never returns the empty initial list while the cache is ahead of the flow`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repository = newRepository(
+            slowManifest = CompletableDeferred(Response.success(manifestDto(SLOW_NAME))),
+            dispatcher = dispatcher,
+            diskCache = mapOf(
+                FAST_URL to manifestDto(FAST_NAME).toDomain(FAST_URL),
+                SLOW_URL to manifestDto(SLOW_NAME).toDomain(SLOW_URL)
+            )
+        )
+
+        val resolved = async { repository.awaitResolvedInstalledAddons(timeoutMs = 30_000) }
+
+        assertEquals(listOf(FAST_NAME, SLOW_NAME), resolved.await().map { it.name })
+    }
+
+    private fun newRepository(
+        slowManifest: CompletableDeferred<Response<AddonManifestDto>>,
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        diskCache: Map<String, Addon> = emptyMap()
+    ): AddonRepositoryImpl {
         val api = mockk<AddonApi>()
         coEvery { api.getManifest("$FAST_URL/manifest.json") } returns
             Response.success(manifestDto(FAST_NAME))
@@ -75,12 +116,23 @@ class AddonRepositoryResolvedAddonsTest {
         every { preferences.addonEnabledStates } returns
             flowOf(mapOf(FAST_URL to true, SLOW_URL to true))
 
+        // Same shape the repository persists with: a JSON map of canonical URL -> Addon under
+        // "manifests_v2" in the "addon_manifest_cache" SharedPreferences.
+        val prefs = mockk<SharedPreferences>(relaxed = true)
+        every { prefs.contains(any()) } returns false
+        every { prefs.getString("manifests_v2", null) } returns
+            if (diskCache.isEmpty()) null else Gson().toJson(diskCache)
+        val context = mockk<Context>(relaxed = true)
+        every { context.getSharedPreferences("addon_manifest_cache", Context.MODE_PRIVATE) } returns prefs
+
         return AddonRepositoryImpl(
             api = api,
             preferences = preferences,
             addonSyncService = mockk<AddonSyncService>(relaxed = true),
             authManager = mockk<AuthManager>(relaxed = true),
-            context = mockk<Context>(relaxed = true)
+            context = context,
+            dispatcher = dispatcher,
+            clock = System::currentTimeMillis
         )
     }
 

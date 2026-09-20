@@ -319,27 +319,37 @@ class AddonRepositoryImpl(
     // Costs nothing when everything is cached — the predicate is already true, so this returns on
     // the current StateFlow value without suspending. Upstream fixed the same class of bug on the
     // META path in 0.8.11 (MetaRepositoryImpl.INSTALLED_ADDONS_WAIT_MS) but left streams alone.
+    //
+    // The predicate judges the PUBLISHED list, never `manifestCache`. The cache fills before the
+    // flow publishes the matching list (fetchAddon and the disk load both write it first), so a
+    // cache-based check evaluated in that gap says "resolved" while the StateFlow still holds the
+    // initial empty list, and the caller gets `[]` back in milliseconds. That is exactly the bug
+    // this method exists to prevent, and it surfaced as a deterministic full-suite failure in the
+    // 1.0.0 sync (2026-09-20). See `AddonRepositoryResolvedAddonsTest`.
     override suspend fun awaitResolvedInstalledAddons(timeoutMs: Long): List<Addon> =
         kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
-            installedAddonsFlow.first { !hasUnresolvedEnabledAddon() }
+            installedAddonsFlow.first { published -> !hasUnresolvedEnabledAddon(published) }
         } ?: installedAddonsFlow.first()
 
     /**
-     * True while some enabled addon has no cached manifest yet. Same condition the flow uses to
-     * decide it must fetch (`hasCacheMiss`), so this stops being true exactly when the flow has
-     * finished filling the cache — and the flow re-emits on `manifestCacheRevision`, so the
-     * predicate above is re-evaluated as each manifest lands.
+     * True while some enabled addon is missing from [published] or is only there as a placeholder
+     * (the flow emits one for a manifest it could not fetch or has not fetched yet). The flow
+     * re-emits as each manifest lands, so the predicate above is re-evaluated on every new list.
      */
-    private suspend fun hasUnresolvedEnabledAddon(): Boolean {
+    private suspend fun hasUnresolvedEnabledAddon(published: List<Addon>): Boolean {
         val urls = preferences.installedAddonUrls.first()
         if (urls.isEmpty()) return false
         val enabledByUrl = preferences.addonEnabledStates.first()
             .mapKeys { (url, _) -> canonicalizeUrl(url) }
         return urls.any { url ->
             val canonical = canonicalizeUrl(url)
-            (enabledByUrl[canonical] ?: true) && getCachedManifest(canonical) == null
+            (enabledByUrl[canonical] ?: true) &&
+                published.none { it.baseUrl == canonical && !it.isManifestPlaceholder() }
         }
     }
+
+    /** What [placeholderAddon] builds: no version and no resources. A fetched manifest has both. */
+    private fun Addon.isManifestPlaceholder(): Boolean = version.isEmpty() && resources.isEmpty()
     // ======================= END KevBox FORK DIVERGENCE =======================
 
     override suspend fun fetchAddon(baseUrl: String): NetworkResult<Addon> {
