@@ -68,10 +68,11 @@ git merge upstream/dev
 #    commits, and pushes the CURRENT branch to your fork — so be ON kevbox when you run it, having
 #    fast-forwarded it to your isolation branch first: `git switch kevbox && git merge --ff-only sync0.9.2`).
 #    KevBox runs its OWN version line: since 0.7.16 we mirror upstream's patch number into ours and sit
-#    one minor ahead (upstream 0.8.11-beta → KevBox 0.9.11-beta, upstream 0.9.2-beta → KevBox 0.10.2-beta)
+#    one minor ahead (upstream 0.8.11-beta → KevBox 0.9.11-beta, upstream 0.9.2-beta → KevBox 0.10.2-beta,
+#    upstream 1.0.0 → KevBox 1.1.0; the -beta suffix went when upstream dropped theirs)
 #    so the base is legible at a glance. The updater compares versionCode only, so the name is cosmetic,
-#    but keep it monotonic in semver terms (0.10.2 > 0.9.11). Bump YOUR name:
-./release.sh 0.10.2-beta "Bug fixes and improvements"
+#    but keep it monotonic in semver terms (1.1.0 > 0.10.2 > 0.9.11). Bump YOUR name:
+./release.sh 1.1.0 "Bug fixes and improvements"
 ```
 
 > ⚠️ **Let `release.sh` do the push — don't use VS Code's "Sync Changes" button.** `kevbox` carries
@@ -122,7 +123,8 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `app/src/full/res/drawable/app_logo_wordmark_{gold,jade,rose_gold,arctic_blue,graphite}.xml` (0.9.2) | ours — five `<bitmap>` aliases to `@drawable/app_logo_wordmark`. `ThemeBranding.kt` maps the premium themes to Nuvio-branded wordmark PNGs in `main/res`, and both the profile screen and the 0.9.1 startup splash draw that resource directly. Without the aliases a member on the Gold theme sees a Nuvio play-triangle logo on every launch. Keep the folder; it never conflicts | n/a |
 | `ThemeAccessTest.kt` / `ThemeSettingsViewModel.kt` (0.9.2) | our OCEAN fallback now has a THIRD assertion to flip: upstream's new `customThemesAreAvailableWithoutMembership` asserts `resolveAppTheme(null, None) == WHITE` → make it OCEAN. In `ThemeSettingsViewModel` keep `selectedTheme = AppTheme.OCEAN` and take upstream's new `customThemeColors` / `customThemeGradientEnabled` fields beside it | the custom-theme editor (`AppTheme.CUSTOM`) is free for everyone and maps to our default wordmark — nothing to hide |
 | `MainActivity.kt` (0.9.2 splash + profile switch) | as before (email onboarding, access gate, `UpdatePromptDialog`, no `UpdateBannerHost`), but the tail of `onCreate` is now upstream's shape: take `startupDestination = StartupDestination.Setup` before our `AuthEmailOnboardingScreen(`, the `} else {` that replaced the essential-addon-setup `return@Surface`, upstream's `handleSwitchProfile` (resets the splash state; both scaffolds take it), the `Box { scaffolds + autoNextOverlay }`, and the `StartupSplashScreen` block after the scaffolds. Our `UpdatePromptDialog` block goes where the `UpdateBannerHost` lambda used to close. The auto-merge left BOTH copies of the scaffolds in the file (ours bare + upstream's inside the banner host) — rebuild that region from upstream's text rather than patching the interleaving; the brace balance must match upstream's file | everything else |
-| `AddonRepositoryResolvedAddonsTest.kt` (0.9.2) | our test; its inner `awaitResolvedInstalledAddons(timeoutMs)` budget is 30 s and the outer `withTimeout` 60 s **on purpose**. With 5 s/5 s it flaked inside the full suite (IO pool starved by neighbours, inner timeout fell back to the empty initial value) while passing alone. Do not "tidy" the numbers back down | n/a |
+| `AddonRepositoryResolvedAddonsTest.kt` (0.9.2, corrected 1.0.0) | our test. The 30 s / 60 s budgets stay, but the 0.9.2 note blaming "IO starvation" was wrong: the flake was the race described in the 1.0.0 callout (the method answered `[]` in 3 ms, it never waited). The third test pins that race with a shared `StandardTestDispatcher` and a pre-filled disk cache; keep it, it is the only deterministic guard | n/a |
+| `AddonRepositoryImpl.kt` `awaitResolvedInstalledAddons` (1.0.0) | the predicate judges the **published** list (`installedAddonsFlow.first { published -> !hasUnresolvedEnabledAddon(published) }`): an enabled URL counts as resolved only when it appears with a real manifest, where a placeholder is `version.isEmpty() && resources.isEmpty()`. Do not "simplify" it back to a `manifestCache` check; the cache fills before the flow publishes, and a check in that gap returns the empty initial list | n/a, upstream has no such method |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -887,6 +889,55 @@ rendition fallback, ASS styling under libass, cross-domain subtitle headers).
   There is no test account on this box, so the automated run stops at the gate; Kevin signed in and
   played a stream on the emulator by hand before giving the go for the release. Keep doing that: the
   player churn alone warrants it every cycle.
+
+### 0.9.3 → 1.0.0 — the light cycle; a fork race surfaced through the test suite (2026-09-20)
+
+108 commits (67 non-merge, `e54a74904`→`8f5e9a963`, dev tip two past the `1.0.0` tag; 0.9.3/0.9.4/0.9.5-beta
+and 1.0.0 were cut in one week and 1.0.0 is a version bump, not a rework). Branch `sync1.0.0`, merge
+`ef6695c08`, fork fix `bb00bf53b`, released as **1.1.0 / versionCode 1051**. 95 files, +3.2k/-0.4k.
+**One conflict** (the version line; resolved the hunk only, `git diff upstream/dev -- app/build.gradle.kts`
+shows only the known KevBox lines). Seven auto-merges over KevBox-edited files, all additive one-liners
+or new enum values nowhere near our lines. **No server migration** (zero `rpc()` changes, `core/sync/`
+untouched), no new URL field, manifest / updater / `SettingsScreen` / `NuvioNavHost` / DI / launcher /
+`.gitignore` / generated profiles untouched; every standing grep passed unchanged. Upstream content: RTL
+layout fixes (many), movie post-credits skip (inert, `INTRODB_API_URL` blank), subtitle credential scoping
+(`PlayerSubtitleDataSource`: stream headers no longer follow a subtitle fetch to another host), nested-MKV
+seek + truncated-tail fixes, ffmpeg downmix fix as a new prebuilt aar (still carries `armeabi-v7a`,
+checked), stream list paginated 100 rows at a time, transparent player window so HDR letterbox bars stay
+black, Rotten Tomatoes icons (needs an MDBList key), TVDB option in Simkl settings (hidden by `TRACKING`),
+upstream's own CI workflow files (inert for us).
+
+- **⚠️ The suite went 12 → 13, and the 13th was ours.** `AddonRepositoryResolvedAddonsTest` failed on
+  every full-suite run after the merge, passed alone, passed paired with each new upstream test class and
+  in every package partition, and still failed with all eight new upstream test files moved aside. So
+  upstream's tests were innocent, and upstream's code never touched `AddonRepositoryImpl` either; the merge
+  only shifted thread timing. The tell was the duration: **3 ms**, returning `[]`. A timeout would have
+  taken 30 s. Root cause: `awaitResolvedInstalledAddons` judged "resolved" by reading `manifestCache`,
+  which `fetchAddon` and the disk load both fill *before* `installedAddonsFlow` publishes the matching list.
+  Evaluated in that gap, the predicate is true on the initial empty StateFlow value, so the caller gets
+  `[]` at once, which is the exact partial-list bug the method was written to prevent (a microsecond window
+  in production, deterministic under suite load). The 0.9.2 note that widened this test's budgets for "IO
+  starvation" had misread the same race. Fixed test-first (`bb00bf53b`): the predicate now judges the
+  published list, and a new test pins the ordering with a shared `StandardTestDispatcher` plus a pre-filled
+  disk cache so `init` fills the cache before the flow's collectors run; it failed RED with the suite's
+  exact message. **Lesson: a new full-suite failure in a kevbox-only test is still ours to root-cause even
+  when the merge did not touch its subject. Run it alone and read the duration in the XML report: a fast
+  wrong answer is a race, a slow one is a timeout.**
+- **Version rule for the 1.x line:** upstream 1.0.0 → KevBox 1.1.0 (still one minor ahead; `-beta` dropped
+  with upstream's). Upstream's versionCode is 1062 and ours 1051; unrelated, the updater only reads ours.
+- **Emulator:** full-debug launched to the signed-in home (Continue Watching populated, OCEAN), one
+  `Loaded N cached manifests from disk` line (single repository instance), zero 429s, `MemberConfigService`
+  applied 7 rows. Manual picker enforced; Kevbox returned 29 streams. ExoPlayer refused the 10-bit HEVC
+  file on the emulator's software decoder (`NO_EXCEEDS_CAPABILITIES`, an emulator limit), the
+  `autoSwitchInternalPlayerOnError` default handed it to MPV and video played; letterbox bars rendered
+  true black. 131 addon subtitles fetched, the internal English track auto-selected. **Not exercised:**
+  ExoPlayer's new subtitle data source (the credential-scoping change), because HEVC forced MPV; check
+  subtitles on a real TV with an H.264 stream. Two log lines seen and judged harmless, both in files the
+  merge did not touch: `AccessControlService: applyUnknown grace evaluation failed:
+  LeftCompositionCancellationException` at startup (a cancellation caught by the fail-open branch; the
+  check reruns on resume) and `AUTO_SUB stop: user explicitly selected current subtitle` every 500 ms
+  under MPV (log noise).
+- **Known-failure baseline stays at 12** (1320 tests, 1 skipped), the same list as 0.9.2.
 
 ## Verify before shipping
 
