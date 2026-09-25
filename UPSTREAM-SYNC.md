@@ -125,6 +125,9 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `MainActivity.kt` (0.9.2 splash + profile switch) | as before (email onboarding, access gate, `UpdatePromptDialog`, no `UpdateBannerHost`), but the tail of `onCreate` is now upstream's shape: take `startupDestination = StartupDestination.Setup` before our `AuthEmailOnboardingScreen(`, the `} else {` that replaced the essential-addon-setup `return@Surface`, upstream's `handleSwitchProfile` (resets the splash state; both scaffolds take it), the `Box { scaffolds + autoNextOverlay }`, and the `StartupSplashScreen` block after the scaffolds. Our `UpdatePromptDialog` block goes where the `UpdateBannerHost` lambda used to close. The auto-merge left BOTH copies of the scaffolds in the file (ours bare + upstream's inside the banner host) — rebuild that region from upstream's text rather than patching the interleaving; the brace balance must match upstream's file | everything else |
 | `AddonRepositoryResolvedAddonsTest.kt` (0.9.2, corrected 1.0.0) | our test. The 30 s / 60 s budgets stay, but the 0.9.2 note blaming "IO starvation" was wrong: the flake was the race described in the 1.0.0 callout (the method answered `[]` in 3 ms, it never waited). The third test pins that race with a shared `StandardTestDispatcher` and a pre-filled disk cache; keep it, it is the only deterministic guard | n/a |
 | `AddonRepositoryImpl.kt` `awaitResolvedInstalledAddons` (1.0.0) | the predicate judges the **published** list (`installedAddonsFlow.first { published -> !hasUnresolvedEnabledAddon(published) }`): an enabled URL counts as resolved only when it appears with a real manifest, where a placeholder is `version.isEmpty() && resources.isEmpty()`. Do not "simplify" it back to a `manifestCache` check; the cache fills before the flow publishes, and a check in that gap returns the empty initial list | n/a, upstream has no such method |
+| `ui/navigation/DetailChildHost.kt` (1.1.0-beta.2) | the nested-detail `MetaDetailsScreen`'s `onPlayClick` is a lambda that calls `navigateToDetailStream(..., manualSelection = true)`. Upstream passes the bare reference `parentNavController::navigateToDetailStream`, whose default is `manualSelection = false`, so a title opened from cast / similar / studio rows auto-plays past our forced stream picker. No conflict marks it: the file is new, and our six `manualSelection = true` lines in `NuvioNavHost` all survive | everything else in the host (child back stack, nested-depth cap, focus restore) |
+| `LibraryScreen.kt` header (1.1.0-beta.2) | our `app_logo_wordmark` `Image`. Upstream's side of the hunk is the source-label `Text` with a new `MDBLIST` line, and it prints `"NUVIO"` for a signed-in account | n/a for this hunk |
+| `app/src/full/.../updater/ui/UpdateBanner.kt` (1.1.0-beta.2) | stays **deleted** (modify/delete conflict: upstream touched one text style). `git rm` it | nothing |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -327,6 +330,8 @@ grep -rn "SHOW_LAUNCHER_ARTWORK_PICKER" app/src --include=*.kt                  
 grep -rn "supportNuvioEnabled" app/src/full/.../AppFeaturePolicy.kt                       # want: false
 grep -rn "UpdateBannerHost\|AbiSelector\|VersionUtils" app/src --include=*.kt             # want: empty
 grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                             # want: 6 hits, not 4
+grep -c "manualSelection = true" app/src/.../ui/navigation/DetailChildHost.kt             # want: 2 (1.1.0 nested details)
+grep -rn "Screen.Stream.createRoute\|::navigateToDetailStream" app/src/main --include=*.kt # review any NEW call site
 grep -rn "allowUnverifiedPlayback = true" app/src --include=*.kt                        # want: 1 (PlaybackAvailabilityProvider)
 ls app/src/full/res/drawable/app_logo_wordmark_*.xml | wc -l                              # want: 5 (themed wordmark aliases)
 ls app/src/main/java/com/nuvio/tv/updater/ 2>/dev/null                                    # want: no such directory
@@ -938,6 +943,50 @@ upstream's own CI workflow files (inert for us).
   check reruns on resume) and `AUTO_SUB stop: user explicitly selected current subtitle` every 500 ms
   under MPV (log noise).
 - **Known-failure baseline stays at 12** (1320 tests, 1 skipped), the same list as 0.9.2.
+
+### 1.0.0 → 1.1.0-beta.2 — first sync onto a pre-release; a new play path skipped the picker (2026-09-25)
+
+216 commits (152 non-merge, `8f5e9a963`→`d8c500175`, exactly the `1.1.0-beta.2` tag). GitHub marks both
+1.1.0 betas as pre-releases, the first time we merged one; Kevin chose to take it after an emulator test.
+Branch `sync1.1.0-beta.2`, merge `0372ac1d4`, **merged into kevbox but not released** (version still
+1.1.0 / 1051; `release.sh` bumps it). 295 files, +22k/-2.7k, of which about 4.4k are translations and 7k
+tests. **Three conflicts**, all in the table: the version block (upstream added
+`testInstrumentationRunner`, take that line), the `LibraryScreen` header, and `UpdateBanner.kt`
+(modify/delete). **No server migration**: zero `rpc()` changes; `ProfileSettingsSyncService` only adds a
+`plugin_settings` key inside the existing settings blob. No manifest change, no new hard-coded URL field.
+
+- **🛑 Policy leak: nested details auto-play.** Upstream moved Cast / Studio / similar-title navigation
+  into a new child host (`DetailChildHost.kt`) that draws its own `MetaDetailsScreen` and wires Play to
+  `navigateToDetailStream` with `manualSelection = false`. A member who opens a film from a cast list and
+  presses Play would skip the stream picker. Zero conflict, compiles, and every old standing grep stayed
+  green, because the old six `manualSelection = true` lines are all still there. Fixed in the merge commit
+  (table row above). **Lesson: grep for every `Screen.Stream.createRoute` / `navigateToDetailStream`
+  call site after a sync, not just count the known ones.**
+- **Inert new surfaces.** MDBList becomes a full tracker (OAuth device login, library, scrobble). It needs
+  `MDBLIST_CLIENT_ID`, which we leave unset (blank = "unavailable in this build"), and its sign-in lives in
+  `TrackingSettingsScreen`, hidden by `TRACKING -> false`. Every MDBList service checks
+  `isAuthenticated` before a network call. Simkl "More like this" sits under the same hidden screen.
+  **Custom Poster Source** is a new row under Settings → Layout, which we show: blank by default, set from
+  a phone through a local config page on port 8092 (same pattern as the stream-badge server). Harmless;
+  hide it if a member ever gets confused by it.
+- **Player memory retune** (about 30 commits, three reverts in the same week): target buffer default
+  150 → 50 MB, back buffer 15 s → 0, lower native-memory tiers, plus one-time migrations that rewrite stored
+  buffer prefs on existing installs. Upstream's own `NuvioExoPlayerPerformanceHelperTest` 1 GB / 2 GB tier
+  tests fail against the new tiers. Watch real 32-bit TVs after release for rebuffering.
+- **Tests:** 1663 run, 17 failures. That is **exactly** the set upstream's own tip fails when run alone
+  (1606 tests, 17 failures, compared name by name), so none are ours. Against our old baseline of 12: two
+  old failures now pass, and seven new ones are all upstream-own: `CatalogRepositoryTypeTest` (mockk stub
+  missing `getCustomPosterEnabledScreens`), `CustomPosterUrlResolverTest`, `NuvioExoPlayerPerformanceHelperTest`
+  ×3 (tier values), `PluginBinaryFetchTest` ×2 (`NoSuchMethodException`, reflection on a changed
+  signature). **New baseline: 17.**
+- **Emulator:** existing signed-in install upgraded in place, home rendered (OCEAN, Continue Watching
+  populated), one `Loaded N cached manifests` line, `MemberConfigService` applied 7 rows, zero 429s. Main
+  Detail Play showed the picker; an H.264 WEB-DL (Torrentio via Premiumize) played on stock ExoPlayer for
+  90 s+ with the buffer steady at 50 s ahead; addon English subtitles loaded (933 cues) and Kevin confirmed
+  them on screen. No telemetry failure logged (the repository logs only failures). Pre-existing noise:
+  `PluginSyncService` "Could not find the table public.plugins" (we never created it; file untouched).
+  Not exercised on a device: the nested-detail Play fix (covered by code review), MPV fallback, real
+  32-bit TV memory.
 
 ## Verify before shipping
 
