@@ -23,7 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -204,7 +204,7 @@ fun AboutSettingsContent(
                                 SettingsActionRow(
                                     title = stringResource(R.string.support_nuvio_name),
                                     subtitle = stringResource(R.string.about_supporters_contributors_subtitle),
-                                    trailingIcon = Icons.Default.ChevronRight,
+                                    trailingIcon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     onClick = onNavigateToSupportersContributors
                                 )
                             }
