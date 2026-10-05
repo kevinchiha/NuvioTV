@@ -1028,7 +1028,10 @@ open class MainActivity : ComponentActivity() {
                                         contentId = launchContentId,
                                         contentName = launchName,
                                         returnToDetailOnBack = launchContentType.equals("series", ignoreCase = true),
-                                        returnToHomeOnBack = true
+                                        returnToHomeOnBack = true,
+                                        // KevBox FORK DIVERGENCE: a launch from the TV home-screen
+                                        // Continue Watching row still opens the stream picker.
+                                        manualSelection = true
                                     )
                                 )
                             } else {
@@ -1066,7 +1069,10 @@ open class MainActivity : ComponentActivity() {
                                     contentId = contentId,
                                     contentName = name,
                                     returnToDetailOnBack = contentType.equals("series", ignoreCase = true),
-                                    returnToHomeOnBack = true
+                                    returnToHomeOnBack = true,
+                                    // KevBox FORK DIVERGENCE: a launch from the TV home-screen
+                                    // Watch Next row still opens the stream picker.
+                                    manualSelection = true
                                 )
                             )
                         } else {

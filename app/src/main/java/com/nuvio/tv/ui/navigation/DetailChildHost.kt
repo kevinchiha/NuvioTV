@@ -275,6 +275,8 @@ internal fun DetailChildHost(
                             parentNavController.navigateToDetailStream(
                                 videoId, contentType, contentId, title, poster, backdrop, logo,
                                 season, episode, episodeName, genres, year, runtime, contentLanguage,
+                                // KevBox FORK DIVERGENCE: forced picker on "Start from beginning" too.
+                                manualSelection = true,
                                 startFromBeginning = true
                             )
                         }

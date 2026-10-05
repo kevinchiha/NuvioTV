@@ -1,6 +1,5 @@
 package com.nuvio.tv.ui.screens.player
 
-import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.media3.common.util.UnstableApi
@@ -729,39 +728,31 @@ private fun PlayerRuntimeController.openExternalStreamInBrowser(
         return true
     }
 
-    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl))
-        .addCategory(Intent.CATEGORY_BROWSABLE)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-    runCatching {
-        context.startActivity(browserIntent)
-    }.onSuccess {
-        _uiState.update {
-            if (fromEpisodePanel) {
-                it.copy(
-                    showEpisodesPanel = false,
-                    showEpisodeStreams = false,
-                    isLoadingEpisodeStreams = false,
-                    episodeStreamsError = null
-                )
-            } else {
-                it.copy(
-                    showSourcesPanel = false,
-                    isLoadingSourceStreams = false,
-                    sourceStreamsError = null
-                )
-            }
-        }
-    }.onFailure { error ->
-        _uiState.update {
-            if (fromEpisodePanel) {
-                it.copy(episodeStreamsError = error.message ?: context.getString(com.nuvio.tv.R.string.player_stream_error_open_external_link_failed))
-            } else {
-                it.copy(sourceStreamsError = error.message ?: context.getString(com.nuvio.tv.R.string.player_stream_error_open_external_link_failed))
-            }
+    // KevBox FORK DIVERGENCE: launch NO intent for an external entry picked in the player's
+    // Sources or Episodes panel. Same reason as consumeExternalStreamClick in StreamScreen.kt:
+    // these entries are AIOStreams info cards ("Removal Reasons", "Statistics"), and an
+    // ACTION_VIEW / CATEGORY_BROWSABLE intent gets taken by the sideloaded Downloader app, which
+    // traps the member until they force-close KevBox. We close the panel exactly as upstream did
+    // after a successful launch (the caller has already cancelled the panel's stream search) and
+    // return true so nothing plays; the current video keeps going. On a future sync, drop upstream's
+    // Intent/startActivity block again and keep `import android.net.Uri` (still used further down)
+    // but not `import android.content.Intent`.
+    _uiState.update {
+        if (fromEpisodePanel) {
+            it.copy(
+                showEpisodesPanel = false,
+                showEpisodeStreams = false,
+                isLoadingEpisodeStreams = false,
+                episodeStreamsError = null
+            )
+        } else {
+            it.copy(
+                showSourcesPanel = false,
+                isLoadingSourceStreams = false,
+                sourceStreamsError = null
+            )
         }
     }
-
     return true
 }
 

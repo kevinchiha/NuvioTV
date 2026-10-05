@@ -239,8 +239,11 @@ private fun PlaybackNavHost(
                         Toast.makeText(context, R.string.playback_unavailable_message, Toast.LENGTH_SHORT).show()
                         return@onContinueWatchingStartFromBeginning
                     }
+                    // KevBox FORK DIVERGENCE: forced picker here too. startFromBeginning alone does not
+                    // force it, so with "Auto-play first source" or "Reuse last link" switched on this
+                    // path would play without the picker.
                     navController.navigate(
-                        createContinueWatchingRoute(item, startFromBeginning = true)
+                        createContinueWatchingRoute(item, manualSelection = true, startFromBeginning = true)
                     )
                 },
                 onContinueWatchingPlayManually = onContinueWatchingPlayManually@{ item ->
@@ -424,6 +427,9 @@ private fun PlaybackNavHost(
                             contentId = contentId,
                             contentName = title,
                             runtime = runtime,
+                            // KevBox FORK DIVERGENCE: forced picker on "Start from beginning" too
+                            // (detail screen and, since 1.1.0-beta.4, the shuffle dialog).
+                            manualSelection = true,
                             startFromBeginning = true,
                             returnToDetailOnBack = contentType.equals("series", ignoreCase = true),
                             contentLanguage = contentLanguage
