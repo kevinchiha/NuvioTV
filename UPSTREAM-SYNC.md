@@ -105,7 +105,8 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `AboutScreen.kt` | our `if (BuildConfig.FEATURE_TELEMETRY)` §11 privacy-notice block | upstream's added imports + tokenized spacer (`NuvioTheme.spacing.xxs`) |
 | `AuthSignInScreen.kt` | our `EmailPasswordForm(...)` sign-in body + `AuthEmailOnboardingScreen` + the `androidx.compose.runtime.*` and **`import androidx.hilt.navigation.compose.hiltViewModel`** imports — **discard** upstream's QR `Button`/`Text` header (we replaced that flow) | nothing here — but **0.7.16 trap:** the import-block auto-merge takes upstream's version (which doesn't use `hiltViewModel`) and **silently drops that import** while our body calls `hiltViewModel()` twice → compile break, no marker (see "release-only breakage" — same class as the `NuvioColors` one). Re-add the import; also drop the now-unused `Button`/`ButtonDefaults` imports |
 | `NuvioNavHost.kt` (Settings block) | route the dormant account entry to `Screen.AuthSignIn` (QR retired); **force `onNavigateToAddons`/`onNavigateToPlugins` to no-op `{}`** (see policy-regression callout) | **keep both** — take upstream's new `onNavigateToPlugins` param and any other added route callbacks |
-| `SettingsScreen.kt` | **hide the whole `CONTENT_DISCOVERY` category** (`SettingsCategory.CONTENT_DISCOVERY -> false` in the `visibleSections` filter) — it holds only the operator-forbidden Addons + Plugins rows. 0.7.16 rewrote this file heavily (+551 lines) but the one-line suppression survived — **re-confirm it after every sync**. **0.8.1:** upstream renamed the enum `TRAKT`→`TRACKING`; our kevbox-added `SettingsCategory.TRAKT -> false` line merges cleanly but **fails to compile** — rename it to `TRACKING -> false` (this also hides the new combined Trakt/Simkl `TrackingSettingsScreen`, which is what policy wants) | n/a — KevBox never edits this file except to suppress those categories |
+| `SettingsScreen.kt` (**rewritten for 1.1.0-beta.4**, read this first) | upstream moved category visibility into `SettingsCatalog.visibleSettingsCategories()` (`else -> true`), so our old `visibleSections` filter is gone. Keep **`KEVBOX_HIDDEN_SETTINGS_CATEGORIES`** (PROFILES, CONTENT_DISCOVERY, TRACKING) and the `.filterNot { it in KEVBOX_HIDDEN_SETTINGS_CATEGORIES }` on the result inside the `visibleCategories` `remember`. Filter `visibleCategories`, not `visibleSections`: the rail places its group dividers with `visibleCategories.startsNewGroup(index)`. Never edit `SettingsCatalog.kt` itself; upstream's `SettingsCatalogTest` pins it. Taking upstream's side of this hunk alone compiles and shows Addons, Plugins, Tracking and Profiles again | take upstream's restructure. The next row describes the pre-beta.4 shape and is kept for history |
+| `SettingsScreen.kt` (before 1.1.0-beta.4) | **hide the whole `CONTENT_DISCOVERY` category** (`SettingsCategory.CONTENT_DISCOVERY -> false` in the `visibleSections` filter) — it holds only the operator-forbidden Addons + Plugins rows. 0.7.16 rewrote this file heavily (+551 lines) but the one-line suppression survived — **re-confirm it after every sync**. **0.8.1:** upstream renamed the enum `TRAKT`→`TRACKING`; our kevbox-added `SettingsCategory.TRAKT -> false` line merges cleanly but **fails to compile** — rename it to `TRACKING -> false` (this also hides the new combined Trakt/Simkl `TrackingSettingsScreen`, which is what policy wants) | n/a — KevBox never edits this file except to suppress those categories |
 | `AndroidManifest.xml` (0.7.16) | **keep `allowBackup="true"` + `dataExtractionRules="@xml/data_extraction_rules"` + `fullBackupContent="@xml/full_backup_content"`** — these are KevBox-authored rules that **exclude the access-kill-switch DataStores** (`access_control`/`device_guard`) from cloud backup + device transfer, so a locked-out member can't clone a "last-verified" grace state or duplicate a device id. They only work with backup ON | **discard** upstream's `allowBackup="false"` (it would orphan our exclusion rules) |
 | `WatchedItemsSyncService.kt` (0.7.16) | our **rev-4 Option B union** — the first cloud-restore snapshot for a never-synced profile must `replaceWithRemoteItems(..., unionWhenNeverSynced = true)` so it doesn't wipe a family member's existing watch history. Upstream extracted a shared `pullSnapshotFromRemote(...)` helper — **put the `unionWhenNeverSynced = true` INSIDE that helper** so all restore paths inherit it (the flag is a no-op for already-synced profiles, so it's safe universally) | take upstream's delta-cursor resilience refactor (the `try { fetchDeltaCursor } catch { snapshot fallback }`) |
 | `StreamScreen.kt` (external-stream tap) | **replace upstream's `openExternalInBrowser(playbackInfo)` with our `consumeExternalStreamClick(playbackInfo)` = `return playbackInfo.isExternal`** — launch NO intent. External-URL entries in the stream list are AIOStreams info cards ("Removal Reasons"/"Statistics", externalUrl set + url == null); upstream's `Intent.ACTION_VIEW`/`CATEGORY_BROWSABLE` gets hijacked by the sideloaded Downloader app and traps the user (force-close required). Same contract (true == consumed), so the two callers (`routePlayback`/`routeAutoPlay`) only need the rename. **Also re-remove the imports it drags back:** `android.content.Intent`, `android.net.Uri`, `com.nuvio.tv.core.player.ExternalPlayerLauncher`. Full rationale is in the `// KevBox FORK DIVERGENCE` block on the function | take upstream's other stream-list changes; this is the only line that matters |
@@ -128,6 +129,10 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `ui/navigation/DetailChildHost.kt` (1.1.0-beta.2) | the nested-detail `MetaDetailsScreen`'s `onPlayClick` is a lambda that calls `navigateToDetailStream(..., manualSelection = true)`. Upstream passes the bare reference `parentNavController::navigateToDetailStream`, whose default is `manualSelection = false`, so a title opened from cast / similar / studio rows auto-plays past our forced stream picker. No conflict marks it: the file is new, and our six `manualSelection = true` lines in `NuvioNavHost` all survive | everything else in the host (child back stack, nested-depth cap, focus restore) |
 | `LibraryScreen.kt` header (1.1.0-beta.2) | our `app_logo_wordmark` `Image`. Upstream's side of the hunk is the source-label `Text` with a new `MDBLIST` line, and it prints `"NUVIO"` for a signed-in account | n/a for this hunk |
 | `app/src/full/.../updater/ui/UpdateBanner.kt` (1.1.0-beta.2) | stays **deleted** (modify/delete conflict: upstream touched one text style). `git rm` it | nothing |
+| `NuvioNavHost.kt` settings block (1.1.0-beta.4) | `onNavigateToTracking = { }` and `onNavigateToManageProfiles = { }`, beside the Addons/Plugins no-ops. Second layer behind `KEVBOX_HIDDEN_SETTINGS_CATEGORIES`; upstream wires both to live routes | other callbacks |
+| `PlaybackSettingsSections.kt`, `EssentialPlaybackSettingsContent.kt`, `core/torrent/TorrentService.kt` (1.1.0-beta.4) | **no P2P on family TVs.** Keep `.filterNot { it == PlaybackSection.P2P }` on `visiblePlaybackSections(...)` (filter at the caller; upstream's `SettingsStructureTest` pins the function), `SHOW_ESSENTIAL_P2P_TOGGLE = false`, and the `check(settings.p2pEnabled)` at the top of `ensureEngine()` with its `kevbox_p2p_disabled` string. Upstream's new "Clear torrent cache" row starts the Nuvio Engine (DHT, UPnP, LAN broadcast) even with P2P off, and in-player source/episode switches never check consent. `ensureEngine()` is the only place `NuvioEngine.create()` runs, so one check covers every caller | the engine, its settings model and its tests |
+| `PlayerRuntimeControllerStreams.kt` `openExternalStreamInBrowser` (1.1.0-beta.4, gap predates it) | no `Intent`/`startActivity`: close the panel and `return true`. Same Downloader hijack as the `StreamScreen.kt` row, reached from the player's Sources and Episodes panels. Drop `import android.content.Intent`, keep `android.net.Uri` (used further down) | the rest of the file |
+| "Start from beginning" + TV home-screen launches (1.1.0-beta.4, gap predates it) | `manualSelection = true` next to `startFromBeginning = true` in `NuvioNavHost` (Continue Watching and Detail) and `DetailChildHost`, and in **both** `MainActivity` Stream launches (channel row `launchMode == "stream"` and the `pendingLaunch` Watch Next intent). `StreamScreenViewModel` treats the two flags separately, so without it a member who turns on "Auto-play first source" or "Reuse last link" skips the picker. The external-player `autoPlayNext` route in `MainActivity` stays as is: that is binge | n/a |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -325,12 +330,19 @@ look as new navigation routes.
 ```bash
 grep -rn "navigate(Screen.AddonManager\|navigate(Screen.Plugins" app/src --include=*.kt   # want: empty
 grep -n "stremio" app/src/main/AndroidManifest.xml                                        # want: comment only
-grep -n "CONTENT_DISCOVERY ->\|TRACKING ->" app/src/.../SettingsScreen.kt                 # want: -> false
+grep -A4 "KEVBOX_HIDDEN_SETTINGS_CATEGORIES = setOf" app/src/.../SettingsScreen.kt       # want: PROFILES, CONTENT_DISCOVERY, TRACKING
+grep -c "in KEVBOX_HIDDEN_SETTINGS_CATEGORIES" app/src/.../SettingsScreen.kt             # want: 1 (the filter is applied)
+# (the old "CONTENT_DISCOVERY ->" grep now also matches upstream's own lines and passes even when nothing is hidden)
+grep -n "onNavigateToTracking = \|onNavigateToManageProfiles = " app/src/.../NuvioNavHost.kt # want: both "{ }"
+grep -n "PlaybackSection.P2P }" app/src/.../settings/PlaybackSettingsSections.kt           # want: 1 (P2P section filtered)
+grep -n "check(settings.p2pEnabled)" app/src/.../core/torrent/TorrentService.kt           # want: 1
+grep -n "startActivity" app/src/.../player/PlayerRuntimeControllerStreams.kt              # want: empty
+grep -c "manualSelection = true" app/src/.../MainActivity.kt                              # want: 2 (TV home-screen launches)
 grep -rn "SHOW_LAUNCHER_ARTWORK_PICKER" app/src --include=*.kt                            # want: still false
 grep -rn "supportNuvioEnabled" app/src/full/.../AppFeaturePolicy.kt                       # want: false
 grep -rn "UpdateBannerHost\|AbiSelector\|VersionUtils" app/src --include=*.kt             # want: empty
-grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                             # want: 6 hits, not 4
-grep -c "manualSelection = true" app/src/.../ui/navigation/DetailChildHost.kt             # want: 2 (1.1.0 nested details)
+grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                             # want: 8 (6 + 2 start-from-beginning, 1.1.0-beta.4)
+grep -c "manualSelection = true" app/src/.../ui/navigation/DetailChildHost.kt             # want: 3 (nested details incl. start-from-beginning)
 grep -rn "Screen.Stream.createRoute\|::navigateToDetailStream" app/src/main --include=*.kt # review any NEW call site
 grep -rn "allowUnverifiedPlayback = true" app/src --include=*.kt                        # want: 1 (PlaybackAvailabilityProvider)
 ls app/src/full/res/drawable/app_logo_wordmark_*.xml | wc -l                              # want: 5 (themed wordmark aliases)
@@ -987,6 +999,54 @@ tests. **Three conflicts**, all in the table: the version block (upstream added
   `PluginSyncService` "Could not find the table public.plugins" (we never created it; file untouched).
   Not exercised on a device: the nested-detail Play fix (covered by code review), MPV fallback, real
   32-bit TV memory.
+
+### 1.1.0-beta.2 → 1.1.0-beta.4 — settings rebuilt, TorrServer replaced, P2P blocked (2026-10-05)
+
+151 non-merge commits: the `1.1.0-beta.4` tag plus two engine fixes that landed an hour later
+(`e9e3e40cd` engine 0.1.4, `19ecc9bf9` cache path), so `upstream/dev` = `19ecc9bf9`. Still a GitHub
+pre-release. Branch `sync1.1.0-beta.4` off the unreleased beta.2 merge; merge `519ad4b42`, fork fixes
+`023b08372` and `b0ec37672`. **Three conflicts** (version hunk, `AboutScreen` Licenses row = keep ours,
+`SettingsScreen`). **No server migration**: zero `rpc()` changes, `core/sync` untouched, no new
+`buildConfigField`, manifest unchanged.
+
+- **🛑 Settings rebuilt, and taking upstream's side brings hidden categories back.** Upstream moved
+  category visibility into `SettingsCatalog.visibleSettingsCategories()` and grouped the rail. Our side of
+  the hunk no longer compiles; upstream's side compiles and shows Addons, Plugins, Tracking and Profiles.
+  Resolved with `KEVBOX_HIDDEN_SETTINGS_CATEGORIES` (table row). The old standing grep for
+  `CONTENT_DISCOVERY ->` would have passed on the broken resolution, because upstream's own spec lines
+  match it; replaced.
+- **🛑 TorrServer replaced by the Nuvio Engine** (`app/libs/lib-nuvio-engine-android-0.1.4.aar`,
+  libtorrent, GPL-3). Has armeabi-v7a (7.5 MB `.so`), loads its library only when first created, adds no
+  permissions or services. It joins the public DHT, asks the router for a port (UPnP/NAT-PMP), broadcasts
+  on the LAN and adds 20 hardcoded public trackers, but only while it runs. Upstream's new "Clear torrent
+  cache" row starts it with P2P off. Family streams are Torrentio + Premiumize with `nodownloadlinks`, so
+  KevBox now blocks P2P outright (table row). Side effect worth having: the 32-bit release APK dropped from
+  ~73 MB to **52.9 MB** (`libtorrserver.so` was 24.7 MB compressed).
+- **Two older gaps closed in the same branch** (both predate this sync, separate commit `b0ec37672`): the
+  player's Sources/Episodes panels opened AIOStreams info cards with a browser intent (Downloader
+  hijack), and "Start from beginning" plus the TV home-screen launches skipped the picker when a member
+  had turned on "Auto-play first source" or "Reuse last link". Table rows above.
+- **Inert or off by default:** episode shuffle (every entry point goes through the forced picker),
+  preload next-episode sources (off; one extra cached search per episode when on, the only new stream
+  request call site), background trailers (off), subtitle AutoSync (off, on-device), YouTube-id streams
+  (same extractor as trailers), MDBList ratings on the hero (need a key). IMDb episode ratings now run on
+  Continue Watching cards with no setting, but `IMDB_TAPFRAME_API_BASE_URL`/`IMDB_RATINGS_API_BASE_URL`
+  are unset, so they hit `http://localhost/` on the TV and fail quietly. **If those two URLs are ever
+  set, every member's watched-show IMDb ids go to that host.**
+- **Tests: 1899 run, 2 failures**, both long-known (`LocalhostZeroCopyDataSourceTest.testHttpError404`,
+  `DefaultAllocatorTest.testLateReleasedAllocationsMemoryLeak`), files byte-identical to upstream. Upstream
+  fixed its own stale tests (`2f44fa38f`, `c974b5a39`, `4bdd2abba`), so **the baseline drops from 17 to 2**.
+  Any third failure after the next sync is worth a look.
+- **Gates:** `compileFullDebugKotlin`, `assembleFullRelease --dry-run`, and a full signed R8
+  `assembleFullRelease` (cert SHA-256 `9A:E0:71:8C…1D:6F`, matches) all green. All standing greps pass; 40
+  `KevBox FORK DIVERGENCE` markers (27 before).
+- **Emulator:** upgraded in place over the signed-in beta.2 build, home in OCEAN with Continue Watching
+  filled. Settings rail = Account, Appearance, Layout, Playback, Integrations, Advanced, About; Playback
+  ends at Buffer & Network (no P2P). A Continue Watching card opened the picker; an x264 WEB-DL via
+  Torrentio/Premiumize resumed at 14:13 and played 80 s+ on ExoPlayer with the buffer ~50 s ahead and
+  subtitles on screen. Not exercised on a device: the start-from-beginning and Watch Next picker fixes
+  (needs a member setting changed, which would sync to Kevin's real TVs), the player-panel info-card fix,
+  MPV fallback, real 32-bit TV memory.
 
 ## Verify before shipping
 
