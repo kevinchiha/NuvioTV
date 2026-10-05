@@ -306,6 +306,11 @@ class TorrentService @Inject constructor(
 
     private suspend fun ensureEngine(): NuvioEngine {
         val settings = torrentSettings.settings.first()
+        // KevBox FORK DIVERGENCE: never start the torrent engine while P2P is off. This is the
+        // only place NuvioEngine.create() runs, so the check covers every caller: the settings
+        // "Clear torrent cache" row (which upstream lets start the engine with P2P off) and the
+        // in-player source / episode switches that skip StreamScreen's consent check.
+        check(settings.p2pEnabled) { context.getString(R.string.kevbox_p2p_disabled) }
         val configurationKey = EngineConfigurationKey(
             uploadEnabled = settings.enableUpload,
             torrentProfile = settings.torrentProfile,

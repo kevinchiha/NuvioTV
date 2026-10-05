@@ -1198,7 +1198,11 @@ private fun PlaybackNavHost(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 showBuiltInHeader = !hideBuiltInHeaders,
-                onNavigateToTracking = { navController.navigate(Screen.Tracking.route) },
+                // KevBox FORK DIVERGENCE: Tracking (Trakt / Simkl / MDBList sign-in) and profile management
+                // are hidden from members. Their categories are filtered out in SettingsScreen
+                // (KEVBOX_HIDDEN_SETTINGS_CATEGORIES); these no-ops are the second layer, added in the
+                // 1.1.0-beta.4 sync when upstream moved category visibility into SettingsCatalog.
+                onNavigateToTracking = { },
                 // KevBox: addon + plugin management is operator-managed (kevbox-admin / member_addon);
                 // family members must not manage addons/plugins on-device. Upstream (0.7.8) surfaced both
                 // under Settings → Content Discovery — neutralize the nav here. The whole Content Discovery
@@ -1208,7 +1212,7 @@ private fun PlaybackNavHost(
                 onNavigateToPlugins = { },
                 // KevBox: QR sign-in retired — route the (now dormant) account entry to email/password sign-in.
                 onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthSignIn.route) },
-                onNavigateToManageProfiles = { navController.navigate(Screen.ManageProfiles.route) },
+                onNavigateToManageProfiles = { },
                 onNavigateToSupportersContributors = {
                     navController.navigate(Screen.SupportersContributors.route)
                 },

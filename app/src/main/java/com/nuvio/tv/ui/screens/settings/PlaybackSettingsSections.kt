@@ -36,7 +36,12 @@ internal fun PlaybackSettingsSections(
     onClearTorrentCache: () -> Unit,
     initialFocusRequester: FocusRequester? = null
 ) {
-    val sections = visiblePlaybackSections(playerSettings)
+    // KevBox FORK DIVERGENCE: no P2P section on family TVs. Members stream through debrid links
+    // (Torrentio + Premiumize, nodownloadlinks), so nobody needs the torrent engine, and the
+    // section's "Clear torrent cache" row would start it (DHT, UPnP, LAN broadcast) even with P2P
+    // off. Filtered here rather than in visiblePlaybackSections() so upstream's
+    // SettingsStructureTest keeps its expectations. TorrentService.ensureEngine() is the second layer.
+    val sections = visiblePlaybackSections(playerSettings).filterNot { it == PlaybackSection.P2P }
     var expandedSections by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val listState = rememberLazyListState()
 

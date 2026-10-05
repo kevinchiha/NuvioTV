@@ -27,6 +27,9 @@ import com.nuvio.tv.data.local.SubtitleLanguageOption
 import com.nuvio.tv.ui.components.P2pConsentDialog
 import kotlinx.coroutines.launch
 
+// KevBox FORK DIVERGENCE: see the P2P toggle below.
+private const val SHOW_ESSENTIAL_P2P_TOGGLE = false
+
 @Composable
 fun EssentialPlaybackSettingsContent(
     initialFocusRequester: FocusRequester? = null,
@@ -106,7 +109,10 @@ fun EssentialPlaybackSettingsContent(
                         },
                         enabled = settings != null
                     )
-                    SettingsToggleRow(
+                    // KevBox FORK DIVERGENCE: P2P toggle hidden on family TVs (see the P2P
+                    // filter in PlaybackSettingsSections.kt). Upstream's row kept below, unreachable,
+                    // so future merges of this file stay clean.
+                    if (SHOW_ESSENTIAL_P2P_TOGGLE) SettingsToggleRow(
                         title = stringResource(R.string.essential_p2p_streams),
                         subtitle = stringResource(R.string.essential_p2p_streams_subtitle),
                         checked = torrentSettings?.p2pEnabled == true,
