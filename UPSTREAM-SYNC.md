@@ -1005,7 +1005,17 @@ tests. **Three conflicts**, all in the table: the version block (upstream added
 151 non-merge commits: the `1.1.0-beta.4` tag plus two engine fixes that landed an hour later
 (`e9e3e40cd` engine 0.1.4, `19ecc9bf9` cache path), so `upstream/dev` = `19ecc9bf9`. Still a GitHub
 pre-release. Branch `sync1.1.0-beta.4` off the unreleased beta.2 merge; merge `519ad4b42`, fork fixes
-`023b08372` and `b0ec37672`. **Three conflicts** (version hunk, `AboutScreen` Licenses row = keep ours,
+`023b08372` and `b0ec37672`. **Released as KevBox `1.2.0-beta.4` / versionCode 1052** (bump `9a750be18`,
+sha256 `89d008c3…`, 52.9 MB armeabi-v7a), shipping the beta.2 and beta.4 merges together. The 441-commit
+push went through cleanly after staging upstream's commits on a temporary branch first.
+
+Subtitle AutoSync (new in this range) stays **off by default** on purpose (Kevin, 2026-10-05). It can
+only fix timing by comparing against subtitles built into the video, shows a "Sync failed" message
+whenever there are none (the South Park test file had zero), and it is two weeks old upstream. If it is
+ever turned on, flip the `false` defaults in `AutoSyncPreferences.kt` and hide its failure messages on
+KevBox in the same change.
+
+**Three conflicts** (version hunk, `AboutScreen` Licenses row = keep ours,
 `SettingsScreen`). **No server migration**: zero `rpc()` changes, `core/sync` untouched, no new
 `buildConfigField`, manifest unchanged.
 
