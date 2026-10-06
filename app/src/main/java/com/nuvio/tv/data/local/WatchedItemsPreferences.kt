@@ -12,6 +12,7 @@ import com.nuvio.tv.domain.model.WatchedMutationKey
 import com.nuvio.tv.domain.model.mutationKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged // KevBox: see observeAllItems
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
@@ -77,13 +78,19 @@ class WatchedItemsPreferences @Inject constructor(
         observeAllItems(pid)
     }
 
+    // KevBox FORK DIVERGENCE: upstream re-parsed every JSON string on every store emission, per
+    // reader. Skip emissions where the watched set is unchanged and reuse already-parsed items.
+    // Why and merge notes: KevboxParsedJsonCache.kt.
+    private val kevboxParsedItems = KevboxParsedJsonCache { json ->
+        runCatching { gson.fromJson(json, WatchedItem::class.java) }.getOrNull()
+    }
+
     fun observeAllItems(profileId: Int): Flow<List<WatchedItem>> {
-        return store(profileId).data.map { preferences ->
-            val raw = preferences[watchedItemsKey] ?: emptySet()
-            raw.mapNotNull { json ->
-                runCatching { gson.fromJson(json, WatchedItem::class.java) }.getOrNull()
-            }
-        }.flowOn(Dispatchers.Default)
+        return store(profileId).data
+            .map { preferences -> preferences[watchedItemsKey] ?: emptySet() }
+            .distinctUntilChanged()
+            .map { raw -> kevboxParsedItems.parseAll(raw) }
+            .flowOn(Dispatchers.Default)
     }
 
     fun isWatched(contentId: String, season: Int? = null, episode: Int? = null): Flow<Boolean> {
