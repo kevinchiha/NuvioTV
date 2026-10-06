@@ -1,5 +1,9 @@
 package com.nuvio.tv.data.local
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -34,6 +38,28 @@ class KevboxParsedJsonCacheTest {
     @Test
     fun `entries that fail to parse are skipped`() {
         assertEquals(listOf("A"), cache.parseAll(setOf("a", "bad")))
+    }
+
+    @Test
+    fun `readers arriving together at a cold cache parse the list once`() {
+        // App start: many screens subscribe to the watched list before the first parse finishes.
+        val parses = AtomicInteger()
+        val firstParseStarted = CountDownLatch(1)
+        val slowCache = KevboxParsedJsonCache { json ->
+            parses.incrementAndGet()
+            firstParseStarted.countDown()
+            Thread.sleep(50) // keep the first reader busy while the second arrives
+            json
+        }
+        val raw = setOf("a", "b", "c")
+
+        val first = thread { slowCache.parseAll(raw) }
+        firstParseStarted.await(5, TimeUnit.SECONDS)
+        val second = thread { slowCache.parseAll(raw) }
+        first.join(5_000)
+        second.join(5_000)
+
+        assertEquals(raw.size, parses.get())
     }
 
     @Test
