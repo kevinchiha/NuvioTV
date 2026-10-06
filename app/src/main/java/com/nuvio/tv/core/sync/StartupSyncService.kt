@@ -442,7 +442,8 @@ class StartupSyncService @Inject constructor(
             val syncState = startupSyncPreferences.getState(profileId)
             // KevBox FORK DIVERGENCE (1 of 2): upstream also required the in-memory lastPulledKey /
             // lastPulledAtMs, which reset on every process death, so each cold start re-downloaded
-            // the whole watch history. Decide from the on-disk full-pull record only.
+            // the whole watch history. Decide from the on-disk full-pull record only, with a 24 h
+            // window instead of FULL_STARTUP_PULL_TTL_MS (6 h).
             // Why and merge notes: KevboxWarmStartupSync.kt.
             val canUseWarmSync = canUseKevboxWarmStartupSync(
                 force = force,
@@ -450,7 +451,7 @@ class StartupSyncService @Inject constructor(
                 includeProfileSettings = includeProfileSettings,
                 state = syncState,
                 nowMs = System.currentTimeMillis(),
-                ttlMs = FULL_STARTUP_PULL_TTL_MS
+                ttlMs = KEVBOX_FULL_STARTUP_PULL_TTL_MS
             )
 
             if (canUseWarmSync) {

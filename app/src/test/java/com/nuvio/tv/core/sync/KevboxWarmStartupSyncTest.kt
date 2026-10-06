@@ -30,14 +30,15 @@ class KevboxWarmStartupSyncTest {
         force: Boolean = false,
         userId: String = "user",
         includeProfileSettings: Boolean = true,
-        nowMs: Long = now
+        nowMs: Long = now,
+        ttlMs: Long = ttl
     ) = canUseKevboxWarmStartupSync(
         force = force,
         userId = userId,
         includeProfileSettings = includeProfileSettings,
         state = state,
         nowMs = nowMs,
-        ttlMs = ttl
+        ttlMs = ttlMs
     )
 
     @Test
@@ -65,6 +66,15 @@ class KevboxWarmStartupSyncTest {
     fun `a full pull older than the ttl means a full pull`() {
         assertFalse(decide(state = state(lastFullPullAtMs = now - ttl)))
         assertTrue(decide(state = state(lastFullPullAtMs = now - ttl + 1)))
+    }
+
+    @Test
+    fun `kevbox keeps a full pull good for a day so the first evening open stays quick`() {
+        val hour = 60 * 60 * 1000L
+        val dayTtl = KEVBOX_FULL_STARTUP_PULL_TTL_MS
+
+        assertTrue(decide(state = state(lastFullPullAtMs = now - 23 * hour), ttlMs = dayTtl))
+        assertFalse(decide(state = state(lastFullPullAtMs = now - 24 * hour), ttlMs = dayTtl))
     }
 
     @Test

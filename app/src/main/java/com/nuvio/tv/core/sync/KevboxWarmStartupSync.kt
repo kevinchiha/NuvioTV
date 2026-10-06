@@ -12,13 +12,22 @@ import com.nuvio.tv.data.local.StartupSyncState
  * caller asks for profile settings. So every startup re-downloaded and rewrote the member's whole
  * watched-items and watch-progress history (measured 2026-10-06 on a TCL TV: 3,321 + 1,048 rows,
  * ~13 s of background CPU, visible lag). This decision reads only the full-pull record that
- * StartupSyncPreferences already saves on disk, so the 6 h full-pull TTL works across restarts.
+ * StartupSyncPreferences already saves on disk, so the full-pull TTL works across restarts.
  * Do not drop this just because upstream "fixes process death"; check the warm path is reachable.
  *
  * Wired in at two marked spots in StartupSyncService.kt (pullRemoteData and pullWarmRemoteData).
  * On an upstream merge: keep both markers. If upstream rewrites canUseWarmSync or stops calling
  * markFullPull from the warm path, re-read this note and drop whichever half upstream now covers.
  */
+
+/**
+ * KevBox runs the safety-net full pull at most once a day instead of upstream's 6 h
+ * (FULL_STARTUP_PULL_TTL_MS, now unused by the warm decision; left in place to keep the diff small).
+ * With 6 h, the first open of each evening still re-downloaded the whole history. The delta syncs
+ * fall back to a snapshot on their own when the cursor is missing or the delta call fails.
+ */
+internal const val KEVBOX_FULL_STARTUP_PULL_TTL_MS = 24 * 60 * 60 * 1000L
+
 internal fun canUseKevboxWarmStartupSync(
     force: Boolean,
     userId: String,
