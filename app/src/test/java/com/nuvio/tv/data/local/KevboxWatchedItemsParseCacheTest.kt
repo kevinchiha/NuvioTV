@@ -57,6 +57,19 @@ class KevboxWatchedItemsParseCacheTest {
     }
 
     @Test
+    fun `getAllItems reuses the objects already parsed`() = runTest {
+        // The delta sync calls getAllItems twice per run only to log a count.
+        val preferences = harness(item("a"))
+
+        val first = preferences.getAllItems(1).single()
+        val second = preferences.getAllItems(1).single()
+        val observed = preferences.observeAllItems(1).first().single()
+
+        assertSame(first, second)
+        assertSame(first, observed)
+    }
+
+    @Test
     fun `changing another key in the same store does not re-emit the watched list`() = runTest {
         val preferences = harness(item("a"))
         val emissions = Channel<List<WatchedItem>>(Channel.UNLIMITED)

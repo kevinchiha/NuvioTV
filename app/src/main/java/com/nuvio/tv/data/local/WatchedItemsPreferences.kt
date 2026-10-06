@@ -184,9 +184,9 @@ class WatchedItemsPreferences @Inject constructor(
 
     suspend fun getAllItems(profileId: Int = profileManager.activeProfileId.value): List<WatchedItem> {
         val preferences = store(profileId).data.first()
-        return (preferences[watchedItemsKey] ?: emptySet()).mapNotNull { raw ->
-            runCatching { gson.fromJson(raw, WatchedItem::class.java) }.getOrNull()
-        }
+        // KevBox FORK DIVERGENCE: upstream parsed every string here too, and the delta sync calls
+        // this twice per run just to log a count. Same cache as observeAllItems.
+        return kevboxParsedItems.parseAll(preferences[watchedItemsKey] ?: emptySet())
     }
 
     suspend fun mergeRemoteItems(remoteItems: List<WatchedItem>, profileId: Int = profileManager.activeProfileId.value) {
