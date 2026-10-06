@@ -440,13 +440,18 @@ class StartupSyncService @Inject constructor(
         try {
             val profileId = profileManager.activeProfileId.value
             val syncState = startupSyncPreferences.getState(profileId)
-            val canUseWarmSync = !force &&
-                lastPulledKey == pullKey(userId) &&
-                lastPulledAtMs > 0L &&
-                syncState.lastFullPullUserId == userId &&
-                syncState.lastFullPullAtMs > 0L &&
-                System.currentTimeMillis() - syncState.lastFullPullAtMs < FULL_STARTUP_PULL_TTL_MS &&
-                (!includeProfileSettings || syncState.lastFullPullIncludedProfileSettings)
+            // KevBox FORK DIVERGENCE (1 of 2): upstream also required the in-memory lastPulledKey /
+            // lastPulledAtMs, which reset on every process death, so each cold start re-downloaded
+            // the whole watch history. Decide from the on-disk full-pull record only.
+            // Why and merge notes: KevboxWarmStartupSync.kt.
+            val canUseWarmSync = canUseKevboxWarmStartupSync(
+                force = force,
+                userId = userId,
+                includeProfileSettings = includeProfileSettings,
+                state = syncState,
+                nowMs = System.currentTimeMillis(),
+                ttlMs = FULL_STARTUP_PULL_TTL_MS
+            )
 
             if (canUseWarmSync) {
                 return pullWarmRemoteData(
@@ -518,11 +523,11 @@ class StartupSyncService @Inject constructor(
                 watchProgressRepository.hasCompletedInitialWatchedItemsPull = true
                 Log.d(TAG, "Skipping warm Supabase watch progress sync for profile $profileId because a tracking provider is active")
             }
-            startupSyncPreferences.markFullPull(
-                profileId = profileId,
-                userId = userId,
-                includeProfileSettings = includeProfileSettings
-            )
+            // KevBox FORK DIVERGENCE (2 of 2): upstream called startupSyncPreferences.markFullPull(...)
+            // here. Now that warm syncs run on every cold start (see 1 of 2), renewing the full-pull
+            // timestamp from a warm sync would push the 6 h full pull back forever and drop upstream's
+            // self-healing snapshot. Only a real full pull (pullRemoteData) stamps it.
+            // Why and merge notes: KevboxWarmStartupSync.kt.
             return Result.success(Unit)
         } catch (e: Exception) {
             watchProgressRepository.isSyncingFromRemote = false
