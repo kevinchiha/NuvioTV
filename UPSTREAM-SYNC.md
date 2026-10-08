@@ -1060,6 +1060,43 @@ KevBox in the same change.
   (needs a member setting changed, which would sync to Kevin's real TVs), the player-panel info-card fix,
   MPV fallback, real 32-bit TV memory.
 
+### 1.1.0-beta.4 → 1.1.0-beta.5 — the light cycle; a picker bypass that upstream closed itself (2026-10-08)
+
+38 non-merge commits (61 with merges) from `19ecc9bf9` to the `1.1.0-beta.5` tag (`6adf0251b`, still a
+GitHub pre-release). The two engine commits in the beta.5 notes (engine 0.1.4, cache path) were already in
+`1.2.0-beta.4`. Branch `sync1.1.0-beta.5` off `kevbox` at `1.2.0-beta.4.1`; merge `0fe0da071`.
+74 files, +1961/-823.
+
+**One conflict** (version hunk, hunk only). **No server migration**: zero `rpc()` changes, `core/sync`
+untouched, no new `buildConfigField`, manifest unchanged. `MainActivity` and `ThemeSettingsScreen` changed
+only to add screen-reader labels. Both 2026-10-06 startup-lag divergences survived the auto-merge.
+
+- **⚠️ Next-episode binge match nearly skipped the picker.** `d293973bd` added an "early binge group
+  match" in `StreamScreenViewModel` that picks a stream on every emission, guarded only by
+  `!resolvedAutoPlayTarget`. With `manualSelection = true` we set `autoPlayHandledForSession = true`, and
+  that commit never read it, so a member with "Reuse binge group" on would have had the picker skipped.
+  Upstream's own follow-up `2c5554ecf` (same day) added `!autoPlayHandledForSession` to the guard, which
+  closes it. Both are in beta.5, so nothing to change. **If a later sync touches `earlyBingeGroupMatch`,
+  confirm the guard still reads `autoPlayHandledForSession`.** The same commit also makes binge-group
+  reuse ignore the auto-play source/addon filters (it searches all streams); harmless for us.
+- **Tests: 1940 run, 3 failures.** The two known ones plus
+  `StreamAutoPlaySelectorTest > bingeGroup-first respects source and addon plugin filters`. Upstream's own:
+  `d293973bd` changed the selector to ignore source filters on purpose and left the test expecting the
+  filtered result. Selector, test and `AppFeaturePolicy.pluginsEnabled` (true) are identical to upstream,
+  so their tree fails it too. **Baseline is now 3.**
+- **Player:** new `lib-exoplayer-release.aar` (calloc buffer allocation, fixes SIGSEGV), `isLive` moved to
+  `PlayerUiState`, Watch Next updates deferred until playback stops, AutoSync parallelism capped and the
+  "AutoSync really off" fix (`0a20eb1fe`, we keep AutoSync off), HTTP/2 one connection per parallel
+  connection, Coil timeout 8 s.
+- **Inert for us:** MDBList list sorting / external lists in the library (no MDBList key), accessibility
+  labels, translations (`values-he` renamed to `values-iw`).
+- **Gates:** `compileFullDebugKotlin`, `assembleFullRelease --dry-run` green. All standing greps pass; 46
+  `KevBox FORK DIVERGENCE` lines. The hardcoded `TV_LOGIN_WEB_BASE_URL` (`nuvio.tv/tv-login`) defaults
+  predate this sync and only feed the dead QR sign-in.
+- **Emulator:** debug build installed over the existing signed-in one, home in OCEAN with Continue
+  Watching filled. Detail → Play opened the picker; an x264 HDRip via Torrentio/Premiumize played on
+  ExoPlayer from 0 to 84 s with subtitles on screen, no crash, no MPV fallback.
+
 ## Verify before shipping
 
 > **Run these with `set -o pipefail`.** Piping gradle into `tail`/`grep` reports the *pipe's* exit
