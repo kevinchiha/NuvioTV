@@ -1065,7 +1065,10 @@ KevBox in the same change.
 38 non-merge commits (61 with merges) from `19ecc9bf9` to the `1.1.0-beta.5` tag (`6adf0251b`, still a
 GitHub pre-release). The two engine commits in the beta.5 notes (engine 0.1.4, cache path) were already in
 `1.2.0-beta.4`. Branch `sync1.1.0-beta.5` off `kevbox` at `1.2.0-beta.4.1`; merge `0fe0da071`.
-74 files, +1961/-823.
+74 files, +1961/-823. **Released as KevBox `1.2.0-beta.5` / versionCode 1054** (bump `723a23991`, sha256
+`76fd35d6…`, 52.9 MB armeabi-v7a, cert `9A:E0:71:8C…1D:6F`). `release.sh` stopped at the upload with
+`Permission denied (publickey)`: the ssh-agent was empty after a reboot and the persovps key has a
+passphrase. Finished by hand as in the "release.sh resume gotcha". Run `ssh-add -l` before `release.sh`.
 
 **One conflict** (version hunk, hunk only). **No server migration**: zero `rpc()` changes, `core/sync`
 untouched, no new `buildConfigField`, manifest unchanged. `MainActivity` and `ThemeSettingsScreen` changed
