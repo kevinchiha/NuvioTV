@@ -13,8 +13,9 @@
 #         app/build/outputs/apk/full/release/app-full-<abi>-release.apk
 #      scp'd to persovps, installed under /var/www/kevbox-tv/, and pointed to by the
 #      stable /download symlink (kevbox-tv-latest.apk) for first-install sideloads.
+#      The install-time compile profiles (.dm, one per Android API range) go up with it.
 #   4. Computes sha256 ON THE HOST and writes /var/www/kevbox-tv/version.json
-#      ({ versionCode, versionName, url, sha256, notes }) — the manifest the
+#      ({ versionCode, versionName, url, sha256, notes, profiles }) — the manifest the
 #      in-app updater (UpdateRepository) fetches from ${UPDATE_BASE_URL}/version.json.
 #   5. Optionally commits the version bump (set KEVBOX_COMMIT=1).
 #
@@ -75,17 +76,47 @@ APK="$REPO/app/build/outputs/apk/full/release/app-full-${APK_ABI}-release.apk"
 [[ -f "$APK" ]] || err "APK not found at $APK — build may have failed, or KEVBOX_TV_APK_ABI=$APK_ABI is wrong"
 note "APK built: $APK ($(du -h "$APK" | cut -f1))"
 
-# --- 3. Upload APK to persovps --------------------------------------------------
+# --- 3. Upload APK + compile profiles to persovps -------------------------------
 REMOTE_APK="kevbox-tv-$VER.apk"
-note "Uploading $REMOTE_APK to $SSH_ALIAS:$WEB_ROOT…"
-scp -P "$SSH_PORT" "$APK" "$SSH_ALIAS:/tmp/$REMOTE_APK"
-# Install the APK and (re)point the stable /download symlink at it for first-install sideloads.
-ssh "$SSH_ALIAS" -p "$SSH_PORT" "sudo install -m 644 /tmp/$REMOTE_APK $WEB_ROOT/$REMOTE_APK && sudo ln -sfn $WEB_ROOT/$REMOTE_APK $WEB_ROOT/kevbox-tv-latest.apk && rm -f /tmp/$REMOTE_APK"
+# Install-time compile profiles (.dm), one per Android API range. The in-app updater installs
+# the matching one together with the APK, so Android compiles the app during the install
+# instead of leaving it in the interpreter until idle maintenance (slow first day after every
+# update). An APK-only release still works; it is just slow on first launch.
+PROFILE_LINES=$(python3 "$REPO/scripts/list-install-profiles.py" "$(dirname "$APK")/output-metadata.json" "$APK_ABI")
+[[ -n "$PROFILE_LINES" ]] || note "⚠ No compile profiles found for $APK_ABI; publishing the APK alone"
 
-# --- 4. Compute SHA-256 on the host and write version.json ----------------------
-note "Computing sha256 on host and writing version.json…"
-SHA=$(ssh "$SSH_ALIAS" -p "$SSH_PORT" "sha256sum $WEB_ROOT/$REMOTE_APK | awk '{print \$1}'")
+# Stage everything under its published name so one scp and one ssh do the whole upload
+# (persovps rate-limits new SSH connections).
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+ln -s "$APK" "$STAGE/$REMOTE_APK"
+REMOTE_FILES=("$REMOTE_APK")
+PROFILE_RANGES=()
+while read -r MIN MAX DM; do
+  [[ -n "${DM:-}" ]] || continue
+  NAME="kevbox-tv-$VER-api$MIN.dm"
+  ln -s "$DM" "$STAGE/$NAME"
+  REMOTE_FILES+=("$NAME")
+  PROFILE_RANGES+=("$MIN $MAX $NAME")
+done <<< "$PROFILE_LINES"
+
+note "Uploading ${REMOTE_FILES[*]} to $SSH_ALIAS:$WEB_ROOT…"
+scp -P "$SSH_PORT" "${REMOTE_FILES[@]/#/$STAGE/}" "$SSH_ALIAS:/tmp/"
+# Install the files, (re)point the stable /download symlink at the APK for first-install
+# sideloads, and print sha256 sums computed ON THE HOST.
+SUMS=$(ssh "$SSH_ALIAS" -p "$SSH_PORT" "set -e; for f in ${REMOTE_FILES[*]}; do sudo install -m 644 /tmp/\$f $WEB_ROOT/\$f; rm -f /tmp/\$f; done; sudo ln -sfn $WEB_ROOT/$REMOTE_APK $WEB_ROOT/kevbox-tv-latest.apk; cd $WEB_ROOT && sha256sum ${REMOTE_FILES[*]}")
+
+# --- 4. Write version.json --------------------------------------------------------
+note "Writing version.json…"
+SHA=$(awk -v f="$REMOTE_APK" '$2 == f { print $1 }' <<< "$SUMS")
 [[ -n "$SHA" ]] || err "Failed to compute sha256 on host"
+PROFILES_JSON=""
+for R in "${PROFILE_RANGES[@]}"; do
+  read -r MIN MAX NAME <<< "$R"
+  PSHA=$(awk -v f="$NAME" '$2 == f { print $1 }' <<< "$SUMS")
+  [[ -n "$PSHA" ]] || err "Failed to compute sha256 for $NAME on host"
+  PROFILES_JSON+="${PROFILES_JSON:+, }{\"minApi\": $MIN, \"maxApi\": $MAX, \"url\": \"$BASE_URL/$NAME\", \"sha256\": \"$PSHA\"}"
+done
 # Write version.json on the host (kevbox-support style: one inline `sudo tee` heredoc).
 # Escape notes for JSON embedding (backslashes, double-quotes, newlines); keep notes concise.
 NOTES_ESC=${NOTES//\\/\\\\}; NOTES_ESC=${NOTES_ESC//\"/\\\"}; NOTES_ESC=${NOTES_ESC//$'\n'/ }
@@ -95,10 +126,11 @@ ssh "$SSH_ALIAS" -p "$SSH_PORT" "sudo tee $WEB_ROOT/version.json > /dev/null <<E
   \"versionName\": \"$VER\",
   \"url\": \"$BASE_URL/$REMOTE_APK\",
   \"sha256\": \"$SHA\",
-  \"notes\": \"$NOTES_ESC\"
+  \"notes\": \"$NOTES_ESC\",
+  \"profiles\": [$PROFILES_JSON]
 }
 EOF"
-note "version.json updated (versionCode=$NEW_CODE sha256=${SHA:0:16}…)"
+note "version.json updated (versionCode=$NEW_CODE sha256=${SHA:0:16}…, ${#PROFILE_RANGES[@]} compile profile(s))"
 
 # --- 5. Commit + push the version bump (like kevbox-support) ----------------------
 note "Committing version bump…"
