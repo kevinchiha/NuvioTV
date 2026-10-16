@@ -1121,7 +1121,7 @@ only to add screen-reader labels. Both 2026-10-06 startup-lag divergences surviv
 
 158 non-merge commits (234 with merges) from `6adf0251b` to the `1.1.0-beta.7` tag (= `upstream/dev`
 `6bda667f8`, still a GitHub pre-release). Branch `sync1.1.0-beta.7` off `kevbox` at `1.2.0-beta.5`; merge
-`8da79d138`, fork fix `d14117700`. 351 files, +23.9k/-2.6k. First release with Sentry crash reports on
+`8da79d138`, fork fix `d14117700`. 351 files, +23.9k/-2.6k. Four commits landed on `upstream/dev` after the tag the same evening (`82661599a` no profile-settings push on profile switch, `050dfd275` Manage Profiles crash), merged on top as `9fda09407` with no conflict; 2256 tests, same single failure. First release with Sentry crash reports on
 (see the Sentry callout). To ship as KevBox `1.2.0-beta.7`.
 
 **Twelve conflicts**, the most since 0.7.16, all small: version hunk, and "keep both" in `MainActivity`
