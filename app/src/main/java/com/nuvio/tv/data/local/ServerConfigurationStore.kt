@@ -28,7 +28,8 @@ class ServerConfigurationStore @Inject constructor(
             publishableKey = publishableKey,
             capabilities = ServerCapabilities(
                 emailPasswordAuth = emailPasswordAuth,
-                tvLogin = tvLogin
+                tvLogin = tvLogin,
+                watchParty = preferences.getBoolean(KEY_WATCH_PARTY, false)
             ),
             isCustom = true,
             discoveryUrl = preferences.getString(KEY_DISCOVERY_URL, null),
@@ -47,6 +48,7 @@ class ServerConfigurationStore @Inject constructor(
             .putString(KEY_PUBLISHABLE_KEY, configuration.publishableKey)
             .putBoolean(KEY_EMAIL_PASSWORD_AUTH, configuration.capabilities.emailPasswordAuth)
             .putBoolean(KEY_TV_LOGIN, configuration.capabilities.tvLogin)
+            .putBoolean(KEY_WATCH_PARTY, configuration.capabilities.watchParty)
             .putString(KEY_DISCOVERY_URL, configuration.discoveryUrl)
             .commit()
     }
@@ -62,7 +64,13 @@ class ServerConfigurationStore @Inject constructor(
         publishableKey = BuildConfig.SUPABASE_ANON_KEY,
         capabilities = ServerCapabilities(
             emailPasswordAuth = false,
-            tvLogin = true
+            tvLogin = true,
+            // KevBox FORK DIVERGENCE: upstream's official server offers Watch Party; ours doesn't.
+            // KevBox's Supabase has none of the watch_party_* RPCs or the realtime party channel, so
+            // the feature would show everywhere (Settings rail, player button) and fail on use.
+            // false makes PartyRepository report unavailable and skip its realtime start, which hides
+            // every surface at once. Kevin, 2026-10-16. Flip back only after that server side exists.
+            watchParty = false
         ),
         isCustom = false,
         fallbackBackendUrl = BuildConfig.SUPABASE_FALLBACK_URL.trim().trimEnd('/').takeIf { it.isNotBlank() },
@@ -78,6 +86,7 @@ class ServerConfigurationStore @Inject constructor(
         const val KEY_PUBLISHABLE_KEY = "publishable_key"
         const val KEY_EMAIL_PASSWORD_AUTH = "email_password_auth"
         const val KEY_TV_LOGIN = "tv_login"
+        const val KEY_WATCH_PARTY = "watch_party"
         const val KEY_DISCOVERY_URL = "discovery_url"
     }
 }

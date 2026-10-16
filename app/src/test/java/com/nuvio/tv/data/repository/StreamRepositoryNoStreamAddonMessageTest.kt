@@ -120,6 +120,12 @@ class StreamRepositoryNoStreamAddonMessageTest {
             tmdbService = mockk<TmdbService>(relaxed = true),
             debridStreamPresentation = presentation,
             localDebridAvailabilityService = availability,
+            // 1.1.0-beta.7 added media-server streams; none here, same stub as upstream's tests.
+            serverStreams = mockk {
+                every { isNativeRequest(any()) } returns false
+                every { revision } returns 0
+                every { sources(any(), any(), any(), any(), any()) } returns emptyList()
+            },
             authManager = authManager
         )
     }
