@@ -136,6 +136,11 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `core/sync/StartupSyncService.kt` (2026-10-06, startup lag) | the two `KevBox FORK DIVERGENCE` markers: (1) in `pullRemoteData`, `canUseWarmSync = canUseKevboxWarmStartupSync(..., ttlMs = KEVBOX_FULL_STARTUP_PULL_TTL_MS)` (24 h, upstream 6 h) instead of upstream's expression, which also required the in-memory `lastPulledKey`/`lastPulledAtMs`; those reset on every process death, so each cold start re-downloaded the member's whole watched/progress history (13 s of CPU for a 3,000-item history on a TCL TV); (2) **no `startupSyncPreferences.markFullPull(...)` at the end of `pullWarmRemoteData`**, so warm syncs don't push the daily full pull back forever. Logic and merge notes live in the kevbox-only `KevboxWarmStartupSync.kt`, pinned by `KevboxWarmStartupSyncTest`. Post-merge check: `grep -n 'canUseKevboxWarmStartupSync\|markFullPull' app/src/main/java/com/nuvio/tv/core/sync/StartupSyncService.kt` must show the call in `pullRemoteData` and exactly one `markFullPull` (the full path) | take upstream's other startup-sync changes. If upstream itself drops the in-memory check, keep marker 1 anyway for the KevBox 24 h window, and keep marker 2 only if they still stamp from the warm path |
 | `data/local/WatchedItemsPreferences.kt` `observeAllItems` + `getAllItems` (2026-10-06, startup lag) | the two `KevBox FORK DIVERGENCE` blocks: the `kevboxParsedItems` cache plus `.map { raw set }.distinctUntilChanged().map { kevboxParsedItems.parseAll(it) }` in `observeAllItems`, `kevboxParsedItems.parseAll(...)` as the body of `getAllItems` (the delta sync calls it twice per run only to log a count), and the `distinctUntilChanged` import. Upstream re-parses every JSON string on every store emission, per reader, which was the top app-level hotspot in simpleperf. Logic in the kevbox-only `KevboxParsedJsonCache.kt`, pinned by `KevboxParsedJsonCacheTest` and `KevboxWatchedItemsParseCacheTest`. A merge that takes upstream's body compiles and passes every upstream test, so only that test catches the regression | take upstream's other changes. If upstream moves watched items off the JSON string set (Room, proto), drop the cache and the test instead of porting them |
 
+| Watch Party (1.1.0-beta.7) | **hidden.** `ServerConfigurationStore.officialConfiguration()` sets `watchParty = false` (upstream `true`): `PartyRepository.available` stays false, `refreshAvailability()` returns before its first RPC, and the player's party button is null. Second layer: `SettingsCategory.WATCH_PARTY` in `KEVBOX_HIDDEN_SETTINGS_CATEGORIES`, `onNavigateToWatchParty = { }` in `NuvioNavHost`, and the `AppDeepLink.Party` branch in `MainActivity` only clears the pending link. Our Supabase has none of the nine `watch_party_*` RPCs or the realtime channel | the party code, `PartyEffects` in `MainActivity`, the realtime install in `SupabaseModule` (nothing connects while the capability is off) |
+| Media servers (Jellyfin/Emby/Plex, 1.1.0-beta.7) | **hidden by the existing `CONTENT_DISCOVERY` filter** (the servers page lives inside that category). The Library "Servers" tab only shows when a server exists, and none can be added. Not patched: `MediaServerSyncService` still calls `sync_pull_media_servers` at sign-in, profile switch and foreground (at most once a minute), which 404s on our Supabase and is logged and dropped. Upstream's `MediaServerSyncServiceTest` drives those triggers, so stopping them means patching upstream tests too; not worth it for ~1-3 calls per TV per day. To ship the feature: add `sync_pull_media_servers(p_profile_id)` / `sync_push_media_servers(p_profile_id, p_servers, p_origin_client_id)` to the kevbox repo and drop the category from the hidden set | the whole feature |
+| `StreamRepositoryImpl` constructor (1.1.0-beta.7) | `authManager` stays last; upstream's new `serverStreams` goes before it. Our `StreamRepositoryNoStreamAddonMessageTest` builds the class by hand and needs the same `serverStreams` stub as upstream's tests, or the test source set stops compiling | the param |
+| `NuvioNavHost.kt` settings block (1.1.0-beta.7) | upstream removed `onNavigateToTracking` from `SettingsScreen`; drop our `onNavigateToTracking = { }` line or it won't compile. Tracking stays hidden through the `TRACKING` category filter (it renders inline; `Screen.Tracking` has no `navigate` call) | n/a |
+
 After resolving, `git add` the files and `git commit` to complete the merge.
 
 ### ⚠️ Invisible breakage — upstream refactors that DON'T show as conflicts
@@ -332,7 +337,9 @@ look as new navigation routes.
 ```bash
 grep -rn "navigate(Screen.AddonManager\|navigate(Screen.Plugins" app/src --include=*.kt   # want: empty
 grep -n "stremio" app/src/main/AndroidManifest.xml                                        # want: comment only
-grep -A4 "KEVBOX_HIDDEN_SETTINGS_CATEGORIES = setOf" app/src/.../SettingsScreen.kt       # want: PROFILES, CONTENT_DISCOVERY, TRACKING
+grep -A10 "KEVBOX_HIDDEN_SETTINGS_CATEGORIES = setOf" app/src/.../SettingsScreen.kt      # want: PROFILES, CONTENT_DISCOVERY, TRACKING, WATCH_PARTY
+grep -n "watchParty = " app/src/.../data/local/ServerConfigurationStore.kt                # want: official config false (custom-server line reads prefs)
+grep -n "onNavigateToWatchParty = " app/src/.../NuvioNavHost.kt                           # want: "{ }"
 grep -c "in KEVBOX_HIDDEN_SETTINGS_CATEGORIES" app/src/.../SettingsScreen.kt             # want: 1 (the filter is applied)
 # (the old "CONTENT_DISCOVERY ->" grep now also matches upstream's own lines and passes even when nothing is hidden)
 grep -n "onNavigateToTracking = \|onNavigateToManageProfiles = " app/src/.../NuvioNavHost.kt # want: both "{ }"
@@ -343,7 +350,7 @@ grep -c "manualSelection = true" app/src/.../MainActivity.kt                    
 grep -rn "SHOW_LAUNCHER_ARTWORK_PICKER" app/src --include=*.kt                            # want: still false
 grep -rn "supportNuvioEnabled" app/src/full/.../AppFeaturePolicy.kt                       # want: false
 grep -rn "UpdateBannerHost\|AbiSelector\|VersionUtils" app/src --include=*.kt             # want: empty
-grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                             # want: 8 (6 + 2 start-from-beginning, 1.1.0-beta.4)
+grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                             # want: 9 (6 + 2 start-from-beginning, 1.1.0-beta.4; + upstream's openPartyMedia, 1.1.0-beta.7)
 grep -c "manualSelection = true" app/src/.../ui/navigation/DetailChildHost.kt             # want: 3 (nested details incl. start-from-beginning)
 grep -rn "Screen.Stream.createRoute\|::navigateToDetailStream" app/src/main --include=*.kt # review any NEW call site
 grep -rn "allowUnverifiedPlayback = true" app/src --include=*.kt                        # want: 1 (PlaybackAvailabilityProvider)
@@ -416,6 +423,16 @@ defaults `true`, so it's the blank *DSN* — not the toggle — that keeps it of
 The Gradle plugin only uploads debug-symbol mappings when `SENTRY_AUTH_TOKEN`/`SENTRY_ORG`/`SENTRY_PROJECT`
 are all set (blank for us → `sentryMappingUploadEnabled = false`, no upload during `assembleFullRelease`).
 **Standing check:** keep `SENTRY_DSN` **and** `SENTRY_AUTH_TOKEN`/`SENTRY_ORG`/`SENTRY_PROJECT` blank/unset.
+
+> **Superseded 2026-10-16: Sentry is ON for KevBox TV.** Kevin's call: use upstream's wiring as-is, no
+> KevBox additions. The four `SENTRY_*` values live in `~/secrets/kevbox-keys/release.env` (Sentry org
+> `kevbox`, project `kevbox-tv`); `release.sh` sources that file and Gradle reads them from the
+> environment, so only release builds carry the DSN. `local.properties` must stay without them, so debug
+> and emulator builds stay off. What this changes for syncs: any upstream change to
+> `SentryInitializer.kt`, `SentryNetworkBreadcrumbInterceptor.kt` or the `sentry {}` block in
+> `app/build.gradle.kts` now reaches real TVs. Read those diffs every cycle; check that `beforeSend`
+> still nulls `event.user` and `event.request`, and that tracing stays at 0. The task card "Sentry
+> evening check (KevBox TV)" reads the project twice a week.
 
 ### ⚠️ Invisible breakage #2 — the Supabase DI wiring FLIP-FLOPS between syncs (0.7.9 ↔ 0.7.16)
 
@@ -1099,6 +1116,50 @@ only to add screen-reader labels. Both 2026-10-06 startup-lag divergences surviv
 - **Emulator:** debug build installed over the existing signed-in one, home in OCEAN with Continue
   Watching filled. Detail → Play opened the picker; an x264 HDRip via Torrentio/Premiumize played on
   ExoPlayer from 0 to 84 s with subtitles on screen, no crash, no MPV fallback.
+
+### 1.1.0-beta.5 → 1.1.0-beta.7 — media servers and Watch Party, both hidden; Sentry switched on (2026-10-16)
+
+158 non-merge commits (234 with merges) from `6adf0251b` to the `1.1.0-beta.7` tag (= `upstream/dev`
+`6bda667f8`, still a GitHub pre-release). Branch `sync1.1.0-beta.7` off `kevbox` at `1.2.0-beta.5`; merge
+`8da79d138`, fork fix `d14117700`. 351 files, +23.9k/-2.6k. First release with Sentry crash reports on
+(see the Sentry callout). To ship as KevBox `1.2.0-beta.7`.
+
+**Twelve conflicts**, the most since 0.7.16, all small: version hunk, and "keep both" in `MainActivity`
+(`PartyEffects` next to the lock gate state), `NuvioApplication` (server services next to the addon seed),
+`PlaybackAvailability` (`serverStreams` after `allowUnverifiedPlayback`), `StreamRepositoryImpl` and its
+plugin-isolation test, `LibrarySyncReducer` (our first-snapshot union, then upstream's server-item keep),
+`PlayerRuntimeController` (`heartbeatScheduler.stop()` then `playerSession.close()`/`stopServerPlayback()`),
+`SettingsScreen` (new `isWatchPartyAvailable` argument, our filter on the result). Ours in `LibraryScreen`
+(wordmark) and `WatchedItemsPreferences` (see below). Table rows above cover Watch Party, media servers,
+the `StreamRepositoryImpl` param order and the dropped `onNavigateToTracking`.
+
+- **Two features that need server work we don't have.** Media servers (`sync_pull/push_media_servers`)
+  and Watch Party (nine `watch_party_*` RPCs plus Supabase realtime). Upstream ships no SQL. Kevin hid
+  both (2026-10-16). Media servers sit inside the already-hidden Content Discovery category; Watch Party
+  needed its own switch (table row). The one leftover is a 404 on `sync_pull_media_servers` per sign-in /
+  foreground, logged and dropped on the TV.
+- **Upstream converged on our watched-items parse cache.** `WatchedItemsPreferences` now has its own
+  per-profile `decodeItems` cache. We kept `kevboxParsedItems` at our two marked spots because upstream's
+  has no lock, so the startup burst of readers each decode the whole list again (the reason ours has one).
+  Upstream's cache serves its other call sites. If a later sync adds a lock to `decodeItems`, retire
+  `KevboxParsedJsonCache` and its tests.
+- **Custom server connections stay off.** `FEATURE_CUSTOM_SERVER_CONNECTIONS_ENABLED` is `false` in both
+  of our flavors (upstream `true` for full). That screen would let a member point the app at another
+  backend. Predates this sync; re-check every cycle.
+- **No sync arg changes on existing RPCs.** Watched items, progress and library pushes now skip `srv1:`
+  ids (media-server items); normal ids never start with that. New realtime dependency
+  (`supabase.realtime`), only connected by Watch Party.
+- **Tests: 2254 run, 1 failure, 1 skipped.** The three old known failures pass (upstream fixed them). The
+  new one, `TraktProgressServiceRefreshTest > change seen by a cancelled refresh is fetched by the next
+  poll`, fails identically on a clean checkout of the `1.1.0-beta.7` tag: upstream's `3a871400d` (their last
+  commit before the tag) changed the forced-refresh behaviour and left the test behind. **Baseline is now 1.**
+- **Gates:** `compileFullDebugKotlin`, `testFullDebugUnitTest` (baseline), `assembleFullRelease --dry-run`
+  green; the dry run lists `uploadSentryProguardMappingsFullRelease`. All standing greps pass.
+- **Emulator:** debug build over the signed-in beta.5, home in OCEAN with Continue Watching filled.
+  Settings rail = Account, Appearance, Layout, Playback, Integrations, Advanced, About (+ Debug, debug
+  builds only): no Watch Party, Profiles, Content Discovery or Tracking. Detail → Play opened the picker;
+  a 1080p WEB-DL via Torrentio/Premiumize played on ExoPlayer past 1:00, no MPV fallback. Startup log:
+  member config applied, one manifest-cache load, no 429s, no Watch Party calls, the one media-server 404.
 
 ## Verify before shipping
 
