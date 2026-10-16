@@ -1,5 +1,6 @@
 package com.nuvio.tv.updater
 
+import android.os.Build
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.updater.model.AppUpdate
 import com.nuvio.tv.updater.model.UpdateManifest
@@ -20,11 +21,6 @@ class UpdateRepository @Inject constructor(
     private val okHttpClient: OkHttpClient
 ) {
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-    }
-
     suspend fun getLatestUpdate(): Result<AppUpdate> {
         return runCatching {
             val url = BuildConfig.UPDATE_BASE_URL.trimEnd('/') + "/version.json"
@@ -43,6 +39,21 @@ class UpdateRepository @Inject constructor(
                 }
             }
 
+            parseManifest(raw, Build.VERSION.SDK_INT)
+        }
+    }
+
+    companion object {
+        private val json = Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+        }
+
+        /**
+         * Parses `version.json` and maps it to the dialog-facing [AppUpdate], picking the
+         * install-time compile profile that matches [sdkInt]. Pure so it can be unit-tested.
+         */
+        fun parseManifest(raw: String, sdkInt: Int): AppUpdate {
             val manifest = json.decodeFromString(UpdateManifest.serializer(), raw)
 
             if (manifest.url.isBlank()) error("Update manifest has no APK url")
@@ -50,10 +61,11 @@ class UpdateRepository @Inject constructor(
 
             val assetName = manifest.url.substringAfterLast('/').takeIf { it.isNotBlank() }
                 ?: "kevbox-tv-${manifest.versionName}.apk"
+            val profile = InstallProfile.pick(manifest.profiles, sdkInt)
 
             // Map manifest -> AppUpdate: versionName drives the dialog's version tag/title and
             // notes drives the dialog's markdown release-notes section (kept non-blank).
-            AppUpdate(
+            return AppUpdate(
                 versionCode = manifest.versionCode,
                 tag = manifest.versionName,
                 title = manifest.versionName,
@@ -62,7 +74,9 @@ class UpdateRepository @Inject constructor(
                 releaseUrl = null,
                 assetName = assetName,
                 assetUrl = manifest.url,
-                assetSizeBytes = null
+                assetSizeBytes = null,
+                profileUrl = profile?.url,
+                profileSha256 = profile?.sha256
             )
         }
     }

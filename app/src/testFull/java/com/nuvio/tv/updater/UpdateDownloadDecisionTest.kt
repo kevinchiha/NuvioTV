@@ -85,6 +85,14 @@ class UpdateDownloadDecisionTest {
     }
 
     @Test
+    fun `staleFileNames keeps the kept apk's profile file`() {
+        assertEquals(
+            listOf("old.apk", "old.dm"),
+            UpdateDownloadDecision.staleFileNames(listOf("old.apk", "old.dm", "keep.apk", "keep.dm"), "keep.apk"),
+        )
+    }
+
+    @Test
     fun `staleFileNames with null keep returns everything`() {
         assertEquals(
             listOf("a.apk", "b.apk"),

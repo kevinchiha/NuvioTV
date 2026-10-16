@@ -29,7 +29,25 @@ data class UpdateManifest(
     @SerialName("versionName") val versionName: String,
     @SerialName("url") val url: String,
     @SerialName("sha256") val sha256: String,
-    @SerialName("notes") val notes: String = ""
+    @SerialName("notes") val notes: String = "",
+    // Install-time compile profiles (.dm files), one per Android API range. Absent from
+    // manifests written before 1.2.0-beta.7.1, hence the default.
+    @SerialName("profiles") val profiles: List<ProfileAsset> = emptyList()
+)
+
+/**
+ * One `.dm` file published next to the APK. Installing it together with the APK lets Android
+ * compile the app's hot code during the install, instead of running it in the interpreter
+ * until the next idle maintenance pass (measured on a TCL TV: 3.7% vs 58% of main-thread time
+ * in compiled code on the first launch after an update).
+ */
+@Keep
+@Serializable
+data class ProfileAsset(
+    @SerialName("minApi") val minApi: Int,
+    @SerialName("maxApi") val maxApi: Int,
+    @SerialName("url") val url: String,
+    @SerialName("sha256") val sha256: String
 )
 
 /**
@@ -50,5 +68,9 @@ data class AppUpdate(
     val releaseUrl: String?,
     val assetName: String,
     val assetUrl: String,
-    val assetSizeBytes: Long?
+    val assetSizeBytes: Long?,
+    // The profile picked for this device's Android version, or null. Defaults keep cached
+    // JSON saved by older builds decodable.
+    val profileUrl: String? = null,
+    val profileSha256: String? = null
 )

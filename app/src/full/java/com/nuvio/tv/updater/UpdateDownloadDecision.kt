@@ -30,9 +30,14 @@ object UpdateDownloadDecision {
     ): Boolean =
         cachedVersionCode != null && cachedVersionCode == targetVersionCode && cachedFileExists
 
-    /** Names in [allNames] to prune — everything except [keepName] (null keeps nothing). */
-    fun staleFileNames(allNames: List<String>, keepName: String?): List<String> =
-        allNames.filter { it != keepName }
+    /**
+     * Names in [allNames] to prune — everything except [keepName] and its profile file
+     * (null keeps nothing).
+     */
+    fun staleFileNames(allNames: List<String>, keepName: String?): List<String> {
+        val keepProfile = keepName?.let(InstallProfile::fileNameFor)
+        return allNames.filter { it != keepName && it != keepProfile }
+    }
 
     /** Only download an asset served over https from the same host as [baseUrl]. */
     fun isTrustedAssetUrl(assetUrl: String, baseUrl: String): Boolean {

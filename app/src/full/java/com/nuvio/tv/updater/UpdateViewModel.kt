@@ -9,6 +9,7 @@ import com.nuvio.tv.updater.model.AppUpdate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -230,8 +231,28 @@ class UpdateViewModel @Inject constructor(
         }
 
         _uiState.update { it.copy(showUnknownSourcesDialog = false) }
-        ApkInstaller.launchInstall(context, apkFile)
+
+        // One install at a time: copying the APK into a session takes a few seconds, and a
+        // second press meanwhile would open a second confirmation.
+        if (installJob?.isActive == true) return
+        val update = _uiState.value.update
+        installJob = viewModelScope.launch(Dispatchers.IO) {
+            // The compile profile is optional: any failure here installs without it.
+            val profile = update?.let {
+                ProfileFetcher.fetch(apkDownloader, it, apkFile) { url ->
+                    UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+                }
+            }
+            runCatching { ApkInstaller.launchInstall(context, apkFile, profile) }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(errorMessage = e.message ?: context.getString(R.string.update_error_apk_missing))
+                    }
+                }
+        }
     }
+
+    private var installJob: Job? = null
 
     fun openUnknownSourcesSettings() {
         ApkInstaller.buildUnknownSourcesSettingsIntent(context)?.let { intent ->

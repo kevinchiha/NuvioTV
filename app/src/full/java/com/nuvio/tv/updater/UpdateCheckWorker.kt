@@ -97,9 +97,19 @@ class UpdateCheckWorker(
                 return Result.retry()
             }
 
+            // The compile profile is optional; without it the install still works, just slower
+            // on first launch. Install time fetches it again if this attempt fails.
+            val profile = ProfileFetcher.fetch(downloader, update, file) { url ->
+                UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+            }
+
             prefs.setPredownload(file.absolutePath, UpdateJson.json.encodeToString(update))
             keepName = file.name
-            Log.i(TAG, "Pre-downloaded + verified ${file.name} (versionCode ${update.versionCode})")
+            Log.i(
+                TAG,
+                "Pre-downloaded + verified ${file.name} (versionCode ${update.versionCode}, " +
+                    "profile=${profile?.name ?: "none"})",
+            )
         } else {
             Log.i(
                 TAG,

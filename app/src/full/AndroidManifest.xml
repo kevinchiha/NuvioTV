@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- KevBox full flavour only: the self-hosted updater lives in src/full. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Result of the updater's PackageInstaller session (APK + compile profile).
+             Not exported: only the app's own PendingIntent reaches it. -->
+        <receiver
+            android:name="com.nuvio.tv.updater.InstallResultReceiver"
+            android:exported="false" />
+    </application>
+</manifest>
