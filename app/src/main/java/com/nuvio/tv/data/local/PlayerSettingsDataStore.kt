@@ -1663,10 +1663,6 @@ class PlayerSettingsDataStore @Inject constructor(
         }
     }
 
-    suspend fun setEnableHttp2(enabled: Boolean) {
-        store().edit { it[enableHttp2Key] = enabled }
-    }
-
     suspend fun setVodCacheEnabled(enabled: Boolean) {
         store().edit { prefs ->
             prefs[vodCacheEnabledKey] = enabled

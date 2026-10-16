@@ -1,5 +1,7 @@
 package com.nuvio.tv.domain.model
 
+import com.nuvio.tv.data.mediaserver.ServerItemRef
+
 object LibrarySyncReducer {
     fun sanitize(state: LibrarySyncState): LibrarySyncState {
         val items = state.items.toItemMap()
@@ -143,6 +145,7 @@ object LibrarySyncReducer {
                     }
                 }
             }
+            localItems.filterValues { ServerItemRef.isServerId(it.id) }.forEach(remoteItemsByKey::putIfAbsent)
             remoteItemsByKey
         }
 

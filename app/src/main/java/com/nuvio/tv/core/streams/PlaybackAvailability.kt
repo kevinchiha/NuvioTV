@@ -6,13 +6,16 @@ import com.nuvio.tv.domain.model.ScraperInfo
 import com.nuvio.tv.domain.model.Video
 
 internal fun Addon.supportsStreamResource(type: String, videoId: String): Boolean =
+    supportsResource("stream", type, videoId)
+
+internal fun Addon.supportsResource(name: String, type: String, id: String): Boolean =
     resources.any { resource ->
-        resource.name == "stream" &&
+        resource.name == name &&
             (resource.types.isEmpty() || resource.types.contains(type)) &&
             run {
                 val prefixes = resource.idPrefixes?.takeIf { it.isNotEmpty() }
                     ?: idPrefixes.takeIf { it.isNotEmpty() }
-                prefixes == null || prefixes.any { videoId.startsWith(it) }
+                prefixes == null || prefixes.any { id.startsWith(it) }
             }
     }
 
@@ -30,7 +33,8 @@ internal data class PlaybackAvailability(
     // stream screen, which already explains failures in member-facing terms. Only the provider
     // composable sets this; upstream's unit tests construct the class without it and keep their
     // semantics. Do not drop this field or the early return on merge.
-    val allowUnverifiedPlayback: Boolean = false
+    val allowUnverifiedPlayback: Boolean = false,
+    private val serverStreams: (String, String) -> Boolean = { _, _ -> false }
 ) {
     fun canStream(
         type: String,
@@ -41,5 +45,6 @@ internal data class PlaybackAvailability(
         video?.takeIf { it.id == videoId }?.streams?.isNotEmpty() == true ||
         cachedMeta(type, contentId)?.videos?.any { it.id == videoId && it.streams.isNotEmpty() } == true ||
         addons.any { it.enabled && it.supportsStreamResource(type, videoId) } ||
-        scrapers.any { it.enabled && it.supportsType(type) }
+        scrapers.any { it.enabled && it.supportsType(type) } ||
+        serverStreams(type, videoId)
 }
