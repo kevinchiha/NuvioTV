@@ -87,7 +87,9 @@ import android.util.Log
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.withStateAtLeast
+import com.nuvio.tv.updater.ApkInstaller
 import com.nuvio.tv.updater.PendingInstallScreen
+import java.io.File
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -108,9 +110,16 @@ fun UpdatePromptDialog(
     LaunchedEffect(pendingInstall) {
         if (pendingInstall == null) return@LaunchedEffect
         installLifecycle.withStateAtLeast(Lifecycle.State.RESUMED) {
-            PendingInstallScreen.take()?.let { screen ->
-                runCatching { installContext.startActivity(screen) }
-                    .onFailure { Log.w("UpdatePromptDialog", "Could not open the install screen", it) }
+            val waiting = PendingInstallScreen.take() ?: return@withStateAtLeast
+            val opened = runCatching { installContext.startActivity(waiting.screen) }
+                .onFailure { Log.w("UpdatePromptDialog", "Could not open the install screen", it) }
+                .isSuccess
+            // The confirm screen failed (e.g. an OEM build without it): install without the
+            // profile through the plain screen, so a profile problem never blocks the update.
+            val apk = waiting.fallbackApkPath?.let(::File)?.takeIf { it.exists() }
+            if (!opened && apk != null) {
+                runCatching { installContext.startActivity(ApkInstaller.buildViewInstallIntent(installContext, apk)) }
+                    .onFailure { Log.w("UpdatePromptDialog", "Plain installer fallback failed", it) }
             }
         }
     }

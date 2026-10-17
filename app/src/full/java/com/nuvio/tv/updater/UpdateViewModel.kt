@@ -197,6 +197,14 @@ class UpdateViewModel @Inject constructor(
                         return@launch
                     }
 
+                    // Fetch the compile profile now, while "Downloading…" is on screen, so the
+                    // Install step finds it ready. Optional: on failure Install tries once more.
+                    withContext(Dispatchers.IO) {
+                        ProfileFetcher.fetch(apkDownloader, update, file) { url ->
+                            UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+                        }
+                    }
+
                     _uiState.update {
                         it.copy(
                             isDownloading = false,

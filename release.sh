@@ -121,6 +121,8 @@ done
 # Write version.json on the host (kevbox-support style: one inline `sudo tee` heredoc).
 # Escape notes for JSON embedding (backslashes, double-quotes, newlines); keep notes concise.
 NOTES_ESC=${NOTES//\\/\\\\}; NOTES_ESC=${NOTES_ESC//\"/\\\"}; NOTES_ESC=${NOTES_ESC//$'\n'/ }
+# Any other control character (tab, CR, ...) is invalid inside a JSON string; make it a space.
+NOTES_ESC=${NOTES_ESC//[[:cntrl:]]/ }
 # The delimiter is quoted so the REMOTE shell leaves the body alone: every value is already
 # filled in here, and an unquoted heredoc would expand $ and backticks in the notes and turn
 # their escaped \\ back into \, writing invalid JSON that breaks every member's update check.

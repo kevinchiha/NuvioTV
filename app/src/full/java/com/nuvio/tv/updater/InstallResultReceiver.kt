@@ -24,7 +24,9 @@ class InstallResultReceiver : BroadcastReceiver() {
             InstallStatusAction.CONFIRM -> {
                 val confirm = confirmIntent(intent)
                 if (confirm != null) {
-                    PendingInstallScreen.post(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    PendingInstallScreen.post(
+                        PendingInstall(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), fallbackApkPath = apkPath)
+                    )
                 } else {
                     Log.w(TAG, "Session needs confirmation but sent no screen; using the plain installer")
                     fallback(context, apkPath)
@@ -45,7 +47,7 @@ class InstallResultReceiver : BroadcastReceiver() {
             Log.w(TAG, "No APK to fall back to (path=$apkPath); the next Install press starts over")
             return
         }
-        runCatching { PendingInstallScreen.post(ApkInstaller.buildViewInstallIntent(context, apk)) }
+        runCatching { PendingInstallScreen.post(ApkInstaller.plainInstall(context, apk)) }
             .onFailure { Log.w(TAG, "Could not prepare the plain installer", it) }
     }
 

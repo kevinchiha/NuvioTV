@@ -39,8 +39,9 @@ object ApkInstaller {
      * Installs [apkFile]. With a [profileFile] (Android 9+), it goes through a PackageInstaller
      * session as `base.apk` + `base.dm`, so Android compiles the app during the install instead
      * of leaving it in the interpreter until idle maintenance. Without one, or if the session
-     * can't start, it opens the plain install screen as before. Blocking file I/O: call it off
-     * the main thread.
+     * can't start, it queues the plain install screen as before. Screens go through
+     * [PendingInstallScreen], never startActivity here: this runs after a background download,
+     * when the member may have left the app. Blocking file I/O: call it off the main thread.
      */
     fun launchInstall(context: Context, apkFile: File, profileFile: File? = null) {
         if (profileFile != null && InstallProfile.useSession(hasProfile = true, sdkInt = Build.VERSION.SDK_INT)) {
@@ -49,13 +50,12 @@ object ApkInstaller {
                 .isSuccess
             if (started) return
         }
-        launchViewInstall(context, apkFile)
+        PendingInstallScreen.post(plainInstall(context, apkFile))
     }
 
-    /** The plain install screen with only the APK (no compile profile). */
-    fun launchViewInstall(context: Context, apkFile: File) {
-        context.startActivity(buildViewInstallIntent(context, apkFile))
-    }
+    /** The plain install screen with only the APK; nothing further to fall back to. */
+    fun plainInstall(context: Context, apkFile: File): PendingInstall =
+        PendingInstall(buildViewInstallIntent(context, apkFile), fallbackApkPath = null)
 
     fun buildViewInstallIntent(context: Context, apkFile: File): Intent {
         val authority = "${BuildConfig.APPLICATION_ID}.fileprovider"

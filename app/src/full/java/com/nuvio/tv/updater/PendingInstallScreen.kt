@@ -7,20 +7,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 
 /**
+ * An install screen to open, and the APK to fall back to (the plain install screen, without
+ * the profile) if [screen] can't be opened. Null when [screen] already is the plain one.
+ */
+data class PendingInstall(val screen: Intent, val fallbackApkPath: String?)
+
+/**
  * One install screen waiting to be shown: Android's "Install this update?" confirmation, or the
- * plain install screen as a fallback. [InstallResultReceiver] posts here instead of starting the
- * activity itself, because Android 10+ silently drops activity starts from a receiver while the
- * app has no visible window. The update dialog's code shows it once the app is resumed.
+ * plain install screen. Nothing in the updater starts these activities itself: the result
+ * arrives in a receiver, and the install runs after a background download, and Android 10+
+ * silently drops activity starts while the app has no visible window. The update dialog's code
+ * opens what waits here once the app is resumed.
  */
 object PendingInstallScreen {
 
-    private val slot = MutableStateFlow<Intent?>(null)
-    val pending: StateFlow<Intent?> = slot.asStateFlow()
+    private val slot = MutableStateFlow<PendingInstall?>(null)
+    val pending: StateFlow<PendingInstall?> = slot.asStateFlow()
 
-    fun post(intent: Intent) {
-        slot.value = intent
+    fun post(install: PendingInstall) {
+        slot.value = install
     }
 
     /** Returns the waiting screen and empties the slot, so it is shown once. */
-    fun take(): Intent? = slot.getAndUpdate { null }
+    fun take(): PendingInstall? = slot.getAndUpdate { null }
 }
