@@ -82,7 +82,8 @@ REMOTE_APK="kevbox-tv-$VER.apk"
 # the matching one together with the APK, so Android compiles the app during the install
 # instead of leaving it in the interpreter until idle maintenance (slow first day after every
 # update). An APK-only release still works; it is just slow on first launch.
-PROFILE_LINES=$(python3 "$REPO/scripts/list-install-profiles.py" "$(dirname "$APK")/output-metadata.json" "$APK_ABI")
+PROFILE_LINES=$(python3 "$REPO/scripts/list-install-profiles.py" "$(dirname "$APK")/output-metadata.json" "$APK_ABI") \
+  || { note "⚠ Could not list compile profiles"; PROFILE_LINES=""; }
 [[ -n "$PROFILE_LINES" ]] || note "⚠ No compile profiles found for $APK_ABI; publishing the APK alone"
 
 # Stage everything under its published name so one scp and one ssh do the whole upload
@@ -120,7 +121,10 @@ done
 # Write version.json on the host (kevbox-support style: one inline `sudo tee` heredoc).
 # Escape notes for JSON embedding (backslashes, double-quotes, newlines); keep notes concise.
 NOTES_ESC=${NOTES//\\/\\\\}; NOTES_ESC=${NOTES_ESC//\"/\\\"}; NOTES_ESC=${NOTES_ESC//$'\n'/ }
-ssh "$SSH_ALIAS" -p "$SSH_PORT" "sudo tee $WEB_ROOT/version.json > /dev/null <<EOF
+# The delimiter is quoted so the REMOTE shell leaves the body alone: every value is already
+# filled in here, and an unquoted heredoc would expand $ and backticks in the notes and turn
+# their escaped \\ back into \, writing invalid JSON that breaks every member's update check.
+ssh "$SSH_ALIAS" -p "$SSH_PORT" "sudo tee $WEB_ROOT/version.json > /dev/null <<'EOF'
 {
   \"versionCode\": $NEW_CODE,
   \"versionName\": \"$VER\",

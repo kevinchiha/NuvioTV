@@ -13,9 +13,14 @@ class ApkDownloader @Inject constructor(
     private val okHttpClient: OkHttpClient
 ) {
 
+    /**
+     * [callTimeoutMs] caps the whole call, connect included; 0 means no cap, which suits the
+     * large APK. Small downloads that must not stall an install (the compile profile) pass one.
+     */
     suspend fun download(
         url: String,
         destinationFile: File,
+        callTimeoutMs: Long = 0L,
         onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit
     ): Result<File> {
         return runCatching {
@@ -37,7 +42,7 @@ class ApkDownloader @Inject constructor(
             val downloadClient = okHttpClient.newBuilder()
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .writeTimeout(0, TimeUnit.MILLISECONDS)
-                .callTimeout(0, TimeUnit.MILLISECONDS)
+                .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
                 .build()
 
             downloadClient.newCall(request).execute().use { response ->

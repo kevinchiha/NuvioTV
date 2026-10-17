@@ -11,6 +11,8 @@ import java.io.File
 /**
  * Receives the result of [ApkInstaller]'s session install. Android first answers with
  * STATUS_PENDING_USER_ACTION and the confirm screen to show; after that, a final status.
+ * Screens go through [PendingInstallScreen] rather than startActivity here: Android 10+ drops
+ * activity starts from a receiver while the app is not visible, without an error.
  * Not exported: only the PendingIntent this app hands to PackageInstaller can reach it.
  */
 class InstallResultReceiver : BroadcastReceiver() {
@@ -21,10 +23,12 @@ class InstallResultReceiver : BroadcastReceiver() {
         when (InstallStatusAction.forStatus(status)) {
             InstallStatusAction.CONFIRM -> {
                 val confirm = confirmIntent(intent)
-                val shown = confirm != null && runCatching {
-                    context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }.onFailure { Log.w(TAG, "Could not show the install confirmation", it) }.isSuccess
-                if (!shown) fallback(context, apkPath)
+                if (confirm != null) {
+                    PendingInstallScreen.post(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } else {
+                    Log.w(TAG, "Session needs confirmation but sent no screen; using the plain installer")
+                    fallback(context, apkPath)
+                }
             }
             InstallStatusAction.NOTHING -> Log.i(TAG, "Session install finished with status $status")
             InstallStatusAction.FALLBACK -> {
@@ -36,9 +40,13 @@ class InstallResultReceiver : BroadcastReceiver() {
     }
 
     private fun fallback(context: Context, apkPath: String?) {
-        val apk = apkPath?.let(::File)?.takeIf { it.exists() } ?: return
-        runCatching { ApkInstaller.launchViewInstall(context, apk) }
-            .onFailure { Log.w(TAG, "Plain installer fallback failed", it) }
+        val apk = apkPath?.let(::File)?.takeIf { it.exists() }
+        if (apk == null) {
+            Log.w(TAG, "No APK to fall back to (path=$apkPath); the next Install press starts over")
+            return
+        }
+        runCatching { PendingInstallScreen.post(ApkInstaller.buildViewInstallIntent(context, apk)) }
+            .onFailure { Log.w(TAG, "Could not prepare the plain installer", it) }
     }
 
     @Suppress("DEPRECATION")

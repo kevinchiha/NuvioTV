@@ -17,4 +17,11 @@ object InstallProfile {
      */
     fun fileNameFor(apkFileName: String): String =
         apkFileName.removeSuffix(".apk") + ".dm"
+
+    /**
+     * Whether to install through a PackageInstaller session (APK + profile) instead of the
+     * plain install screen. Android only reads `.dm` files from Android 9 (API 28).
+     */
+    fun useSession(hasProfile: Boolean, sdkInt: Int): Boolean =
+        hasProfile && sdkInt >= 28
 }

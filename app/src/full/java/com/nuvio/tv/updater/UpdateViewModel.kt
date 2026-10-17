@@ -48,6 +48,9 @@ class UpdateViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(UpdateUiState())
     val uiState: StateFlow<UpdateUiState> = _uiState.asStateFlow()
 
+    // One install at a time; see installUpdateOrRequestPermission.
+    private var installJob: Job? = null
+
     init {
         // Lightweight check on app start.
         checkForUpdates(force = false, showNoUpdateFeedback = false)
@@ -78,6 +81,10 @@ class UpdateViewModel @Inject constructor(
             // Drop a now-installed/stale cached pre-download (file + pointer) so it can't resurface.
             if (!decision.isUpdateAvailable && cachedApkPath != null) {
                 runCatching { File(cachedApkPath).delete() }
+                runCatching {
+                    val apk = File(cachedApkPath)
+                    File(apk.parentFile, InstallProfile.fileNameFor(apk.name)).delete()
+                }
                 updatePreferences.clearPredownload()
             }
 
@@ -251,8 +258,6 @@ class UpdateViewModel @Inject constructor(
                 }
         }
     }
-
-    private var installJob: Job? = null
 
     fun openUnknownSourcesSettings() {
         ApkInstaller.buildUnknownSourcesSettingsIntent(context)?.let { intent ->

@@ -83,6 +83,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.runtime.DisposableEffect
 import com.nuvio.tv.R
+import android.util.Log
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.withStateAtLeast
+import com.nuvio.tv.updater.PendingInstallScreen
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -94,6 +99,22 @@ fun UpdatePromptDialog(
     onIgnore: () -> Unit,
     onOpenUnknownSources: () -> Unit
 ) {
+    // Show an install screen the session receiver left waiting (see PendingInstallScreen),
+    // only once the app is resumed so Android can't drop the start. Placed above the early
+    // return so it also runs while the dialog is closed.
+    val pendingInstall by PendingInstallScreen.pending.collectAsState()
+    val installContext = LocalContext.current
+    val installLifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(pendingInstall) {
+        if (pendingInstall == null) return@LaunchedEffect
+        installLifecycle.withStateAtLeast(Lifecycle.State.RESUMED) {
+            PendingInstallScreen.take()?.let { screen ->
+                runCatching { installContext.startActivity(screen) }
+                    .onFailure { Log.w("UpdatePromptDialog", "Could not open the install screen", it) }
+            }
+        }
+    }
+
     if (!state.showDialog) return
 
     val closeFocusRequester = remember { FocusRequester() }

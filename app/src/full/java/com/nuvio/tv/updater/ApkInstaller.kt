@@ -43,7 +43,7 @@ object ApkInstaller {
      * the main thread.
      */
     fun launchInstall(context: Context, apkFile: File, profileFile: File? = null) {
-        if (profileFile != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        if (profileFile != null && InstallProfile.useSession(hasProfile = true, sdkInt = Build.VERSION.SDK_INT)) {
             val started = runCatching { installWithSession(context, apkFile, profileFile) }
                 .onFailure { Log.w(TAG, "Session install could not start; using the plain installer", it) }
                 .isSuccess
@@ -54,21 +54,29 @@ object ApkInstaller {
 
     /** The plain install screen with only the APK (no compile profile). */
     fun launchViewInstall(context: Context, apkFile: File) {
+        context.startActivity(buildViewInstallIntent(context, apkFile))
+    }
+
+    fun buildViewInstallIntent(context: Context, apkFile: File): Intent {
         val authority = "${BuildConfig.APPLICATION_ID}.fileprovider"
         val uri = FileProvider.getUriForFile(context, authority, apkFile)
 
-        val intent = Intent(Intent.ACTION_VIEW)
+        return Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-        context.startActivity(intent)
     }
 
     private fun installWithSession(context: Context, apkFile: File, profileFile: File) {
         val installer = context.packageManager.packageInstaller
+        // An earlier attempt that never got a final answer (confirmation left open, app killed)
+        // still holds a full copy of the APK in /data/app. Clear those before copying again.
+        installer.mySessions.forEach { old -> runCatching { installer.abandonSession(old.sessionId) } }
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-            .apply { setAppPackageName(context.packageName) }
+            .apply {
+                setAppPackageName(context.packageName)
+                setSize(apkFile.length() + profileFile.length())
+            }
         val sessionId = installer.createSession(params)
         try {
             installer.openSession(sessionId).use { session ->

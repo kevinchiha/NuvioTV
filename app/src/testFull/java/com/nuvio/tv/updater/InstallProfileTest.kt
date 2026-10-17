@@ -2,7 +2,9 @@ package com.nuvio.tv.updater
 
 import com.nuvio.tv.updater.model.ProfileAsset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InstallProfileTest {
@@ -50,5 +52,25 @@ class InstallProfileTest {
     @Test
     fun `profile file name for a name without apk extension appends dm`() {
         assertEquals("kevbox-tv.dm", InstallProfile.fileNameFor("kevbox-tv"))
+    }
+
+    @Test
+    fun `uses the session route with a profile on Android 9`() {
+        assertTrue(InstallProfile.useSession(hasProfile = true, sdkInt = 28))
+    }
+
+    @Test
+    fun `uses the session route with a profile on Android 16`() {
+        assertTrue(InstallProfile.useSession(hasProfile = true, sdkInt = 36))
+    }
+
+    @Test
+    fun `uses the plain screen without a profile`() {
+        assertFalse(InstallProfile.useSession(hasProfile = false, sdkInt = 31))
+    }
+
+    @Test
+    fun `uses the plain screen below Android 9 even with a profile`() {
+        assertFalse(InstallProfile.useSession(hasProfile = true, sdkInt = 27))
     }
 }
