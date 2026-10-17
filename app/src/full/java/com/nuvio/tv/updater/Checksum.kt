@@ -7,10 +7,12 @@ import java.security.MessageDigest
  * SHA-256 verification for downloaded APKs (ported from kevbox-support `Checksum`).
  *
  * This is an INTEGRITY check (guards against a corrupted/truncated download), NOT authenticity:
- * the hash comes from the same host as the APK (over the app's trust-all OkHttpClient), so a
- * forged manifest can supply a matching hash. Authenticity is enforced at install time by
- * Android's signing-certificate match against the installed app (the release keystore).
- * See the spec's Security section.
+ * the hash comes from the same host as the APK, so whoever controls that host can supply a
+ * matching hash. (The default OkHttpClient does validate TLS; the trust-all client is the
+ * separate `addonPermissive` one.) Authenticity is enforced at install time by Android's
+ * signing-certificate match against the installed app (the release keystore). The `.dm`
+ * compile profile is not covered by that signature, so ProfileFetcher also limits what a
+ * `.dm` may contain. See the spec's Security section.
  */
 internal object Checksum {
 
