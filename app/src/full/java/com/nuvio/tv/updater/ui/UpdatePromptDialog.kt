@@ -84,10 +84,11 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.runtime.DisposableEffect
 import com.nuvio.tv.R
 import android.util.Log
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.withStateAtLeast
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.filterNotNull
 import com.nuvio.tv.updater.ApkInstaller
+import com.nuvio.tv.updater.PendingInstall
 import com.nuvio.tv.updater.PendingInstallScreen
 import java.io.File
 
@@ -101,25 +102,29 @@ fun UpdatePromptDialog(
     onIgnore: () -> Unit,
     onOpenUnknownSources: () -> Unit
 ) {
-    // Show an install screen the session receiver left waiting (see PendingInstallScreen),
-    // only once the app is resumed so Android can't drop the start. Placed above the early
-    // return so it also runs while the dialog is closed.
-    val pendingInstall by PendingInstallScreen.pending.collectAsState()
+    // Open an install screen the updater left waiting (see PendingInstallScreen). Placed above
+    // the early return so it also runs while the dialog is closed. Android silently drops an
+    // activity start made in the first moments after the app comes back to the front, before
+    // its window counts as visible (seen on a TCL TV: started 60 ms after resume, never shown).
+    // So wait a little after resume, and if the app is still in front a moment after the start,
+    // the screen never opened: put it back for another try.
     val installContext = LocalContext.current
     val installLifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(pendingInstall) {
-        if (pendingInstall == null) return@LaunchedEffect
-        installLifecycle.withStateAtLeast(Lifecycle.State.RESUMED) {
-            val waiting = PendingInstallScreen.take() ?: return@withStateAtLeast
-            val opened = runCatching { installContext.startActivity(waiting.screen) }
-                .onFailure { Log.w("UpdatePromptDialog", "Could not open the install screen", it) }
-                .isSuccess
-            // The confirm screen failed (e.g. an OEM build without it): install without the
-            // profile through the plain screen, so a profile problem never blocks the update.
-            val apk = waiting.fallbackApkPath?.let(::File)?.takeIf { it.exists() }
-            if (!opened && apk != null) {
-                runCatching { installContext.startActivity(ApkInstaller.buildViewInstallIntent(installContext, apk)) }
-                    .onFailure { Log.w("UpdatePromptDialog", "Plain installer fallback failed", it) }
+    LaunchedEffect(Unit) {
+        installLifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            PendingInstallScreen.pending.filterNotNull().collect {
+                delay(INSTALL_SCREEN_OPEN_DELAY_MS)
+                val waiting = PendingInstallScreen.take() ?: return@collect
+                openInstallScreen(installContext, waiting)
+                // A screen that opened pauses this activity, which cancels this wait.
+                delay(INSTALL_SCREEN_CHECK_MS)
+                val again = waiting.retry()
+                if (again != null) {
+                    Log.w("UpdatePromptDialog", "Install screen did not open; try ${again.attempt}")
+                    PendingInstallScreen.post(again)
+                } else {
+                    Log.w("UpdatePromptDialog", "Install screen did not open; giving up until the next Install press")
+                }
             }
         }
     }
@@ -572,3 +577,19 @@ private fun formatSpeed(bytesPerSec: Long): String =
 /** "Ns left" under a minute, else "Nm Ns left" — mirrors kevbox UpdateDialog.formatEta. */
 private fun formatEta(seconds: Long): String =
     if (seconds < 60) "${seconds}s left" else "${seconds / 60}m ${seconds % 60}s left"
+
+private const val INSTALL_SCREEN_OPEN_DELAY_MS = 500L
+private const val INSTALL_SCREEN_CHECK_MS = 1_500L
+
+private fun openInstallScreen(context: android.content.Context, waiting: PendingInstall) {
+    val opened = runCatching { context.startActivity(waiting.screen) }
+        .onFailure { Log.w("UpdatePromptDialog", "Could not open the install screen", it) }
+        .isSuccess
+    // The confirm screen failed (e.g. an OEM build without it): install without the profile
+    // through the plain screen, so a profile problem never blocks the update.
+    val apk = waiting.fallbackApkPath?.let(::File)?.takeIf { it.exists() }
+    if (!opened && apk != null) {
+        runCatching { context.startActivity(ApkInstaller.buildViewInstallIntent(context, apk)) }
+            .onFailure { Log.w("UpdatePromptDialog", "Plain installer fallback failed", it) }
+    }
+}

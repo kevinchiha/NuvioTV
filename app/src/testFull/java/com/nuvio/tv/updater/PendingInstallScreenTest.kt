@@ -31,4 +31,13 @@ class PendingInstallScreenTest {
         assertSame(second, PendingInstallScreen.pending.value)
         assertSame(second, PendingInstallScreen.take())
     }
+
+    @Test
+    fun `a dropped screen is retried at most three times`() {
+        val first = PendingInstall(screen = mockk<Intent>(), fallbackApkPath = null)
+        val second = first.retry()!!
+        val third = second.retry()!!
+        assertSame(first.screen, third.screen)
+        assertNull(third.retry())
+    }
 }

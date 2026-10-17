@@ -10,7 +10,18 @@ import kotlinx.coroutines.flow.getAndUpdate
  * An install screen to open, and the APK to fall back to (the plain install screen, without
  * the profile) if [screen] can't be opened. Null when [screen] already is the plain one.
  */
-data class PendingInstall(val screen: Intent, val fallbackApkPath: String?)
+data class PendingInstall(
+    val screen: Intent,
+    val fallbackApkPath: String?,
+    val attempt: Int = 1,
+) {
+    /** The same screen for another try, or null once [MAX_ATTEMPTS] were spent. */
+    fun retry(): PendingInstall? = if (attempt < MAX_ATTEMPTS) copy(attempt = attempt + 1) else null
+
+    companion object {
+        const val MAX_ATTEMPTS = 3
+    }
+}
 
 /**
  * One install screen waiting to be shown: Android's "Install this update?" confirmation, or the
