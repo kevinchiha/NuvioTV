@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kevbox_update_install_warning">سيُغلق KevBox لمدة دقيقة تقريبًا أثناء التثبيت. انتظر دقيقة واحدة قبل فتحه مرة أخرى.</string>
+</resources>

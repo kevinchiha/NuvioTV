@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- KevBox-only updater strings, kept out of upstream's strings.xml so upstream merges never touch them. -->
+<resources>
+    <!-- Shown above Install. Android compiles the update for about a minute and refuses to open the app until it is done. -->
+    <string name="kevbox_update_install_warning">KEVBOX WILL CLOSE FOR ABOUT A MINUTE WHILE IT INSTALLS. WAIT ONE MINUTE BEFORE OPENING IT AGAIN.</string>
+</resources>

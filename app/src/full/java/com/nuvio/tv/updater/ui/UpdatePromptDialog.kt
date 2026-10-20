@@ -460,6 +460,14 @@ fun UpdatePromptDialog(
                     }
                 }
 
+                if (showInstallWarning(state)) {
+                    Text(
+                        text = stringResource(R.string.kevbox_update_install_warning),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = NuvioColors.TextPrimary
+                    )
+                }
+
                 if (state.showUnknownSourcesDialog) {
                     Text(
                         text = stringResource(R.string.update_unknown_sources),
@@ -577,6 +585,15 @@ private fun formatSpeed(bytesPerSec: Long): String =
 /** "Ns left" under a minute, else "Nm Ns left" — mirrors kevbox UpdateDialog.formatEta. */
 private fun formatEta(seconds: Long): String =
     if (seconds < 60) "${seconds}s left" else "${seconds / 60}m ${seconds % 60}s left"
+
+/**
+ * Warn next to Install that the app will be gone for a while. Android compiles the update with
+ * its speed-up file and refuses to start the app until that finishes (about a minute on a busy
+ * TV), and by then neither our screen nor Android's confirm screen is showing. Seen on the TCL
+ * 2026-10-20: eight presses of the app icon refused with "package is currently frozen".
+ */
+internal fun showInstallWarning(state: UpdateUiState): Boolean =
+    state.downloadedApkPath != null && !state.showUnknownSourcesDialog
 
 private const val INSTALL_SCREEN_OPEN_DELAY_MS = 500L
 private const val INSTALL_SCREEN_CHECK_MS = 1_500L
