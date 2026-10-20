@@ -2,8 +2,10 @@ package com.nuvio.tv.data.local
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler // KevBox: KEVBOX-TV-5
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences // KevBox: KEVBOX-TV-5
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -13,7 +15,12 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.lastSignInDataStore: DataStore<Preferences> by preferencesDataStore(name = "last_sign_in")
+// KevBox: a broken file (all zero bytes after a power cut or a kill mid-save) resets to empty
+// instead of throwing on every read, which crash-looped the app until a data clear (KEVBOX-TV-5).
+private val Context.lastSignInDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "last_sign_in",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 /**
  * Remembers the last account that successfully signed in on this device. The email is stored in

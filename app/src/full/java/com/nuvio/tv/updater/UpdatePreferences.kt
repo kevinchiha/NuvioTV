@@ -2,8 +2,10 @@ package com.nuvio.tv.updater
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler // KevBox: KEVBOX-TV-5
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences // KevBox: KEVBOX-TV-5
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -14,7 +16,12 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.updateDataStore: DataStore<Preferences> by preferencesDataStore(name = "update_settings")
+// KevBox: a broken file (all zero bytes after a power cut or a kill mid-save) resets to empty
+// instead of throwing on every read, which crash-looped the app until a data clear (KEVBOX-TV-5).
+private val Context.updateDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "update_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 @Singleton
 class UpdatePreferences @Inject constructor(
