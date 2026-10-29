@@ -1,0 +1,618 @@
+{
+  "status": "complete",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-5-5"
+  },
+  "message": "Review complete: 15 finding(s) across 33 selected item(s).",
+  "summary": {
+    "files_reviewed": 33,
+    "comments": 15,
+    "total_tokens": 2543994,
+    "input_tokens": 2480387,
+    "output_tokens": 63607,
+    "cache_read_tokens": 1851454,
+    "cache_write_tokens": 628723,
+    "elapsed": "3m1s"
+  },
+  "tool_calls": {
+    "total": 100,
+    "by_tool": {
+      "code_comment": 10,
+      "code_search": 36,
+      "file_find": 2,
+      "file_read": 41,
+      "file_read_diff": 11
+    },
+    "failure": 0,
+    "failure_by_tool": {},
+    "failure_details": []
+  },
+  "comments": [
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt",
+      "content": "`SilentInstall.attempt` is called from inside `runCheck()`, so it runs while `runMutex.withLock` is still held. That means the worker's check lock stays held for the whole silent attempt: re-hashing the full APK, fetching the profile, waiting up to 15 s for `AuthManager`, then writing and committing the session. A concurrent periodic run or one-shot kick blocks on `runMutex` for all of that. It also means the process can be killed for the install while the worker is still running, before it returns `Result.success()`, so WorkManager may rerun the job. The comment says the attempt \"never waits on this one\". That's true for the attempt's own `tryLock`, but the reverse isn't: other check runs do wait on it. Consider releasing `runMutex` first. For example, have `runCheck()` return whether a valid pre-download exists, then call `SilentInstall.attempt` in `doWork()` after `withLock` returns.",
+      "existing_code": "        if (keepName != null) {\n            SilentInstall.attempt(applicationContext, kotlin.Result.success(update), SilentTrigger.DAILY_CHECK)\n        }",
+      "start_line": 126,
+      "end_line": 128,
+      "category": "performance",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdaterTestUrlTrustTest.kt",
+      "content": "The HTTP trust path can install code silently, so it needs a few adversarial cases that are missing now. Add tests for userinfo confusion (`http://10.0.2.2:8765@evil.com/k.apk`), which `java.net.URI` currently resolves to host `evil.com` and refuses. Also add a malformed or empty-host URL (`http://`, `http:///k.apk`) and a blank or whitespace-only `testBaseUrl`. These pin down today's correct behavior, so a later parser swap (e.g. to `Uri.parse` or string splitting) can't quietly weaken it.",
+      "suggestion_code": "    @Test\n    fun `userinfo cannot spoof the test host`() {\n        assertFalse(trusted(\"http://10.0.2.2:8765@evil.com/k.apk\"))\n    }\n\n    @Test\n    fun `malformed or hostless asset URLs are refused`() {\n        assertFalse(trusted(\"http://\"))\n        assertFalse(trusted(\"http:///k.apk\"))\n        assertFalse(trusted(\"http://10.0.2.2:8765/k.apk\", testBaseUrl = \"   \"))\n    }\n",
+      "existing_code": "    @Test\n    fun `the test host matches case-insensitively`() {",
+      "start_line": 59,
+      "end_line": 60,
+      "category": "test",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+      "content": "If the tracker is not registered, this fails open. `register` can throw, and `PluginRuntimeHooks` swallows the error. When that happens, `log == null`, so `startedActivities` reads 0. `storeFor` then makes a new `PrefsVisibilityStore` whose `last_start`/`last_stop` are never written again in this process. `SilentInstallDecision.quiet` takes those stale or missing times as \"out of sight since boot\" and returns ELIGIBLE. The daily `UpdateCheckWorker` (`SilentTrigger.DAILY_CHECK`) still calls `SilentInstall.attempt`, so it can silently install over a member who is watching. Expose the registration state, e.g. `val isRegistered get() = log != null`, and have `SilentInstallGuard.quietInput` refuse when it is false (return `APP_ON_SCREEN` or a dedicated reason). Don't let an unknown state count as 0 started activities.",
+      "suggestion_code": "    /** False when [register] never ran or failed in this process: visibility is unknown. */\n    val isRegistered: Boolean get() = log != null\n\n    val startedActivities: Int get() = log?.startedActivities ?: 0",
+      "existing_code": "    val startedActivities: Int get() = log?.startedActivities ?: 0",
+      "start_line": 85,
+      "end_line": 85,
+      "category": "bug",
+      "severity": "high"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdaterTestUrlTrustTest.kt",
+      "content": "There's no test for an `https` test base URL, and `build.gradle.kts` accepts one (`scheme != \"http\" \u0026\u0026 scheme != \"https\"`). With `testBaseUrl = \"https://10.0.2.2:8765\"`, `isTrustedAssetUrl` currently trusts `http://10.0.2.2:8765/k.apk`, because it only checks host and port, not the test URL's scheme. So a server the developer set up as https can be served over plain http. Since this path can install silently, please add a test that pins the intended behavior (most likely: refuse the http asset). Either fix the implementation to compare schemes, or make the Gradle check accept only `http`.",
+      "suggestion_code": "    @Test\n    fun `an https test URL does not make plain http on its host and port trusted`() {\n        assertFalse(trusted(\"http://10.0.2.2:8765/k.apk\", testBaseUrl = \"https://10.0.2.2:8765\"))\n    }\n\n    @Test\n    fun `a test URL with surrounding whitespace is trimmed`() {\n        assertTrue(trusted(\"http://10.0.2.2:8765/k.apk\", testBaseUrl = \" http://10.0.2.2:8765 \"))\n    }",
+      "existing_code": "    @Test\n    fun `a test URL without a port matches the http default port`() {",
+      "start_line": 52,
+      "end_line": 53,
+      "category": "test",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdateManifestMappingTest.kt",
+      "content": "Two numeric edge cases that change how `SilentBlock.parse` behaves aren't covered: a number too big for a Long (e.g. `{\"after\": 99999999999999999999}`) and exponent notation (`{\"after\": 1.793e12}`). `longOrNull` returns null for both, so both become \"no block\" without any warning. That's probably fine for the overflow, but `release.sh` or a JSON tool could write a valid timestamp in exponent form, and silent install would then be turned off with no sign of it. Please add tests so this behavior is a deliberate, documented choice.",
+      "suggestion_code": "    @Test\n    fun `malformed block - after overflows Long`() =\n        assertNoSilentBlockAndRestMaps(\"\"\"{\"after\": 99999999999999999999}\"\"\")\n\n    @Test\n    fun `malformed block - after in exponent form`() =\n        assertNoSilentBlockAndRestMaps(\"\"\"{\"after\": 1.793e12}\"\"\")",
+      "existing_code": "    @Test\n    fun `malformed block - after is a fraction`() =\n        assertNoSilentBlockAndRestMaps(\"\"\"{\"after\": 1.5}\"\"\")",
+      "start_line": 160,
+      "end_line": 162,
+      "category": "test",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/SilentPromptHold.kt",
+      "content": "`holdsPrompt` hides the app-open prompt whenever a silent block exists, even if the silent path can't run for this version. The worst case is a missing pre-download. `shouldDownload` only downloads on an unmetered network, so a box on a metered or failing connection never gets the APK and `eligibility` keeps returning `NO_PREDOWNLOAD`, but the prompt stays hidden until `after + 72h`. If `after` is far in the future (or a typo), the prompt is hidden for that whole time. The same thing happens on a box that never goes quiet (the ambient screen), which goes against the non-goal that says such a box should get the prompt when someone uses it. Pass in whether a pre-download for `update.versionCode` exists and return false without one. Consider also limiting how long the hold can last before `after`.",
+      "existing_code": "        // Overflow-safe form of `nowMs \u003c afterMs + SAFETY_NET_MS`.\n        return nowMs - block.afterMs \u003c SAFETY_NET_MS",
+      "start_line": 29,
+      "end_line": 30,
+      "category": "bug",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt",
+      "content": "`SystemClock` is imported but never used in this file. Remove it.",
+      "existing_code": "import android.os.SystemClock",
+      "start_line": 5,
+      "end_line": 5,
+      "category": "maintainability",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallDecision.kt",
+      "content": "This data class holds a lambda, so the generated `equals`/`hashCode` compare the function by identity. The early-user path in `SilentInstall.sequence` calls `copy(...)` and relies on the copy sharing the same lazy hash. That works today, but it's an easy contract to break by accident. Pass the checksum check to `eligibility` as its own parameter, or make this a plain class.",
+      "existing_code": "    val cachedSha256Matches: () -\u003e Boolean, // called last, only once every other check passes",
+      "start_line": 36,
+      "end_line": 36,
+      "category": "maintainability",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+      "content": "The test name promises a 15 s wait, but nothing checks that the wait happened. The assertions would still pass if `signedInUserId` gave up on `Loading` straight away, or if `ACCOUNT_WAIT_MS` dropped to 0. Then a cold-process early user would never get the grace period meant for AuthManager to load. Under `runTest` the virtual clock moves forward by the timeout, so assert it.",
+      "suggestion_code": "        SilentInstall.run(env, Result.success(update), SilentTrigger.JOB, Mutex())\n        assertEquals(SilentInstall.ACCOUNT_WAIT_MS, testScheduler.currentTime)",
+      "existing_code": "    fun `an account still loading after 15 s counts as not early`() = runTest {\n        val env = env(outOfSight)\n        env.auth.value = AuthState.Loading\n        val update = update(afterMs = nowMs + 1, earlyUsers = listOf(userId))\n        SilentInstall.run(env, Result.success(update), SilentTrigger.JOB, Mutex())",
+      "start_line": 208,
+      "end_line": 212,
+      "category": "test",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+      "content": "`FakeEnv` hardcodes `5_000_000L` and `1030`, copies of the outer `nowMs` and `live`. A nested class can't read them, so if someone edits the outer values, the fakes drift apart without any error. For example, tests that rely on `afterMs = nowMs + 1` would quietly change meaning. Move these into a `companion object` with `const val`s and use them in both places. Also, `var quiet` is never reassigned, so it can be a `val`.",
+      "existing_code": "        override fun nowMs() = 5_000_000L\n        override suspend fun predownloadPath(): String? = \"/cache/updates/kevbox-1030.apk\"\n        override suspend fun predownloadVersionCode(): Int? = 1030",
+      "start_line": 70,
+      "end_line": 72,
+      "category": "maintainability",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt",
+      "content": "If the check fails, this treats external playback as not running. For a guard whose job is to keep a silent install away from a member who is watching something, it should fail closed. If `getRunningServices` throws (a `SecurityException`, an OEM quirk), the silent install can restart the app in the middle of external playback. Return `true` here so the attempt is skipped and tried again on the next trigger. Logging the failure would also help.",
+      "suggestion_code": "        } catch (t: Throwable) {\n            Log.w(SILENT_LOG_TAG, \"Could not read running services: ${t.javaClass.simpleName}\")\n            true\n        }",
+      "existing_code": "        } catch (t: Throwable) {\n            false\n        }",
+      "start_line": 86,
+      "end_line": 88,
+      "category": "bug",
+      "severity": "low"
+    },
+    {
+      "path": "release.sh",
+      "content": "The script only looks for `--no-silent` in the first argument. Silent install is now the default, so this mistake fails open. `./release.sh 0.7.5-beta --no-silent \"notes\"` publishes a release that installs silently on every box after 24 h, and the notes text becomes `--no-silent notes`. A typo such as `--no-silnet` is taken as the versionName and gets written into build.gradle.kts. Since a committed silent install can't be undone, reject any versionName that starts with `-`, and either reject `--no-silent` anywhere after the version or remove it from the notes and honour it.",
+      "suggestion_code": "NO_SILENT=0\nif [[ \"${1:-}\" == \"--no-silent\" ]]; then\n  NO_SILENT=1\n  shift\nfi\nVER=\"${1:-}\"\n[[ \"$VER\" == -* ]] \u0026\u0026 err \"Unknown option '$VER'. Usage: $0 [--no-silent] \u003cversionName\u003e [notes...]\"\nfor a in \"${@:2}\"; do\n  [[ \"$a\" == \"--no-silent\" ]] \u0026\u0026 err \"--no-silent must come before \u003cversionName\u003e\"\ndone",
+      "existing_code": "NO_SILENT=0\nif [[ \"${1:-}\" == \"--no-silent\" ]]; then\n  NO_SILENT=1\n  shift\nfi\nVER=\"${1:-}\"",
+      "start_line": 43,
+      "end_line": 48,
+      "category": "bug",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+      "content": "`FakeEnv` hardcodes `predownloadPath`, `fileExists` and `sha256Matches` to success, so no test can reach `SilentInstall.sequence`'s pre-download wiring: `cachedFileExists = path != null \u0026\u0026 env.fileExists(path)` and the lazy `shaMatches` that checks `path != null \u0026\u0026 update != null`. If that wiring broke (for example, `cachedFileExists` ignored a null path, or the sha result was flipped), a corrupt or missing APK could reach `openSession`, and every test here would still pass. The decision tests only check the pure function, not how `run` builds its input. Make these overridable (`var fileExists = true`, `var shaMatches = true`, `var path: String? = ...`). Then add `run`-level cases that assert `NO_PREDOWNLOAD` and `PREDOWNLOAD_CHECKSUM_MISMATCH` and check that no session calls happen.",
+      "suggestion_code": "        var path: String? = \"/cache/updates/kevbox-1030.apk\"\n        var exists = true\n        var shaOk = true\n        override suspend fun predownloadPath(): String? = path\n        override fun fileExists(path: String) = exists\n        override fun sha256Matches(path: String, sha256: String): Boolean {\n            hashes++\n            return shaOk\n        }",
+      "existing_code": "        override fun fileExists(path: String) = true\n        override fun sha256Matches(path: String, sha256: String): Boolean {\n            hashes++\n            return true\n        }",
+      "start_line": 73,
+      "end_line": 77,
+      "category": "test",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt",
+      "content": "`holdsPrompt` uses `nowMs - afterMs \u003c SAFETY_NET_MS` so the check can't overflow. That's the reason it doesn't write `nowMs \u003c afterMs + SAFETY_NET_MS`. No test pins this: a very large `after` from the manifest (for example, `Long.MAX_VALUE`) isn't covered. If someone \"simplifies\" it back to the addition form, `afterMs + SAFETY_NET_MS` wraps negative and the prompt is never held, and the tests stay green. Add a case with `update(silentAfterMs = Long.MAX_VALUE)` that asserts `holds(...)` is true.",
+      "existing_code": "        assertFalse(\"at after + 72 h\", holds(nowMs = afterMs + SilentPromptHold.SAFETY_NET_MS))",
+      "start_line": 49,
+      "end_line": 49,
+      "category": "test",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+      "content": "Dead code: nothing calls `AppVisibilityTracker.lastStartElapsedMs(context)` or `lastStopElapsedMs(context)`. `SilentInstallGuard.buildQuietInput` reads the keys straight from `storeFor(context)`. The same is true of `VisibilityLog.lastStartElapsedMs()`/`lastStopElapsedMs()`, which only tests call. That leaves two read paths for the same data that can drift apart. Either remove these, or have `SilentInstallGuard` use them so there is only one path.",
+      "existing_code": "    fun lastStartElapsedMs(context: Context): Long? = storeFor(context).getLong(KEY_LAST_START)\n\n    fun lastStopElapsedMs(context: Context): Long? = storeFor(context).getLong(KEY_LAST_STOP)",
+      "start_line": 87,
+      "end_line": 89,
+      "category": "maintainability",
+      "severity": "low"
+    }
+  ],
+  "groups": [
+    {
+      "label": "Build config, manifest and release script for silent updater",
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/full/AndroidManifest.xml",
+        "release.sh"
+      ]
+    },
+    {
+      "label": "Silent install core: decision, guard, block, prompt hold, result action",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/updater/SilentBlock.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallDecision.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentPromptHold.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentResultAction.kt",
+        "app/src/full/java/com/nuvio/tv/updater/UpdaterBuild.kt"
+      ]
+    },
+    {
+      "label": "Silent install scheduling, worker, visibility tracking and runtime hooks",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/core/runtime/PluginRuntimeHooks.kt",
+        "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallScheduler.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt",
+        "app/src/full/java/com/nuvio/tv/updater/UpdateWorkerEntryPoint.kt"
+      ]
+    },
+    {
+      "label": "APK installer and install result handling",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/updater/ApkInstaller.kt",
+        "app/src/full/java/com/nuvio/tv/updater/InstallResultReceiver.kt"
+      ]
+    },
+    {
+      "label": "Update check/download flow, preferences, repository and model changes",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt",
+        "app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt",
+        "app/src/full/java/com/nuvio/tv/updater/UpdatePreferences.kt",
+        "app/src/full/java/com/nuvio/tv/updater/UpdateRepository.kt",
+        "app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt"
+      ]
+    },
+    {
+      "label": "Update UI: view model, main activity and about screen",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt",
+        "app/src/main/java/com/nuvio/tv/MainActivity.kt",
+        "app/src/main/java/com/nuvio/tv/ui/screens/settings/AboutScreen.kt"
+      ]
+    },
+    {
+      "label": "Silent install unit tests",
+      "files": [
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallGuardTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallSchedulerTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentResultActionTest.kt"
+      ]
+    },
+    {
+      "label": "Update manifest mapping and URL trust tests",
+      "files": [
+        "app/src/testFull/java/com/nuvio/tv/updater/UpdateManifestMappingTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/UpdaterTestUrlTrustTest.kt"
+      ]
+    }
+  ],
+  "session_id": "44c527c0-e7a1-42d0-b9d4-1b9e69ffe523",
+  "manifest": {
+    "schema_version": "ocr.run-manifest/v1",
+    "run_id": "44c527c0-e7a1-42d0-b9d4-1b9e69ffe523",
+    "operation": "review",
+    "terminal_state": "complete",
+    "repository": {
+      "identity_sha256": "e22ee2aa744b7795f4a03c50d70f6c8f98e9662b61352b6c00b1cd8d4fc31c90"
+    },
+    "input": {
+      "mode": "range",
+      "requested_from": "kevbox",
+      "requested_head": "phase/silent-self-update",
+      "resolved_base": "2d536308a7343411e360261b987c4a62546aa1c1",
+      "resolved_head": "cdac10f8e87f1d4eed67861a59cc953cdfae00a9",
+      "exact_range": "2d536308a7343411e360261b987c4a62546aa1c1..cdac10f8e87f1d4eed67861a59cc953cdfae00a9",
+      "source_artifact_sha256": "893ffd57cfc6e0ebd5ce43513f0784601edaa87da9b41725cb856b72284529c1"
+    },
+    "execution": {
+      "ocr_version": "v1.13.3",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "configured_concurrency": 8,
+      "rule_config_sha256": "7bdde30da0c66ee5643876474d879e4d72b8803bf0501749f82291f5b9b2b87a",
+      "runtime_config_sha256": "93c1bae68fa824e3eb9a388b389d2b0cdbe98c00e45b7638e3c4d5afe2dbc39f"
+    },
+    "coverage": {
+      "selected": [
+        {
+          "item_id": "19e58e13243adce9cffe78f1771156e09e1575823a8c99861d7a9735bde66c70",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdatePreferences.kt",
+          "fingerprint": "50fa46f2ec13daae0cdadf939a49c64825cc418b87141abe1b42e3cef9a92042"
+        },
+        {
+          "item_id": "27c94635cb3596635b24144163d357bebdf6840b27d7d9b33503e89b140118e1",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentPromptHold.kt",
+          "fingerprint": "c7009dbb6c18cd3d66c05f490f9c81595c5f0e9c138d52ae6ecd949e2921b487"
+        },
+        {
+          "item_id": "2beab392b19cb815594ec68cdfe262915c18ab064d1330335ddf0ec08fe8ac34",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+          "fingerprint": "a7aa256a42fe84433fbf8726dd6e522267fc40b397ab2bfb83a525c5667e1871"
+        },
+        {
+          "item_id": "2dfdf2c49f6a94cfbf03e86026806ede1ce54850a089e72727302db4a7be7f6a",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt",
+          "fingerprint": "7e284d480ab639fc2fd48eefa8dbc67630d4d94d221ac6e3b45b1d5fccf535aa"
+        },
+        {
+          "item_id": "3fdac876dcfed11675e5eb907fb23fff0553403a6a585d3fd98e57dcc1d2b557",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdaterBuild.kt",
+          "fingerprint": "3b95e7f94e821e6e8827512269b772dba3c61fedfd9a46c087cf85c8eb9a1ec2"
+        },
+        {
+          "item_id": "410baab9b505b69f81b6eed5ac06d0eb2400a6322e34ebc143623151a94427d5",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt",
+          "fingerprint": "63ba30b4610bb33324e4f4828a93ac28619cd074f318c915b0a4cf26afc61f35"
+        },
+        {
+          "item_id": "45411808e87ef862145e0a3bf61730cdf45eb1e56397c9587edafd3d06149177",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallScheduler.kt",
+          "fingerprint": "1c666bfead7b148620e59fcb5401d8cf1f57bb46a84e7f9206f32d54323570de"
+        },
+        {
+          "item_id": "47eb431ae88645737b74c80ddb182dc87953ab5e430803988001ff9ea18ed3e6",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt",
+          "fingerprint": "b9c16a5c669ae54fc409d409ffa6563fc67d1913fe664c6a551b2bd92be1360c"
+        },
+        {
+          "item_id": "4c5de6b858fb4808b3a7f2b68c981d8d70f31ccaaec362a8067062637afb3054",
+          "path": "app/src/main/java/com/nuvio/tv/MainActivity.kt",
+          "fingerprint": "c439adceed8972ee438fea89bec43f6772bfe164929206a26e2a9a1a9455d25f"
+        },
+        {
+          "item_id": "54362dfdca3cb9acb4709deafbb7180415847f90e1ebcc23c00a2bb732df4682",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdateManifestMappingTest.kt",
+          "fingerprint": "73dc7f1ae34a1bc624df15df14518859332806eb719e330adda69a40ce27c6a6"
+        },
+        {
+          "item_id": "5ecec9ba7069d82174f1fe8ccd03fc67c61fe532e5f0cb6259a8afa817b1b832",
+          "path": "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+          "fingerprint": "772f4e908d5329ac97f584ababf7b281dc314b2c098f5359b8e27d87d1f054b4"
+        },
+        {
+          "item_id": "60b9d35d8f6c75379c7edaa8a27586134c2077da83f89e68e3aba8caf75c6da2",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateRepository.kt",
+          "fingerprint": "0d674ac12510c296726514bbd4242a5fc88f2971cda0bbe8262920f2faf4383c"
+        },
+        {
+          "item_id": "6ad07da47050f0aa019ceced0b8507831c4a59e232d62b83612720645edf40b8",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt",
+          "fingerprint": "04307852f9ff91c0f58e247e164f819428cd40b445887a3ea11a97d9bbae3ec6"
+        },
+        {
+          "item_id": "6e7d16599dace564f2e474aecc4cc936c37b79d3d705289a2b2208860f53eb4e",
+          "path": "app/src/main/java/com/nuvio/tv/ui/screens/settings/AboutScreen.kt",
+          "fingerprint": "4c42bd305d99a66c83f606fe1c7cd3377390112ce4abfb65ca72a285ac97b31a"
+        },
+        {
+          "item_id": "7182a0a3bbc9a076840bfa309483176711b5ab7edd2841491597b87b8068d7b7",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt",
+          "fingerprint": "f5253f0657410cef76a6e6c0f2adfc566859d8ad61eb5a2bfe25fe3aeccae488"
+        },
+        {
+          "item_id": "7526031cf9dab23d19d7d094a9ff6b9566ff0d07551266bc61522019ca204636",
+          "path": "app/src/full/java/com/nuvio/tv/updater/InstallResultReceiver.kt",
+          "fingerprint": "11fc9d299505b31cc3de6626ae242b55a587e3283265d7c7f465440022110e2a"
+        },
+        {
+          "item_id": "7c8f6dddc025da26ba16c45249796f9cbf0a1cf41895b9b6508c0da893a9a98c",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallDecision.kt",
+          "fingerprint": "134802d6df9756c6419259f25bc1298424e062e916867891f3e13e314f726897"
+        },
+        {
+          "item_id": "878528a69728afafbc4ea3d78df248de6004308769d576a7a4b20d2913ac2d83",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentResultActionTest.kt",
+          "fingerprint": "c3550f7b0b9b146dd37a66510d644eaf30207390b9d55e4280e4ee5a16c4e9ff"
+        },
+        {
+          "item_id": "87e3dde984497518ddad60027c2f2db83ffc49762c8abde4d1831a33e23e18a2",
+          "path": "app/src/full/AndroidManifest.xml",
+          "fingerprint": "9d76bd940acf6868fdfa87ea81ca630414ebe21948bd8ae119f1222203a424cc"
+        },
+        {
+          "item_id": "8bcf4ab42d6dce12faa00a68e1257862c15628598816d0dd86bf76ed5b2b2d69",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallSchedulerTest.kt",
+          "fingerprint": "16c28f1f12f9bbbad4771a7832dbec5ef0b2bb3f96e4f221704ba8b9a67700f5"
+        },
+        {
+          "item_id": "8ebb8184b41d816fc187c03279a9de16e2d893e1b03a34edc0e288bfaff1b543",
+          "path": "release.sh",
+          "fingerprint": "5caf7b836ac1b4b78dbce879a4a0dd40e4de6ced45558228c525162803a7275a"
+        },
+        {
+          "item_id": "98b072123643c417773365758e2cc9812cc5bea5673cfe7fd7640e072eb54e98",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentBlock.kt",
+          "fingerprint": "8ef6ec90884ef8ba74a4481c202ecd1cbff20634d900fbda09724553df4263fe"
+        },
+        {
+          "item_id": "a10e59cb23c8f233e13747bc2a907500410f1ce31c6a8a63b95b3c152cba68b3",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt",
+          "fingerprint": "7cb95831beedec3f8ad322e72f45619931d6638d8a65ba452dfcf11614a5d5ae"
+        },
+        {
+          "item_id": "a5343afc40918ec1b8eda239bca9597eca2af7e50b5e13152e7e46bde88a9dc2",
+          "path": "app/build.gradle.kts",
+          "fingerprint": "85b8eda72379a8ae8cb35580a61786b628bc95627dfede7f402b771829b2ad4f"
+        },
+        {
+          "item_id": "aba615befdde85c32b87602f4a444580bc83687667ea39fed1a2398dbf4b87fa",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallGuardTest.kt",
+          "fingerprint": "d7517d10590a9c422496c3934bc9e3f079f0604bd6acecb798914ee7b1d1a71b"
+        },
+        {
+          "item_id": "b6196c28f66476abd7046a4885234c3dc3414f27232fc7cbe62fb8a2ec45ca7b",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt",
+          "fingerprint": "15da1bde35aacc90861fbd51a0bd8babab0d265a00df6cd465b8b944978f1dea"
+        },
+        {
+          "item_id": "b7b36a644f11c7ec121101b309a377f87f2ae8196b92f5026be95abebdd2c039",
+          "path": "app/src/full/java/com/nuvio/tv/updater/ApkInstaller.kt",
+          "fingerprint": "c6bce6bd4e2d2733273f094677e304d744e9987052779fafed9120171eb0344b"
+        },
+        {
+          "item_id": "b81ae8969225e94abf006db0a95ee551e30cc4d75025b8c0be4310eabd91c7c7",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt",
+          "fingerprint": "d181eb7d54944d3c75c21e54478cca7b629218aa58603ead451383d74b02057e"
+        },
+        {
+          "item_id": "d8ef93958fd5a6ae05af587467bb1baaec6da94a206c98be92a819b4e5dcd8ff",
+          "path": "app/src/full/java/com/nuvio/tv/core/runtime/PluginRuntimeHooks.kt",
+          "fingerprint": "2ceae3070839d6ed284a9be9141671abaeae24db9e9f86f8f670c2dd53317a7e"
+        },
+        {
+          "item_id": "e3357f333a11292892831c133269f48b5aebd79c61e040e8e875d0765a225ad5",
+          "path": "app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt",
+          "fingerprint": "48b3db24ef371ea167b201df812dd3c5ba6d953119d808649d4e0f8f20b307ab"
+        },
+        {
+          "item_id": "f9547d059b735fda19688fe377c24469ea353ea74c7a602e5ce986251fd7b72a",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateWorkerEntryPoint.kt",
+          "fingerprint": "71d1ce6d9a7195c74eeca53db64e8d09f23daf12d69a342a678e0a917480c1e6"
+        },
+        {
+          "item_id": "fca207c3e8ff3fe421658751270dcb5f7bd4619302dca9ac115734b8ae604612",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdaterTestUrlTrustTest.kt",
+          "fingerprint": "08063ec290e1772502c8aacc979ea618790bd8823636db2721eff7955a4800e1"
+        },
+        {
+          "item_id": "fcfc642fb51382c27ca482a897778301e90f1c3e21372ff35efabf77e6061b91",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentResultAction.kt",
+          "fingerprint": "c18cd8e8c349edb010626838170ee5508495f2b27dcbf212afc993ce402ad7c0"
+        }
+      ],
+      "completed": [
+        {
+          "item_id": "19e58e13243adce9cffe78f1771156e09e1575823a8c99861d7a9735bde66c70",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdatePreferences.kt",
+          "fingerprint": "50fa46f2ec13daae0cdadf939a49c64825cc418b87141abe1b42e3cef9a92042"
+        },
+        {
+          "item_id": "27c94635cb3596635b24144163d357bebdf6840b27d7d9b33503e89b140118e1",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentPromptHold.kt",
+          "fingerprint": "c7009dbb6c18cd3d66c05f490f9c81595c5f0e9c138d52ae6ecd949e2921b487"
+        },
+        {
+          "item_id": "2beab392b19cb815594ec68cdfe262915c18ab064d1330335ddf0ec08fe8ac34",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+          "fingerprint": "a7aa256a42fe84433fbf8726dd6e522267fc40b397ab2bfb83a525c5667e1871"
+        },
+        {
+          "item_id": "2dfdf2c49f6a94cfbf03e86026806ede1ce54850a089e72727302db4a7be7f6a",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt",
+          "fingerprint": "7e284d480ab639fc2fd48eefa8dbc67630d4d94d221ac6e3b45b1d5fccf535aa"
+        },
+        {
+          "item_id": "3fdac876dcfed11675e5eb907fb23fff0553403a6a585d3fd98e57dcc1d2b557",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdaterBuild.kt",
+          "fingerprint": "3b95e7f94e821e6e8827512269b772dba3c61fedfd9a46c087cf85c8eb9a1ec2"
+        },
+        {
+          "item_id": "410baab9b505b69f81b6eed5ac06d0eb2400a6322e34ebc143623151a94427d5",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateDownloadDecision.kt",
+          "fingerprint": "63ba30b4610bb33324e4f4828a93ac28619cd074f318c915b0a4cf26afc61f35"
+        },
+        {
+          "item_id": "45411808e87ef862145e0a3bf61730cdf45eb1e56397c9587edafd3d06149177",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallScheduler.kt",
+          "fingerprint": "1c666bfead7b148620e59fcb5401d8cf1f57bb46a84e7f9206f32d54323570de"
+        },
+        {
+          "item_id": "47eb431ae88645737b74c80ddb182dc87953ab5e430803988001ff9ea18ed3e6",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt",
+          "fingerprint": "b9c16a5c669ae54fc409d409ffa6563fc67d1913fe664c6a551b2bd92be1360c"
+        },
+        {
+          "item_id": "4c5de6b858fb4808b3a7f2b68c981d8d70f31ccaaec362a8067062637afb3054",
+          "path": "app/src/main/java/com/nuvio/tv/MainActivity.kt",
+          "fingerprint": "c439adceed8972ee438fea89bec43f6772bfe164929206a26e2a9a1a9455d25f"
+        },
+        {
+          "item_id": "54362dfdca3cb9acb4709deafbb7180415847f90e1ebcc23c00a2bb732df4682",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdateManifestMappingTest.kt",
+          "fingerprint": "73dc7f1ae34a1bc624df15df14518859332806eb719e330adda69a40ce27c6a6"
+        },
+        {
+          "item_id": "5ecec9ba7069d82174f1fe8ccd03fc67c61fe532e5f0cb6259a8afa817b1b832",
+          "path": "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+          "fingerprint": "772f4e908d5329ac97f584ababf7b281dc314b2c098f5359b8e27d87d1f054b4"
+        },
+        {
+          "item_id": "60b9d35d8f6c75379c7edaa8a27586134c2077da83f89e68e3aba8caf75c6da2",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateRepository.kt",
+          "fingerprint": "0d674ac12510c296726514bbd4242a5fc88f2971cda0bbe8262920f2faf4383c"
+        },
+        {
+          "item_id": "6ad07da47050f0aa019ceced0b8507831c4a59e232d62b83612720645edf40b8",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt",
+          "fingerprint": "04307852f9ff91c0f58e247e164f819428cd40b445887a3ea11a97d9bbae3ec6"
+        },
+        {
+          "item_id": "6e7d16599dace564f2e474aecc4cc936c37b79d3d705289a2b2208860f53eb4e",
+          "path": "app/src/main/java/com/nuvio/tv/ui/screens/settings/AboutScreen.kt",
+          "fingerprint": "4c42bd305d99a66c83f606fe1c7cd3377390112ce4abfb65ca72a285ac97b31a"
+        },
+        {
+          "item_id": "7182a0a3bbc9a076840bfa309483176711b5ab7edd2841491597b87b8068d7b7",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt",
+          "fingerprint": "f5253f0657410cef76a6e6c0f2adfc566859d8ad61eb5a2bfe25fe3aeccae488"
+        },
+        {
+          "item_id": "7526031cf9dab23d19d7d094a9ff6b9566ff0d07551266bc61522019ca204636",
+          "path": "app/src/full/java/com/nuvio/tv/updater/InstallResultReceiver.kt",
+          "fingerprint": "11fc9d299505b31cc3de6626ae242b55a587e3283265d7c7f465440022110e2a"
+        },
+        {
+          "item_id": "7c8f6dddc025da26ba16c45249796f9cbf0a1cf41895b9b6508c0da893a9a98c",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallDecision.kt",
+          "fingerprint": "134802d6df9756c6419259f25bc1298424e062e916867891f3e13e314f726897"
+        },
+        {
+          "item_id": "878528a69728afafbc4ea3d78df248de6004308769d576a7a4b20d2913ac2d83",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentResultActionTest.kt",
+          "fingerprint": "c3550f7b0b9b146dd37a66510d644eaf30207390b9d55e4280e4ee5a16c4e9ff"
+        },
+        {
+          "item_id": "87e3dde984497518ddad60027c2f2db83ffc49762c8abde4d1831a33e23e18a2",
+          "path": "app/src/full/AndroidManifest.xml",
+          "fingerprint": "9d76bd940acf6868fdfa87ea81ca630414ebe21948bd8ae119f1222203a424cc"
+        },
+        {
+          "item_id": "8bcf4ab42d6dce12faa00a68e1257862c15628598816d0dd86bf76ed5b2b2d69",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallSchedulerTest.kt",
+          "fingerprint": "16c28f1f12f9bbbad4771a7832dbec5ef0b2bb3f96e4f221704ba8b9a67700f5"
+        },
+        {
+          "item_id": "8ebb8184b41d816fc187c03279a9de16e2d893e1b03a34edc0e288bfaff1b543",
+          "path": "release.sh",
+          "fingerprint": "5caf7b836ac1b4b78dbce879a4a0dd40e4de6ced45558228c525162803a7275a"
+        },
+        {
+          "item_id": "98b072123643c417773365758e2cc9812cc5bea5673cfe7fd7640e072eb54e98",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentBlock.kt",
+          "fingerprint": "8ef6ec90884ef8ba74a4481c202ecd1cbff20634d900fbda09724553df4263fe"
+        },
+        {
+          "item_id": "a10e59cb23c8f233e13747bc2a907500410f1ce31c6a8a63b95b3c152cba68b3",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt",
+          "fingerprint": "7cb95831beedec3f8ad322e72f45619931d6638d8a65ba452dfcf11614a5d5ae"
+        },
+        {
+          "item_id": "a5343afc40918ec1b8eda239bca9597eca2af7e50b5e13152e7e46bde88a9dc2",
+          "path": "app/build.gradle.kts",
+          "fingerprint": "85b8eda72379a8ae8cb35580a61786b628bc95627dfede7f402b771829b2ad4f"
+        },
+        {
+          "item_id": "aba615befdde85c32b87602f4a444580bc83687667ea39fed1a2398dbf4b87fa",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallGuardTest.kt",
+          "fingerprint": "d7517d10590a9c422496c3934bc9e3f079f0604bd6acecb798914ee7b1d1a71b"
+        },
+        {
+          "item_id": "b6196c28f66476abd7046a4885234c3dc3414f27232fc7cbe62fb8a2ec45ca7b",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt",
+          "fingerprint": "15da1bde35aacc90861fbd51a0bd8babab0d265a00df6cd465b8b944978f1dea"
+        },
+        {
+          "item_id": "b7b36a644f11c7ec121101b309a377f87f2ae8196b92f5026be95abebdd2c039",
+          "path": "app/src/full/java/com/nuvio/tv/updater/ApkInstaller.kt",
+          "fingerprint": "c6bce6bd4e2d2733273f094677e304d744e9987052779fafed9120171eb0344b"
+        },
+        {
+          "item_id": "b81ae8969225e94abf006db0a95ee551e30cc4d75025b8c0be4310eabd91c7c7",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt",
+          "fingerprint": "d181eb7d54944d3c75c21e54478cca7b629218aa58603ead451383d74b02057e"
+        },
+        {
+          "item_id": "d8ef93958fd5a6ae05af587467bb1baaec6da94a206c98be92a819b4e5dcd8ff",
+          "path": "app/src/full/java/com/nuvio/tv/core/runtime/PluginRuntimeHooks.kt",
+          "fingerprint": "2ceae3070839d6ed284a9be9141671abaeae24db9e9f86f8f670c2dd53317a7e"
+        },
+        {
+          "item_id": "e3357f333a11292892831c133269f48b5aebd79c61e040e8e875d0765a225ad5",
+          "path": "app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt",
+          "fingerprint": "48b3db24ef371ea167b201df812dd3c5ba6d953119d808649d4e0f8f20b307ab"
+        },
+        {
+          "item_id": "f9547d059b735fda19688fe377c24469ea353ea74c7a602e5ce986251fd7b72a",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateWorkerEntryPoint.kt",
+          "fingerprint": "71d1ce6d9a7195c74eeca53db64e8d09f23daf12d69a342a678e0a917480c1e6"
+        },
+        {
+          "item_id": "fca207c3e8ff3fe421658751270dcb5f7bd4619302dca9ac115734b8ae604612",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdaterTestUrlTrustTest.kt",
+          "fingerprint": "08063ec290e1772502c8aacc979ea618790bd8823636db2721eff7955a4800e1"
+        },
+        {
+          "item_id": "fcfc642fb51382c27ca482a897778301e90f1c3e21372ff35efabf77e6061b91",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentResultAction.kt",
+          "fingerprint": "c18cd8e8c349edb010626838170ee5508495f2b27dcbf212afc993ce402ad7c0"
+        }
+      ],
+      "reused": [],
+      "failed": [],
+      "waived": []
+    },
+    "elapsed_ms": 180984
+  }
+}
