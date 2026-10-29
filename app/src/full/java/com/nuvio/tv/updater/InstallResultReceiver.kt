@@ -6,6 +6,10 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Build
 import android.util.Log
+import dagger.hilt.android.EntryPointAccessors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -13,11 +17,17 @@ import java.io.File
  * STATUS_PENDING_USER_ACTION and the confirm screen to show; after that, a final status.
  * Screens go through [PendingInstallScreen] rather than startActivity here: Android 10+ drops
  * activity starts from a receiver while the app is not visible, without an error.
+ * A silent session's result ([EXTRA_SILENT]) takes its own branch and never shows a screen.
  * Not exported: only the PendingIntent this app hands to PackageInstaller can reach it.
  */
 class InstallResultReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        // A silent result never reaches the member path below: no screen, no plain installer.
+        if (intent.getBooleanExtra(EXTRA_SILENT, false)) {
+            onSilentResult(context, intent)
+            return
+        }
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val apkPath = intent.getStringExtra(EXTRA_APK_PATH)
         when (InstallStatusAction.forStatus(status)) {
@@ -37,6 +47,40 @@ class InstallResultReceiver : BroadcastReceiver() {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
                 Log.w(TAG, "Session install failed (status $status: $message); using the plain installer")
                 fallback(context, apkPath)
+            }
+        }
+    }
+
+    /**
+     * AC-7, AC-8: log the result; on a refusal, abandon the session and mark the version so no
+     * more silent attempts run for it. The member prompt takes over on the next app open.
+     */
+    private fun onSilentResult(context: Context, intent: Intent) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        val versionCode = intent.getIntExtra(EXTRA_VERSION_CODE, 0)
+        val action = SilentResultAction.forStatus(status)
+        val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+        Log.i(SILENT_LOG_TAG, silentResultLogLine(versionCode, status, action, message))
+        if (action != SilentResultAction.REFUSED) return
+
+        val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        if (sessionId >= 0) ApkInstaller.abandonSession(context, sessionId)
+        if (versionCode <= 0) {
+            Log.w(SILENT_LOG_TAG, "Silent result carries no versionCode; nothing marked refused")
+            return
+        }
+        val appContext = context.applicationContext
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                EntryPointAccessors.fromApplication(appContext, UpdateWorkerEntryPoint::class.java)
+                    .updatePreferences()
+                    .markSilentRefused(versionCode)
+                Log.i(SILENT_LOG_TAG, "Marked versionCode $versionCode silent refused")
+            } catch (t: Throwable) {
+                Log.w(SILENT_LOG_TAG, "Could not mark versionCode $versionCode silent refused: ${t.javaClass.simpleName}")
+            } finally {
+                pending.finish()
             }
         }
     }
