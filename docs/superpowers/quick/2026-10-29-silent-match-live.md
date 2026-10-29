@@ -109,3 +109,4 @@ fix list: (1) important: run steps wait 16 minutes after HOME (run 1 and run 2).
 skipped: review 4 (one-line call site; SilentClock.nowFor is tested), review 5 (worst case each press recorded twice, harmless).
 fix round 1: 1e84a0e0d (16-minute waits; 6-hour wording, old work name and log label kept; touch and generic motion count as presses). Re-review (orchestrator, read the diff; fixer gate: 2475 tests, only the baseline failure; release dry run ok; 39 script tests): all 3 addressed.
 final review: done
+emulator (kevbox_tv, build from ac489b49d, test versions 2001->2002): HOME 11:10:28, "Silent job queued (versionCode 2002, delay 900 s)", 11:25:53 "Silent check [job] versionCode=2002: ELIGIBLE", committed, 11:25:57 INSTALLED, versionCode=2002, installer screens 0. PASS (the restore step was cut off by Kevin; done after the merge).
