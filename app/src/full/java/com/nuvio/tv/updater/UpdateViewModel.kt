@@ -108,16 +108,21 @@ class UpdateViewModel @Inject constructor(
 
             // On Android 12+ the app-open prompt stays hidden while a silent install still owns
             // the version (AC-15). Only the dialog changes: About still shows the version and an
-            // instant Install. The About check (force = true) always shows the prompt.
+            // instant Install. The About check (force = true) always shows the prompt. The hold
+            // reads the live manifest only: when the fetch failed, decision.update is the cached
+            // one, and no silent attempt can run without the live manifest.
             var showDialog = decision.showDialog
             if (!force && showDialog) {
                 val silentState = updatePreferences.silentInstallState.first()
                 val held = SilentPromptHold.holdsPrompt(
                     sdkInt = Build.VERSION.SDK_INT,
                     canRequestInstalls = ApkInstaller.canRequestPackageInstalls(context),
-                    update = decision.update,
+                    liveUpdate = live.getOrNull(),
                     silentState = silentState,
                     nowMs = System.currentTimeMillis(),
+                    // installableApkPath is set only for a cached file of decision.update's versionCode.
+                    predownloadReady = decision.installableApkPath != null,
+                    unmeteredNetwork = UpdateCheckWorker.isUnmetered(context),
                 )
                 if (held) {
                     showDialog = false

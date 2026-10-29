@@ -67,13 +67,19 @@ class SilentInstallTest {
         override val sdkInt = 36
         override val currentVersionCode = 1028
         override fun canRequestInstalls() = true
+        var path: String? = "/cache/updates/kevbox-1030.apk"
+        var exists = true
+        var shaOk = true
+        val committed = mutableSetOf<Int>()
+        val discarded = mutableListOf<String>()
+
         override fun nowMs() = 5_000_000L
-        override suspend fun predownloadPath(): String? = "/cache/updates/kevbox-1030.apk"
+        override suspend fun predownloadPath(): String? = path
         override suspend fun predownloadVersionCode(): Int? = 1030
-        override fun fileExists(path: String) = true
+        override fun fileExists(path: String) = exists
         override fun sha256Matches(path: String, sha256: String): Boolean {
             hashes++
-            return true
+            return shaOk
         }
         override suspend fun ignoredVersionCode(): Int? = null
         override suspend fun silentState(): SilentInstallState? = null
@@ -105,6 +111,14 @@ class SilentInstallTest {
             recordAttemptHook()
             calls += "record:$versionCode"
             attempts++
+        }
+        override fun alreadyCommitted(versionCode: Int) = versionCode in committed
+        override fun rememberCommitted(versionCode: Int) {
+            committed += versionCode
+        }
+        override suspend fun discardPredownload(path: String) {
+            calls += "discard:$path"
+            discarded += path
         }
         override fun log(message: String) {
             lines += message
@@ -211,9 +225,68 @@ class SilentInstallTest {
         val update = update(afterMs = nowMs + 1, earlyUsers = listOf(userId))
         SilentInstall.run(env, Result.success(update), SilentTrigger.JOB, Mutex())
 
+        assertEquals(SilentInstall.ACCOUNT_WAIT_MS, testScheduler.currentTime)
         assertEquals(1, env.authReads)
         assertEquals("Silent check [job] versionCode=1030: NOT_YET early=false", env.lines.single())
         assertEquals(emptyList<String>(), sessionCalls(env))
+    }
+
+    @Test
+    fun `a missing pre-download file gives NO_PREDOWNLOAD and touches no session`() = runTest {
+        val env = env(outOfSight).apply { exists = false }
+        SilentInstall.run(env, Result.success(update()), SilentTrigger.JOB, Mutex())
+
+        assertEquals("Silent check [job] versionCode=1030: NO_PREDOWNLOAD early=false", env.lines.single())
+        assertEquals(0, env.hashes)
+        assertEquals(emptyList<String>(), sessionCalls(env))
+        assertEquals(emptyList<String>(), env.discarded)
+    }
+
+    @Test
+    fun `no stored pre-download path gives NO_PREDOWNLOAD and touches no session`() = runTest {
+        val env = env(outOfSight).apply { path = null }
+        SilentInstall.run(env, Result.success(update()), SilentTrigger.JOB, Mutex())
+
+        assertEquals("Silent check [job] versionCode=1030: NO_PREDOWNLOAD early=false", env.lines.single())
+        assertEquals(0, env.hashes)
+        assertEquals(emptyList<String>(), sessionCalls(env))
+    }
+
+    @Test
+    fun `a checksum mismatch touches no session and discards the pre-download`() = runTest {
+        val env = env(outOfSight).apply { shaOk = false }
+        SilentInstall.run(env, Result.success(update()), SilentTrigger.DAILY_CHECK, Mutex())
+
+        assertEquals(
+            "Silent check [daily-check] versionCode=1030: PREDOWNLOAD_CHECKSUM_MISMATCH early=false",
+            env.lines.first(),
+        )
+        assertEquals(1, env.hashes)
+        assertEquals(emptyList<String>(), sessionCalls(env))
+        assertEquals(0, env.attempts)
+        assertEquals(listOf("/cache/updates/kevbox-1030.apk"), env.discarded)
+    }
+
+    @Test
+    fun `a second attempt for a version this process committed touches no session`() = runTest {
+        val env = env(outOfSight)
+        SilentInstall.run(env, Result.success(update()), SilentTrigger.JOB, Mutex())
+        SilentInstall.run(env, Result.success(update()), SilentTrigger.DAILY_CHECK, Mutex())
+
+        assertEquals(
+            "Silent check [daily-check] versionCode=1030: ALREADY_COMMITTED early=false",
+            env.lines.last(),
+        )
+        assertEquals(listOf("open", "commit:42:1030:kevbox-1030.dm"), sessionCalls(env))
+        assertEquals(1, env.attempts)
+    }
+
+    @Test
+    fun `a refused commit is not remembered, so a later attempt may run`() = runTest {
+        val env = env(outOfSight).apply { commitThrows = SecurityException("refused") }
+        SilentInstall.run(env, Result.success(update()), SilentTrigger.JOB, Mutex())
+
+        assertTrue(env.committed.isEmpty())
     }
 
     @Test

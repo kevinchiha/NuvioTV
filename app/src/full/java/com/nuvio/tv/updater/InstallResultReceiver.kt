@@ -61,6 +61,8 @@ class InstallResultReceiver : BroadcastReceiver() {
         val action = SilentResultAction.forStatus(status)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
         Log.i(SILENT_LOG_TAG, silentResultLogLine(versionCode, status, action, message))
+        // The install did not happen: a later trigger may try this version again (AC-8 counts it).
+        if (action != SilentResultAction.INSTALLED) SilentInstallGuard.committedSilentVersion.forget(versionCode)
         if (action != SilentResultAction.REFUSED) return
 
         val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)

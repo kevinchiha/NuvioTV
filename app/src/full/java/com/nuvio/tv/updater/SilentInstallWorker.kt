@@ -8,7 +8,9 @@ import dagger.hilt.android.EntryPointAccessors
 /**
  * The job [SilentInstallScheduler] queues 2 minutes after the app leaves the screen (AC-4).
  * Fetches version.json and makes one silent attempt, which checks every condition again. It has
- * no network constraint: offline, the fetch fails and the attempt logs MANIFEST_FETCH_FAILED.
+ * no network constraint: offline, the fetch fails and nothing installs. The attempt checks
+ * "out of sight" first, so it logs MANIFEST_FETCH_FAILED only when the app is quiet; otherwise it
+ * logs the on-screen or in-use reason.
  * Always succeeds: a retry would keep trying a box that is in use, and the next leave is the retry.
  */
 class SilentInstallWorker(

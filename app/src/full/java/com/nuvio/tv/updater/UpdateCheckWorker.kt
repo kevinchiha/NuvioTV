@@ -17,8 +17,10 @@ import kotlinx.serialization.encodeToString
 import java.io.File
 
 /**
- * Once-a-day background check. If a newer, non-ignored build exists on a trusted (https +
- * configured-host) URL and the device is on an unmetered network, downloads + SHA-256-verifies
+ * Once-a-day background check. If a newer, non-ignored build exists on a trusted URL (see
+ * [UpdaterBuild.isTrusted]: https on the configured host; a debug build made with
+ * `-PupdaterTestBaseUrl` trusts only that test URL's scheme, host and port) and the device is on
+ * an unmetered network, downloads + SHA-256-verifies
  * the APK and caches its path + metadata so [UpdateViewModel] can offer an instant Install on
  * next app open. No notifications. Pruning runs on every invocation, keeping at most the one
  * APK still worth installing. A run that ends with a valid pre-download then tries a silent
@@ -129,12 +131,6 @@ class UpdateCheckWorker(
         return Result.success()
     }
 
-    private fun isUnmetered(context: Context): Boolean {
-        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-    }
-
     /**
      * Keep only [keepName]; delete other finalized APKs. Skips in-progress `.part` files so a
      * concurrent foreground download (ApkDownloader streams to `<name>.part` then renames) is
@@ -155,5 +151,15 @@ class UpdateCheckWorker(
         // Process-wide lock so the periodic job and the one-time kick can't run the check
         // concurrently and race on the shared cache files.
         private val runMutex = Mutex()
+
+        /**
+         * Whether the active network is unmetered, the only kind the worker downloads on. Also
+         * read by the app-open prompt hold (AC-15).
+         */
+        internal fun isUnmetered(context: Context): Boolean {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
     }
 }

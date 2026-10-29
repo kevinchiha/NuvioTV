@@ -2,7 +2,6 @@ package com.nuvio.tv.updater
 
 import android.content.Context
 import android.os.Build
-import android.os.SystemClock
 import android.util.Log
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.domain.model.AuthState
@@ -51,6 +50,15 @@ internal interface SilentInstallEnv {
     /** Never throws. */
     fun abandonSession(sessionId: Int)
     suspend fun recordAttempt(versionCode: Int)
+    /** Whether this process already committed a silent session for [versionCode]. */
+    fun alreadyCommitted(versionCode: Int): Boolean
+    /** Remembers, for this process, that [versionCode] was committed. */
+    fun rememberCommitted(versionCode: Int)
+    /**
+     * Deletes the cached APK at [path] and its compile profile, and clears the pre-download
+     * pointer while it still names [path], so the next daily check downloads the APK again.
+     */
+    suspend fun discardPredownload(path: String)
     fun log(message: String)
     fun warn(message: String)
 }
@@ -90,6 +98,13 @@ object SilentInstall {
     }
 
     private suspend fun sequence(env: SilentInstallEnv, update: AppUpdate?, trigger: SilentTrigger) {
+        // A trigger that took the lock after another one committed this version: Android is
+        // installing it, so a second commit would only count a second attempt.
+        if (update != null && env.alreadyCommitted(update.versionCode)) {
+            env.log(checkLine(trigger, update, SilentReason.ALREADY_COMMITTED, early = false))
+            return
+        }
+
         var early = false
         var apkPath: String? = null
 
@@ -129,6 +144,12 @@ object SilentInstall {
         }
 
         env.log(checkLine(trigger, update, reason, early))
+        if (reason == SilentReason.PREDOWNLOAD_CHECKSUM_MISMATCH && apkPath != null) {
+            // The worker never re-hashes a cached APK, so without this it would keep the bad file
+            // and never download the version again.
+            env.discardPredownload(apkPath)
+            env.warn("Pre-download for versionCode ${update?.versionCode} failed its checksum; deleted")
+        }
         if (reason != SilentReason.ELIGIBLE) return
         // ELIGIBLE implies both, through the pre-download and manifest checks.
         val live = update ?: return
@@ -169,6 +190,7 @@ object SilentInstall {
             settled = true
             try {
                 env.commitSession(sessionId, versionCode, profile?.name)
+                env.rememberCommitted(versionCode)
             } catch (e: Exception) {
                 env.abandonSession(sessionId)
                 env.warn("Silent commit failed for session $sessionId: ${e.javaClass.simpleName}")
@@ -246,6 +268,20 @@ private class AndroidSilentInstallEnv(private val context: Context) : SilentInst
     override fun abandonSession(sessionId: Int) = ApkInstaller.abandonSession(context, sessionId)
 
     override suspend fun recordAttempt(versionCode: Int) = prefs.recordSilentAttempt(versionCode)
+
+    override fun alreadyCommitted(versionCode: Int): Boolean =
+        SilentInstallGuard.committedSilentVersion.isCommitted(versionCode)
+
+    override fun rememberCommitted(versionCode: Int) =
+        SilentInstallGuard.committedSilentVersion.remember(versionCode)
+
+    override suspend fun discardPredownload(path: String) {
+        val apk = File(path)
+        runCatching { apk.delete() }
+        runCatching { File(apk.parentFile, InstallProfile.fileNameFor(apk.name)).delete() }
+        // A daily check may have stored a newer pre-download meanwhile; leave that one alone.
+        if (prefs.predownloadApkPath.first() == path) prefs.clearPredownload()
+    }
 
     override fun log(message: String) {
         Log.i(SILENT_LOG_TAG, message)

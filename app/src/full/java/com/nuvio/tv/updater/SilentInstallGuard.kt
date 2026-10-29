@@ -43,6 +43,29 @@ internal class MemberInstallLog {
 }
 
 /**
+ * The versionCode this process committed a silent session for (AC-8). Android installs and kills
+ * the process soon after; until then another trigger must not commit the same version again.
+ * A result other than success forgets it, so a failed install can be tried again.
+ */
+internal class CommittedSilentVersion {
+    private var versionCode: Int? = null
+
+    @Synchronized
+    fun remember(versionCode: Int) {
+        this.versionCode = versionCode
+    }
+
+    @Synchronized
+    fun isCommitted(versionCode: Int): Boolean = this.versionCode == versionCode
+
+    /** Forgets [versionCode] only; a later commit of another version stays. */
+    @Synchronized
+    fun forget(versionCode: Int) {
+        if (this.versionCode == versionCode) this.versionCode = null
+    }
+}
+
+/**
  * Live facts that keep a silent install away while the app is in use (AC-3, AC-10), and the
  * lock that lets only one silent attempt run per process at a time.
  */
@@ -52,6 +75,9 @@ object SilentInstallGuard {
     /** AC-10: one silent attempt per process at a time. */
     val attemptLock: Mutex = Mutex()
 
+    /** AC-8: the version this process already committed silently. */
+    internal val committedSilentVersion = CommittedSilentVersion()
+
     private val members = MemberInstallLog()
 
     fun memberInstallStarted() = members.started()
@@ -60,7 +86,10 @@ object SilentInstallGuard {
 
     val memberInstallRunning: Boolean get() = members.isRunning
 
-    /** Called right after the member's session commit. Never throws, so the install goes on. */
+    /**
+     * Called right after the member's session commit, and when a member install screen opens.
+     * Starts the 10-minute wait (AC-10). Never throws, so the install goes on.
+     */
     fun memberSessionCommitted(nowElapsedMs: Long) {
         try {
             members.committed(nowElapsedMs, AppVisibilityTracker.store)
@@ -69,27 +98,30 @@ object SilentInstallGuard {
         }
     }
 
-    val lastMemberCommitElapsedMs: Long?
-        get() = members.lastCommitElapsedMs(AppVisibilityTracker.store, SystemClock.elapsedRealtime())
-
     /**
      * True while the external-player keep-alive service runs. `getRunningServices` is deprecated
-     * but still lists the caller's own services, so the upstream service needs no change.
+     * but still lists the caller's own services, so the upstream service needs no change. A check
+     * that cannot run counts as playback running: the silent install waits for the next trigger.
      */
     fun isExternalPlaybackRunning(context: Context): Boolean {
         return try {
-            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            if (manager == null) {
+                Log.w(SILENT_LOG_TAG, "No ActivityManager; counting external playback as running")
+                return true
+            }
             @Suppress("DEPRECATION")
             manager.getRunningServices(Int.MAX_VALUE).orEmpty().any {
                 it.service.packageName == context.packageName && it.service.className == KEEP_ALIVE_SERVICE
             }
         } catch (t: Throwable) {
-            false
+            Log.w(SILENT_LOG_TAG, "Could not read running services: ${t.javaClass.simpleName}")
+            true
         }
     }
 
     fun quietInput(context: Context): QuietInput = buildQuietInput(
-        startedActivities = AppVisibilityTracker.startedActivities,
+        startedActivities = if (AppVisibilityTracker.isRegistered) AppVisibilityTracker.startedActivities else null,
         store = AppVisibilityTracker.storeFor(context),
         members = members,
         nowElapsedMs = SystemClock.elapsedRealtime(),
@@ -97,16 +129,19 @@ object SilentInstallGuard {
         installScreenWaiting = PendingInstallScreen.pending.value != null,
     )
 
-    /** [quietInput] with every Android fact passed in, for tests. */
+    /**
+     * [quietInput] with every Android fact passed in, for tests. A null [startedActivities] means
+     * the tracker is not registered: visibility is unknown, so it counts as one started activity.
+     */
     internal fun buildQuietInput(
-        startedActivities: Int,
+        startedActivities: Int?,
         store: VisibilityStore?,
         members: MemberInstallLog,
         nowElapsedMs: Long,
         externalPlaybackRunning: Boolean,
         installScreenWaiting: Boolean,
     ): QuietInput = QuietInput(
-        startedActivities = startedActivities,
+        startedActivities = startedActivities ?: 1,
         lastStartElapsedMs = store?.getLong(AppVisibilityTracker.KEY_LAST_START),
         lastStopElapsedMs = store?.getLong(AppVisibilityTracker.KEY_LAST_STOP),
         nowElapsedMs = nowElapsedMs,

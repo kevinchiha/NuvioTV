@@ -1,5 +1,8 @@
 package com.nuvio.tv.updater
 
+import android.content.Context
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -146,6 +149,53 @@ class SilentInstallGuardTest {
         assertEquals(3_000L, visibility.lastStopElapsedMs())
         assertEquals(3_000L, store.values[AppVisibilityTracker.KEY_LAST_STOP])
         assertEquals(1_000L, store.values[AppVisibilityTracker.KEY_LAST_START])
+    }
+
+    @Test
+    fun `an unregistered tracker counts the app as on screen`() {
+        val reason = SilentInstallDecision.quiet(
+            SilentInstallGuard.buildQuietInput(
+                startedActivities = null,
+                store = quietStore(),
+                members = MemberInstallLog(),
+                nowElapsedMs = now,
+                externalPlaybackRunning = false,
+                installScreenWaiting = false,
+            )
+        )
+        assertEquals(SilentReason.APP_ON_SCREEN, reason)
+    }
+
+    @Test
+    fun `a running-services check that throws counts as external playback running`() {
+        val context = mockk<Context>()
+        every { context.getSystemService(Context.ACTIVITY_SERVICE) } throws SecurityException("denied")
+
+        assertTrue(SilentInstallGuard.isExternalPlaybackRunning(context))
+    }
+
+    @Test
+    fun `no ActivityManager counts as external playback running`() {
+        val context = mockk<Context>()
+        every { context.getSystemService(Context.ACTIVITY_SERVICE) } returns null
+
+        assertTrue(SilentInstallGuard.isExternalPlaybackRunning(context))
+    }
+
+    @Test
+    fun `a committed silent version is remembered until a failed result forgets it`() {
+        val committed = CommittedSilentVersion()
+        assertFalse(committed.isCommitted(1030))
+
+        committed.remember(1030)
+        assertTrue(committed.isCommitted(1030))
+        assertFalse(committed.isCommitted(1031))
+
+        committed.forget(1029)
+        assertTrue(committed.isCommitted(1030))
+
+        committed.forget(1030)
+        assertFalse(committed.isCommitted(1030))
     }
 
     @Test

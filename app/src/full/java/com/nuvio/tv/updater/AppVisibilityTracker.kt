@@ -82,11 +82,14 @@ object AppVisibilityTracker {
         }
     }
 
+    /**
+     * False when [register] never ran or failed in this process: nothing counts activities, so
+     * visibility is unknown and a silent install treats the app as on screen.
+     */
+    val isRegistered: Boolean get() = log != null
+
+    /** Started activities; 0 when not registered, so read [isRegistered] first. */
     val startedActivities: Int get() = log?.startedActivities ?: 0
-
-    fun lastStartElapsedMs(context: Context): Long? = storeFor(context).getLong(KEY_LAST_START)
-
-    fun lastStopElapsedMs(context: Context): Long? = storeFor(context).getLong(KEY_LAST_STOP)
 
     internal fun storeFor(context: Context): VisibilityStore =
         store ?: PrefsVisibilityStore(context.applicationContext ?: context)

@@ -8,7 +8,8 @@ const val SILENT_LOG_TAG = "KevboxSilentUpdate"
 /** Why a silent install may or may not run. Logged as is, so each failed check has its own name. */
 enum class SilentReason {
     ELIGIBLE,
-    // AC-2, in check order
+    // AC-2, listed in AC-2 order. eligibility() checks them in this order too, except
+    // PREDOWNLOAD_CHECKSUM_MISMATCH: hashing the APK is slow, so it runs last.
     UPDATER_OFF, SDK_TOO_OLD, NO_INSTALL_PERMISSION, MANIFEST_FETCH_FAILED, NOT_AN_UPGRADE,
     NO_PREDOWNLOAD, PREDOWNLOAD_CHECKSUM_MISMATCH, VERSION_IGNORED, NO_SILENT_BLOCK, NOT_YET,
     SILENT_REFUSED, TOO_MANY_ATTEMPTS,
@@ -16,6 +17,8 @@ enum class SilentReason {
     APP_ON_SCREEN, APP_RECENTLY_ON_SCREEN, EXTERNAL_PLAYBACK,
     // AC-10
     ANOTHER_SILENT_ATTEMPT, MEMBER_INSTALL_RUNNING, INSTALL_SCREEN_WAITING, MEMBER_INSTALL_RECENT,
+    // AC-8: this process already committed a silent session for the version; Android is installing it
+    ALREADY_COMMITTED,
 }
 
 /** Silent attempts made for one versionCode, and whether Android asked the member to confirm it. */

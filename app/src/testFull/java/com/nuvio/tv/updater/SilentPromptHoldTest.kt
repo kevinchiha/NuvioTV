@@ -27,30 +27,88 @@ class SilentPromptHoldTest {
     private fun holds(
         sdkInt: Int = 36,
         canRequestInstalls: Boolean = true,
-        update: AppUpdate = update(),
+        liveUpdate: AppUpdate? = update(),
         silentState: SilentInstallState? = null,
         nowMs: Long = afterMs + 1,
-    ) = SilentPromptHold.holdsPrompt(sdkInt, canRequestInstalls, update, silentState, nowMs)
+        predownloadReady: Boolean = true,
+        unmeteredNetwork: Boolean = true,
+    ) = SilentPromptHold.holdsPrompt(
+        sdkInt = sdkInt,
+        canRequestInstalls = canRequestInstalls,
+        liveUpdate = liveUpdate,
+        silentState = silentState,
+        nowMs = nowMs,
+        predownloadReady = predownloadReady,
+        unmeteredNetwork = unmeteredNetwork,
+    )
 
     @Test
-    fun `holdsPrompt is true while silent owns the version and false for each condition that ends it`() {
-        assertTrue("all hold", holds())
-        assertTrue("API 31", holds(sdkInt = 31))
-        assertTrue("before after", holds(nowMs = afterMs - 1))
-        assertTrue("2 attempts", holds(silentState = SilentInstallState(live, attempts = 2, refused = false)))
+    fun `holdsPrompt is true while silent owns the version`() {
+        assertTrue(holds())
+        assertTrue(holds(sdkInt = 31))
+        assertTrue(holds(nowMs = afterMs - 1))
+        assertTrue(holds(silentState = SilentInstallState(live, attempts = 2, refused = false)))
+    }
 
-        assertFalse("below API 31", holds(sdkInt = 30))
-        assertFalse("no install permission", holds(canRequestInstalls = false))
-        assertFalse("no silent block", holds(update = update(silentAfterMs = null)))
-        assertFalse("refused", holds(silentState = SilentInstallState(live, attempts = 0, refused = true)))
-        assertFalse("3 attempts", holds(silentState = SilentInstallState(live, attempts = 3, refused = false)))
+    @Test
+    fun `below API 31 the prompt shows`() {
+        assertFalse(holds(sdkInt = 30))
+    }
 
-        // Safety net: 72 h after `after` the prompt comes back.
-        assertFalse("at after + 72 h", holds(nowMs = afterMs + SilentPromptHold.SAFETY_NET_MS))
-        assertTrue("1 ms before after + 72 h", holds(nowMs = afterMs + SilentPromptHold.SAFETY_NET_MS - 1))
+    @Test
+    fun `without the install permission the prompt shows`() {
+        assertFalse(holds(canRequestInstalls = false))
+    }
 
-        // State saved for another versionCode counts as 0 attempts, not refused.
-        assertTrue("other version refused", holds(silentState = SilentInstallState(live - 1, attempts = 0, refused = true)))
-        assertTrue("other version 3 attempts", holds(silentState = SilentInstallState(live - 1, attempts = 3, refused = false)))
+    @Test
+    fun `live fetch failed, prompt shows`() {
+        assertFalse(holds(liveUpdate = null))
+    }
+
+    @Test
+    fun `without a silent block the prompt shows`() {
+        assertFalse(holds(liveUpdate = update(silentAfterMs = null)))
+    }
+
+    @Test
+    fun `a version marked silent refused shows the prompt`() {
+        assertFalse(holds(silentState = SilentInstallState(live, attempts = 0, refused = true)))
+    }
+
+    @Test
+    fun `a version with 3 silent attempts shows the prompt`() {
+        assertFalse(holds(silentState = SilentInstallState(live, attempts = 3, refused = false)))
+    }
+
+    @Test
+    fun `72 h after after the prompt shows, and one ms before it stays held`() {
+        assertFalse(holds(nowMs = afterMs + SilentPromptHold.SAFETY_NET_MS))
+        assertTrue(holds(nowMs = afterMs + SilentPromptHold.SAFETY_NET_MS - 1))
+    }
+
+    @Test
+    fun `an after near Long MAX does not overflow into showing the prompt`() {
+        assertTrue(holds(liveUpdate = update(silentAfterMs = Long.MAX_VALUE)))
+    }
+
+    @Test
+    fun `silent state stored for another versionCode is ignored`() {
+        assertTrue(holds(silentState = SilentInstallState(live - 1, attempts = 0, refused = true)))
+        assertTrue(holds(silentState = SilentInstallState(live - 1, attempts = 3, refused = false)))
+    }
+
+    @Test
+    fun `no pre-download on a metered network shows the prompt`() {
+        assertFalse(holds(predownloadReady = false, unmeteredNetwork = false))
+    }
+
+    @Test
+    fun `no pre-download yet on an unmetered network stays held, the daily check fetches it`() {
+        assertTrue(holds(predownloadReady = false, unmeteredNetwork = true))
+    }
+
+    @Test
+    fun `a ready pre-download stays held on a metered network`() {
+        assertTrue(holds(predownloadReady = true, unmeteredNetwork = false))
     }
 }

@@ -111,8 +111,10 @@ object ApkInstaller {
     @RequiresApi(31)
     fun openSilentSession(context: Context, apkFile: File, profileFile: File?): Int {
         val installer = context.packageManager.packageInstaller
-        // Same clean-up as installWithSession. Safe here: SilentInstallGuard blocks a silent attempt
-        // while a member session may still wait for its confirm screen.
+        // Same clean-up as installWithSession. The caller checks SilentInstallGuard first: no
+        // silent attempt runs while the member's Install job copies its session, while an install
+        // screen waits to open, or for 10 minutes after a member commit or an install screen opened.
+        // A member who leaves Android's confirm screen open longer than that loses that session.
         installer.mySessions.forEach { old -> runCatching { installer.abandonSession(old.sessionId) } }
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
             .apply {
