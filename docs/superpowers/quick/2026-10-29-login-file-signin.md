@@ -154,3 +154,4 @@ and a real "invalid sync code" text still gives the sync-code string.
 
 baseline: TraktProgressServiceRefreshTest > change seen by a cancelled refresh is fetched by the next poll (2300 tests, 1 failed, on kevbox 2ddce968d)
 Task 1+2: started at 21429ae59
+Task 1+2: landed (b7348ab21, 31b0a2ee1). Bent: internal LoginFileProcessor constructor with a deleteFile hook for tests; email trimmed before sign-in; auth still Loading after 5 s counts as a different account (sign out first).
