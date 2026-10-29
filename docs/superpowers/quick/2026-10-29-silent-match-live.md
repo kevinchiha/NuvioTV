@@ -26,7 +26,8 @@ TraktProgressServiceRefreshTest "change seen by a cancelled refresh is fetched b
   and no remote key was pressed for 10 800 000 ms (3 h), counted on `elapsedRealtime` from the later
   of the last key press and the last activity start. "Playing" means `AudioManager.isMusicActive()`
   is true; if that cannot be read, it counts as playing (fail closed). External playback, the
-  member-install guard and the install-screen guard still apply.
+  member-install guard and the install-screen guard still apply. When the visibility tracker is not
+  registered (visibility unknown), `quiet` returns `APP_ON_SCREEN` whatever the idle time, as today.
 - **AC-5** Remote key presses are recorded app-wide by a `Window.Callback` wrapper the visibility
   tracker installs on each activity (no upstream file changes). The wrapper passes every call to the
   original callback unchanged and is installed at most once per window.
@@ -41,6 +42,10 @@ TraktProgressServiceRefreshTest "change seen by a cancelled refresh is fetched b
   the 15 min boundary.
 
 ## Non-goals
+- Key presses inside dialog windows (NuvioDialog, Synopsis, EpisodeOptionsOverlay and others open their
+  own windows). The app's screensaver timer that sees them is a private field of upstream's
+  MainActivity, and reaching it means an upstream edit. A member would have to use a dialog nonstop for
+  3 hours without touching the main screen for this to matter.
 - Live's 7-day prompt fallback: TV's prompt rules (AC-15 of the silent-self-update spec) are the
   ones both apps keep.
 - A shorter idle time for emulator tests. Unit tests pin the 3 h rule; the emulator re-runs the
@@ -61,21 +66,24 @@ TraktProgressServiceRefreshTest "change seen by a cancelled refresh is fetched b
 **Files:** `updater/UpdateRepository.kt`, `updater/model/AppUpdate.kt`, `updater/SilentInstall.kt`,
 `updater/UpdateViewModel.kt`, tests in `app/src/testFull/java/com/nuvio/tv/updater/`
 **Interfaces:** `AppUpdate.serverTimeMs: Long? = null`; `UpdateRepository.parseHttpDate(header: String?): Long?`
-(pure, RFC 1123); SilentInstall and UpdateViewModel pass `live.serverTimeMs ?: System.currentTimeMillis()`
-as `nowMs`.
+(pure, RFC 1123); `object SilentClock { fun nowFor(serverTimeMs: Long?, boxNowMs: Long): Long }` (pure:
+the server time when known, else the box clock). SilentInstall passes
+`SilentClock.nowFor(live.serverTimeMs, env.nowMs())` (keep the `env.nowMs()` seam); UpdateViewModel passes
+`SilentClock.nowFor(live.getOrNull()?.serverTimeMs, System.currentTimeMillis())` to `holdsPrompt`.
 **Does:**
 - Read `response.header("Date")` inside the existing call; set `serverTimeMs` on the mapped AppUpdate.
 - SilentInstall's eligibility input and the second evaluation use the live manifest's server time.
 - UpdateViewModel's `holdsPrompt(... nowMs = ...)` uses the live manifest's server time.
-**Tests:** parseHttpDate cases; eligibility NOT_YET with box clock 2 days ahead but server time before `after`;
-holdsPrompt with a wrong box clock.
+**Tests:** parseHttpDate cases; SilentClock.nowFor (server time wins, null falls back); through SilentInstallTest's
+fake env, NOT_YET with the box clock 2 days ahead but a manifest server time before `after`.
 **Verify:** `./gradlew :app:testFullDebugUnitTest --tests 'com.nuvio.tv.updater.*'`
 
 ### Task 2: Idle-on-screen rule, key recorder, Live's timing
 **Delivers:** AC-4, AC-5, AC-6, AC-7, AC-8 (idle and timing tests)
 **Files:** `updater/SilentInstallDecision.kt`, `updater/SilentInstallGuard.kt`, `updater/AppVisibilityTracker.kt`,
 `updater/SilentInstallWorker.kt`, `updater/UpdateWorkScheduler.kt`, tests
-**Interfaces:** `QuietInput` gains `playing: Boolean` and `lastKeyPressElapsedMs: Long?`;
+**Interfaces:** `QuietInput` gains `playing: Boolean`, `lastKeyPressElapsedMs: Long?` and
+`visibilityKnown: Boolean` (false when the tracker is not registered);
 `SilentInstallDecision.IDLE_ON_SCREEN_MS = 10_800_000L`; `OUT_OF_SIGHT_MS = 900_000L`;
 `SilentInstallWorker.DELAY_MS = 900_000L`.
 **Does:**
@@ -84,10 +92,13 @@ holdsPrompt with a wrong box clock.
 - The tracker wraps each activity's `Window.Callback` on start (once) and records the elapsed time of
   every `dispatchKeyEvent` in memory.
 - `quietInput` reads `AudioManager.isMusicActive()` behind try/catch (failure = playing).
-- Worker delay, out-of-sight time and the periodic interval change as in AC-6, AC-7; update the
-  queued log line.
+- Worker delay, out-of-sight time and the periodic interval change as in AC-6, AC-7. The queued log
+  line lives in `SilentInstallScheduler.kt` and builds "delay 900 s" from `DELAY_MS` by itself; check it.
 **Tests:** idle boundary (3 h - 1 ms / 3 h); playing blocks; key press resets; unreadable audio blocks;
-15 min out-of-sight boundary.
+visibility unknown blocks even when idle; 15 min out-of-sight boundary.
 **Verify:** `./gradlew :app:testFullDebugUnitTest --tests 'com.nuvio.tv.updater.*'`
 
 ## Build log
+plan check (62f11a5a): 5 problems folded: visibility-unknown flag always blocks; env.nowMs() seam kept; SilentClock.nowFor as the tested clock choice; dialog-window key presses recorded as a non-goal (upstream-private timer); the queued log line lives in SilentInstallScheduler.kt.
+baseline: TraktProgressServiceRefreshTest "change seen by a cancelled refresh is fetched by the next poll" (gate on kevbox 8501998fc, 2026-10-29 10:0x: 2446 tests, 1 failed)
+Task 1+2: started at 085b73dd0
