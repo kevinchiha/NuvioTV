@@ -21,6 +21,9 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 ## Pre-existing failures
 - TraktProgressServiceRefreshTest > change seen by a cancelled refresh is fetched by the next poll (gate on identical app code, kevbox 2ddce968d, 2026-10-29 05:16: 2300 tests, 1 failed, 1 skipped; compile and release dry run green). Leave it alone; it does not count.
 
+## Rulings
+- 2026-10-29 07:35, Kevin: match KevBox Live, no app-open prompt on Android 12+ unless the silent install was refused. Folded as AC-15 into the spec and Task 8 (85f653206). Orchestrator addition: the prompt also returns when silent can no longer happen for that version (3 attempts, no silent block, no permission) and 72 h after `after` as a safety net.
+
 ## Task outcomes
 - Task 1: landed 08c722c84, review clean (gate green: 2309 tests, only the baseline failure). No interface deviation.
 - Task 2: landed b9456143a, review clean (gate green: 2328 tests, only the baseline failure). No interface deviation.
