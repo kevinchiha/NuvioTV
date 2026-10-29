@@ -252,18 +252,24 @@ class UpdateViewModel @Inject constructor(
         if (installJob?.isActive == true) return
         val update = _uiState.value.update
         installJob = viewModelScope.launch(Dispatchers.IO) {
-            // The compile profile is optional: any failure here installs without it.
-            val profile = update?.let {
-                ProfileFetcher.fetch(apkDownloader, it, apkFile) { url ->
-                    UpdaterBuild.isTrusted(url)
-                }
-            }
-            runCatching { ApkInstaller.launchInstall(context, apkFile, profile) }
-                .onFailure { e ->
-                    _uiState.update {
-                        it.copy(errorMessage = e.message ?: context.getString(R.string.update_error_apk_missing))
+            // No silent install may start while this job copies its session (AC-10).
+            SilentInstallGuard.memberInstallStarted()
+            try {
+                // The compile profile is optional: any failure here installs without it.
+                val profile = update?.let {
+                    ProfileFetcher.fetch(apkDownloader, it, apkFile) { url ->
+                        UpdaterBuild.isTrusted(url)
                     }
                 }
+                runCatching { ApkInstaller.launchInstall(context, apkFile, profile) }
+                    .onFailure { e ->
+                        _uiState.update {
+                            it.copy(errorMessage = e.message ?: context.getString(R.string.update_error_apk_missing))
+                        }
+                    }
+            } finally {
+                SilentInstallGuard.memberInstallFinished()
+            }
         }
     }
 

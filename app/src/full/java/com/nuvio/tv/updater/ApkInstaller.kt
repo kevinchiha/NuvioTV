@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
@@ -91,6 +92,7 @@ object ApkInstaller {
                     (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
                 val pending = PendingIntent.getBroadcast(context, sessionId, result, flags)
                 session.commit(pending.intentSender)
+                SilentInstallGuard.memberSessionCommitted(SystemClock.elapsedRealtime())
             }
             Log.i(TAG, "Committed session $sessionId with ${profileFile.name}")
         } catch (e: Exception) {

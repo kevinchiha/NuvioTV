@@ -33,6 +33,14 @@ object PluginRuntimeHooks {
         } catch (t: Throwable) {
             Log.w("NuvioApplication", "Failed to schedule update check: ${t.message}")
         }
+
+        // KevBox TV: record when the app's activities start and stop, so a silent update
+        // installs only while the app is out of sight. Best-effort, like the call above.
+        try {
+            com.nuvio.tv.updater.AppVisibilityTracker.register(application)
+        } catch (t: Throwable) {
+            Log.w("NuvioApplication", "Failed to register app visibility tracker: ${t.message}")
+        }
     }
 
     @Volatile
