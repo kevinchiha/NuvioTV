@@ -25,30 +25,57 @@ private const val AUTH_SETTLE_TIMEOUT_MS = 5_000L
 
 internal enum class LoginFileAccountAction { SignInOnly, SignOutThenSignIn }
 
+/** What the box has saved on disk for the auth library, read without the network. */
+internal sealed interface StoredSession {
+    /** Nothing saved: the box has never been signed in, or was signed out. */
+    data object Absent : StoredSession
+
+    data class WithEmail(val email: String) : StoredSession
+
+    /** A session is saved but carries no user or no email, or reading it failed. */
+    data object Unknown : StoredSession
+}
+
+internal fun storedSession(found: Boolean, email: String?): StoredSession = when {
+    !found -> StoredSession.Absent
+    email.isNullOrBlank() -> StoredSession.Unknown
+    else -> StoredSession.WithEmail(email)
+}
+
+private fun normaliseEmail(email: String) = email.filterNot { it.isWhitespace() }.lowercase()
+
+internal fun sameEmail(a: String, b: String) = normaliseEmail(a) == normaliseEmail(b)
+
 /**
  * Signed out: sign in. Signed in as the same email (case and spaces ignored): sign in again on
  * top, so nothing gets wiped. Signed in as another email: sign out first, so the old account's
- * profiles and history do not stay on the box. Still Loading: judge by [storedSessionEmail], the
- * email of the session saved on the box (no network); none saved means sign in only.
+ * profiles and history do not stay on the box. Still Loading: judge by [stored], the session
+ * saved on the box. Same email signs in only, another email signs out first, a saved session
+ * with no email signs out first (unknown account), nothing saved signs in only.
  */
 internal fun loginFileAccountAction(
     state: AuthState,
     fileEmail: String,
-    storedSessionEmail: String? = null,
-): LoginFileAccountAction {
-    fun normalise(email: String) = email.filterNot { it.isWhitespace() }.lowercase()
-    fun sameAs(email: String) = normalise(email) == normalise(fileEmail)
-    return when (state) {
-        AuthState.SignedOut -> LoginFileAccountAction.SignInOnly
-        is AuthState.FullAccount ->
-            if (sameAs(state.email)) LoginFileAccountAction.SignInOnly else LoginFileAccountAction.SignOutThenSignIn
-        AuthState.Loading ->
-            if (storedSessionEmail.isNullOrBlank() || sameAs(storedSessionEmail)) {
-                LoginFileAccountAction.SignInOnly
-            } else {
-                LoginFileAccountAction.SignOutThenSignIn
-            }
+    stored: StoredSession = StoredSession.Absent,
+): LoginFileAccountAction = when (state) {
+    AuthState.SignedOut -> LoginFileAccountAction.SignInOnly
+    is AuthState.FullAccount ->
+        if (sameEmail(state.email, fileEmail)) LoginFileAccountAction.SignInOnly
+        else LoginFileAccountAction.SignOutThenSignIn
+    AuthState.Loading -> when (stored) {
+        StoredSession.Absent -> LoginFileAccountAction.SignInOnly
+        is StoredSession.WithEmail ->
+            if (sameEmail(stored.email, fileEmail)) LoginFileAccountAction.SignInOnly
+            else LoginFileAccountAction.SignOutThenSignIn
+        StoredSession.Unknown -> LoginFileAccountAction.SignOutThenSignIn
     }
+}
+
+/** Log text for the Loading case. Never contains the email. */
+internal fun storedSessionLogLabel(stored: StoredSession, fileEmail: String): String = when (stored) {
+    StoredSession.Absent -> "absent"
+    is StoredSession.WithEmail -> if (sameEmail(stored.email, fileEmail)) "same" else "other"
+    StoredSession.Unknown -> "unknown"
 }
 
 /**
@@ -109,18 +136,11 @@ class LoginFileSignIn @Inject constructor(
         val state = withTimeoutOrNull(AUTH_SETTLE_TIMEOUT_MS) {
             authManager.authState.first { it !is AuthState.Loading }
         } ?: authManager.authState.value
-        val storedEmail = if (state is AuthState.Loading) storedSessionEmail() else null
-        val action = loginFileAccountAction(state, email, storedEmail)
+        val stored = if (state is AuthState.Loading) readStoredSession() else StoredSession.Absent
+        val action = loginFileAccountAction(state, email, stored)
         if (state is AuthState.Loading) {
-            Log.i(
-                TAG,
-                when {
-                    storedEmail.isNullOrBlank() -> "auth still loading, no saved session, signing in"
-                    action == LoginFileAccountAction.SignInOnly ->
-                        "auth still loading, saved session is the same account, signing in"
-                    else -> "auth still loading, saved session is another account, signing out first"
-                },
-            )
+            val next = if (action == LoginFileAccountAction.SignInOnly) "signing in" else "signing out first"
+            Log.i(TAG, "auth still loading, saved session ${storedSessionLogLabel(stored, email)}, $next")
         } else if (action == LoginFileAccountAction.SignOutThenSignIn) {
             Log.i(TAG, "signed in to another account, signing out first")
         }
@@ -133,11 +153,17 @@ class LoginFileSignIn @Inject constructor(
         )
     }
 
-    // Reads the session the auth library keeps in memory; makes no network call.
-    private fun storedSessionEmail(): String? =
-        try {
-            auth.currentUserOrNull()?.email ?: auth.currentSessionOrNull()?.user?.email
-        } catch (e: Exception) {
-            null
-        }
+    // currentSessionOrNull() returns null unless the status is Authenticated, so it hides the saved
+    // session exactly when auth is stuck Loading (Initializing, or RefreshFailure after a network
+    // error). loadSession() reads the saved JSON from the library's settings storage: no network,
+    // no write, no status change, and null when nothing is saved or the JSON does not parse.
+    private suspend fun readStoredSession(): StoredSession {
+        val result = runCatching { auth.sessionManager.loadSession() }
+        result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+        return result.fold(
+            onSuccess = { session -> storedSession(found = session != null, email = session?.user?.email) },
+            // A read that throws leaves the account unknown; treat it like a session with no email.
+            onFailure = { StoredSession.Unknown },
+        )
+    }
 }
