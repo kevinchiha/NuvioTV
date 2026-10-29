@@ -15,4 +15,6 @@ interface UpdateWorkerEntryPoint {
     fun updateRepository(): UpdateRepository
     fun apkDownloader(): ApkDownloader
     fun updatePreferences(): UpdatePreferences
+    // Silent install reads the signed-in account to match earlyUsers.
+    fun authManager(): com.nuvio.tv.core.auth.AuthManager
 }
