@@ -19,6 +19,7 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 10. Emulator test server and run steps for AC-14
 
 ## Pre-existing failures
+- TraktProgressServiceRefreshTest > change seen by a cancelled refresh is fetched by the next poll (gate on identical app code, kevbox 2ddce968d, 2026-10-29 05:16: 2300 tests, 1 failed, 1 skipped; compile and release dry run green). Leave it alone; it does not count.
 
 ## Task outcomes
 
