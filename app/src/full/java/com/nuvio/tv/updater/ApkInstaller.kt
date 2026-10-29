@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import com.nuvio.tv.BuildConfig
 import java.io.File
@@ -99,6 +100,65 @@ object ApkInstaller {
             runCatching { installer.abandonSession(sessionId) }
             throw e
         }
+    }
+
+    /**
+     * Creates a silent session and writes base.apk (+ base.dm). Abandons it and rethrows on
+     * failure. Blocking I/O. With UPDATE_PACKAGES_WITHOUT_USER_ACTION, Android installs an update
+     * of this app without the confirm screen. A missing [profileFile] only drops base.dm: the
+     * plain installer always shows a screen, so a silent install never routes there.
+     */
+    @RequiresApi(31)
+    fun openSilentSession(context: Context, apkFile: File, profileFile: File?): Int {
+        val installer = context.packageManager.packageInstaller
+        // Same clean-up as installWithSession. Safe here: SilentInstallGuard blocks a silent attempt
+        // while a member session may still wait for its confirm screen.
+        installer.mySessions.forEach { old -> runCatching { installer.abandonSession(old.sessionId) } }
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            .apply {
+                setAppPackageName(context.packageName)
+                setSize(apkFile.length() + (profileFile?.length() ?: 0L))
+                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
+        val sessionId = installer.createSession(params)
+        try {
+            installer.openSession(sessionId).use { session ->
+                session.writeFile("base.apk", apkFile)
+                if (profileFile != null) session.writeFile("base.dm", profileFile)
+            }
+        } catch (e: Exception) {
+            runCatching { installer.abandonSession(sessionId) }
+            throw e
+        }
+        return sessionId
+    }
+
+    /**
+     * Commits a session opened by [openSilentSession]. Throws if Android refuses the commit.
+     * The result goes to [InstallResultReceiver] flagged as silent, so it never shows a screen.
+     */
+    @RequiresApi(31)
+    fun commitSilentSession(context: Context, sessionId: Int, versionCode: Int, profileName: String?) {
+        val installer = context.packageManager.packageInstaller
+        installer.openSession(sessionId).use { session ->
+            val result = Intent(context, InstallResultReceiver::class.java)
+                .setPackage(context.packageName)
+                .putExtra(InstallResultReceiver.EXTRA_SILENT, true)
+                .putExtra(InstallResultReceiver.EXTRA_VERSION_CODE, versionCode)
+            // MUTABLE, as in installWithSession: PackageInstaller adds the status extras to it.
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            val pending = PendingIntent.getBroadcast(context, sessionId, result, flags)
+            session.commit(pending.intentSender)
+        }
+        Log.i(
+            SILENT_LOG_TAG,
+            "Committed silent session $sessionId (versionCode $versionCode, profile=${profileName ?: "none"})"
+        )
+    }
+
+    /** Abandons [sessionId]; never throws. */
+    fun abandonSession(context: Context, sessionId: Int) {
+        runCatching { context.packageManager.packageInstaller.abandonSession(sessionId) }
     }
 
     private fun PackageInstaller.Session.writeFile(name: String, file: File) {

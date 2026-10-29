@@ -61,6 +61,10 @@ class InstallResultReceiver : BroadcastReceiver() {
 
     companion object {
         const val EXTRA_APK_PATH = "tv.kevbox.updater.APK_PATH"
+        /** Set by [ApkInstaller.commitSilentSession]: the result of a silent install. */
+        const val EXTRA_SILENT = "tv.kevbox.updater.SILENT"
+        /** The versionCode a silent session installs. */
+        const val EXTRA_VERSION_CODE = "tv.kevbox.updater.VERSION_CODE"
         private const val TAG = "InstallResultReceiver"
     }
 }
