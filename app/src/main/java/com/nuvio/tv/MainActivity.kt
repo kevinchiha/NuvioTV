@@ -1341,7 +1341,8 @@ open class MainActivity : ComponentActivity() {
                             )
                         }
 
-                    if (AppFeaturePolicy.inAppUpdatesEnabled && !BuildConfig.IS_DEBUG_BUILD) {
+                    // KevBox: UPDATER_ENABLED is true in release and in debug builds made with -PupdaterTestBaseUrl.
+                    if (AppFeaturePolicy.inAppUpdatesEnabled && BuildConfig.UPDATER_ENABLED) {
                         val updateViewModel: UpdateViewModel = hiltViewModel(this@MainActivity)
                         val updateState by updateViewModel.uiState.collectAsState()
                         UpdatePromptDialog(

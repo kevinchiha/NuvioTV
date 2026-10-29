@@ -201,7 +201,7 @@ class UpdateViewModel @Inject constructor(
                     // Install step finds it ready. Optional: on failure Install tries once more.
                     withContext(Dispatchers.IO) {
                         ProfileFetcher.fetch(apkDownloader, update, file) { url ->
-                            UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+                            UpdaterBuild.isTrusted(url)
                         }
                     }
 
@@ -255,7 +255,7 @@ class UpdateViewModel @Inject constructor(
             // The compile profile is optional: any failure here installs without it.
             val profile = update?.let {
                 ProfileFetcher.fetch(apkDownloader, it, apkFile) { url ->
-                    UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+                    UpdaterBuild.isTrusted(url)
                 }
             }
             runCatching { ApkInstaller.launchInstall(context, apkFile, profile) }

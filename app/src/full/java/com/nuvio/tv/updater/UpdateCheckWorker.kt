@@ -29,9 +29,9 @@ class UpdateCheckWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        // Mirror the launch-time gate: never auto-act in debug/benchmark builds. The worker only
-        // does real work in a release build (BuildConfig.IS_DEBUG_BUILD == false).
-        if (BuildConfig.IS_DEBUG_BUILD) return Result.success()
+        // Mirror the launch-time gate: the worker does real work only in a release build, or a
+        // debug build made with -PupdaterTestBaseUrl. Benchmark and plain debug builds stay off.
+        if (!UpdaterBuild.enabled) return Result.success()
 
         // The daily periodic job and the one-time startup kick can fire concurrently in the same
         // process; serialize so two runs never race on the shared cacheDir/updates files (the
@@ -68,7 +68,7 @@ class UpdateCheckWorker(
         var keepName: String? =
             if (targetIsUpgrade && alreadyCached && cachedPath != null) File(cachedPath).name else null
 
-        val trusted = UpdateDownloadDecision.isTrustedAssetUrl(update.assetUrl, BuildConfig.UPDATE_BASE_URL)
+        val trusted = UpdaterBuild.isTrusted(update.assetUrl)
         if (!trusted) Log.w(TAG, "Untrusted asset URL, skipping download: ${update.assetUrl}")
 
         val shouldDownload = trusted && UpdateDownloadDecision.shouldDownload(
@@ -100,7 +100,7 @@ class UpdateCheckWorker(
             // The compile profile is optional; without it the install still works, just slower
             // on first launch. Install time fetches it again if this attempt fails.
             val profile = ProfileFetcher.fetch(downloader, update, file) { url ->
-                UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+                UpdaterBuild.isTrusted(url)
             }
 
             prefs.setPredownload(file.absolutePath, UpdateJson.json.encodeToString(update))

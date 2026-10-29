@@ -167,10 +167,11 @@ fun AboutSettingsContent(
                             // channel picker + banner toggle, wired to upstream's GitHub-Releases updater). KevBox
                             // ships its own updater against tv.kevbox.dev with no channels, so that composable is
                             // deleted on merge and this single "Check for updates" row stays.
-                            // Gate the manual check the SAME way as the auto-check + dialog host in MainActivity
-                            // (`!IS_DEBUG_BUILD`): the UpdatePromptDialog is only composed in non-debug builds, so
-                            // showing this row in a debug build let it run but render nothing. Hide it in debug.
-                            if (AppFeaturePolicy.inAppUpdatesEnabled && !BuildConfig.IS_DEBUG_BUILD) {
+                            // KevBox: gate the manual check the SAME way as the auto-check + dialog host in
+                            // MainActivity (`UPDATER_ENABLED`): the UpdatePromptDialog is only composed when the
+                            // updater is on (release, or a debug build made with -PupdaterTestBaseUrl), so showing
+                            // this row otherwise let it run but render nothing. Hide it whenever the updater is off.
+                            if (AppFeaturePolicy.inAppUpdatesEnabled && BuildConfig.UPDATER_ENABLED) {
                                 val updateViewModel: UpdateViewModel = hiltViewModel(context as ComponentActivity)
                                 SettingsActionRow(
                                     title = stringResource(R.string.about_check_updates),
