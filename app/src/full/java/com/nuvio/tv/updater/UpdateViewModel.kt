@@ -1,6 +1,8 @@
 package com.nuvio.tv.updater
 
 import android.content.Context
+import android.os.Build
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nuvio.tv.BuildConfig
@@ -104,6 +106,28 @@ class UpdateViewModel @Inject constructor(
                 return@launch
             }
 
+            // On Android 12+ the app-open prompt stays hidden while a silent install still owns
+            // the version (AC-15). Only the dialog changes: About still shows the version and an
+            // instant Install. The About check (force = true) always shows the prompt.
+            var showDialog = decision.showDialog
+            if (!force && showDialog) {
+                val silentState = updatePreferences.silentInstallState.first()
+                val held = SilentPromptHold.holdsPrompt(
+                    sdkInt = Build.VERSION.SDK_INT,
+                    canRequestInstalls = ApkInstaller.canRequestPackageInstalls(context),
+                    update = decision.update,
+                    silentState = silentState,
+                    nowMs = System.currentTimeMillis(),
+                )
+                if (held) {
+                    showDialog = false
+                    Log.i(
+                        SILENT_LOG_TAG,
+                        "App-open prompt held for versionCode ${decision.update.versionCode} (silent install owns it)",
+                    )
+                }
+            }
+
             _uiState.update {
                 it.copy(
                     isChecking = false,
@@ -111,7 +135,7 @@ class UpdateViewModel @Inject constructor(
                     isUpdateAvailable = decision.isUpdateAvailable,
                     downloadedApkPath = decision.installableApkPath,
                     downloadProgress = if (decision.installableApkPath != null) 1f else null,
-                    showDialog = decision.showDialog,
+                    showDialog = showDialog,
                     showNoUpdateToastHint = showNoUpdateFeedback && !decision.isUpdateAvailable,
                     errorMessage = null,
                 )

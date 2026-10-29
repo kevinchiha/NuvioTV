@@ -21,7 +21,8 @@ import java.io.File
  * configured-host) URL and the device is on an unmetered network, downloads + SHA-256-verifies
  * the APK and caches its path + metadata so [UpdateViewModel] can offer an instant Install on
  * next app open. No notifications. Pruning runs on every invocation, keeping at most the one
- * APK still worth installing. Logs at decision points so a release smoke test can follow it.
+ * APK still worth installing. A run that ends with a valid pre-download then tries a silent
+ * install. Logs at decision points so a release smoke test can follow it.
  */
 class UpdateCheckWorker(
     appContext: Context,
@@ -119,6 +120,12 @@ class UpdateCheckWorker(
         }
 
         pruneStale(dir, keepName)
+
+        // A valid pre-download for this manifest, downloaded now or already cached (AC-5). The
+        // attempt checks everything again and takes its own lock, so it never waits on this one.
+        if (keepName != null) {
+            SilentInstall.attempt(applicationContext, kotlin.Result.success(update), SilentTrigger.DAILY_CHECK)
+        }
         return Result.success()
     }
 

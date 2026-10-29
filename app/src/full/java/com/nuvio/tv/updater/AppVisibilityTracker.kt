@@ -39,9 +39,11 @@ internal class VisibilityLog(private val store: VisibilityStore) {
         store.putLong(AppVisibilityTracker.KEY_LAST_START, nowElapsedMs)
     }
 
-    fun activityStopped(nowElapsedMs: Long) {
-        started.updateAndGet { (it - 1).coerceAtLeast(0) }
+    /** Returns how many activities are still started. */
+    fun activityStopped(nowElapsedMs: Long): Int {
+        val left = started.updateAndGet { (it - 1).coerceAtLeast(0) }
         store.putLong(AppVisibilityTracker.KEY_LAST_STOP, nowElapsedMs)
+        return left
     }
 
     fun lastStartElapsedMs(): Long? = store.getLong(AppVisibilityTracker.KEY_LAST_START)
@@ -52,6 +54,7 @@ internal class VisibilityLog(private val store: VisibilityStore) {
 /**
  * Tells whether any activity of the app is on screen, and since when it is not. Registered once
  * from `PluginRuntimeHooks.onApplicationCreate`. Times are `SystemClock.elapsedRealtime()` values.
+ * When the last started activity stops, it asks [SilentInstallScheduler] to queue the silent job.
  * It does not cancel a queued silent job when an activity starts: that job checks again and stops.
  */
 object AppVisibilityTracker {
@@ -94,7 +97,12 @@ object AppVisibilityTracker {
         }
 
         override fun onActivityStopped(activity: Activity) {
-            visibility.activityStopped(SystemClock.elapsedRealtime())
+            // The stop time is stored first: the queued job measures its 2 minutes from it.
+            val left = visibility.activityStopped(SystemClock.elapsedRealtime())
+            // A rotation or other config change stops and restarts the activity at once.
+            if (left == 0 && !activity.isChangingConfigurations) {
+                SilentInstallScheduler.onAppLeftScreen(activity.applicationContext)
+            }
         }
 
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
