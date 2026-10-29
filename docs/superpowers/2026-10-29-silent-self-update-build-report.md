@@ -23,6 +23,7 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 
 ## Rulings
 - 2026-10-29 07:35, Kevin: match KevBox Live, no app-open prompt on Android 12+ unless the silent install was refused. Folded as AC-15 into the spec and Task 8 (85f653206). Orchestrator addition: the prompt also returns when silent can no longer happen for that version (3 attempts, no silent block, no permission) and 72 h after `after` as a safety net.
+- Ruling (Task 8): the AC-15 hold check runs only when `decision.showDialog` is already true, over the brief's "whenever force is false": same UI state, and the "App-open prompt held" log line then only prints when a prompt was really held. Cost if wrong: none to behaviour; a log line fewer.
 
 ## Task outcomes
 - Task 1: landed 08c722c84, review clean (gate green: 2309 tests, only the baseline failure). No interface deviation.
