@@ -123,7 +123,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.os.ConfigurationCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.metrics.performance.JankStats
 import androidx.metrics.performance.PerformanceMetricsState
 import androidx.navigation.NavHostController
@@ -149,6 +151,7 @@ import com.nuvio.tv.core.access.DeviceGuardService
 import com.nuvio.tv.core.access.RefreshOutcome
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.auth.DeviceSessionRegistration
+import com.nuvio.tv.core.auth.loginfile.LoginFileSignIn
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.core.deeplink.DeepLinkHandler
 import com.nuvio.tv.core.deeplink.DeepLinkParser
@@ -316,6 +319,9 @@ open class MainActivity : ComponentActivity() {
     lateinit var deviceSessionRegistration: DeviceSessionRegistration
 
     @Inject
+    lateinit var loginFileSignIn: LoginFileSignIn
+
+    @Inject
     lateinit var authSessionNoticeDataStore: AuthSessionNoticeDataStore
 
     @Inject
@@ -390,6 +396,18 @@ open class MainActivity : ComponentActivity() {
         externalPlaybackTracker.activityLauncher = externalPlayerLauncher
 
         PluginRuntimeHooks.onActivityCreate(this)
+
+        // KevBox Setup login file, see ~/projects/kevbox-setup/docs/login-file.md. Checked on
+        // every resume and then once a second while resumed: the phone's launch command brings
+        // an app that is already on screen forward without a new onResume.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (isActive) {
+                    loginFileSignIn.checkNow()
+                    delay(1_000)
+                }
+            }
+        }
 
         window?.decorView?.post {
             val snapshot = com.nuvio.tv.core.player.DisplayCapabilities.detect(this)

@@ -1,0 +1,192 @@
+{
+  "status": "complete",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-5-5"
+  },
+  "message": "Review complete: 6 finding(s) across 5 selected item(s).",
+  "summary": {
+    "files_reviewed": 5,
+    "comments": 6,
+    "total_tokens": 467096,
+    "input_tokens": 449588,
+    "output_tokens": 17508,
+    "cache_read_tokens": 323527,
+    "cache_write_tokens": 126005,
+    "elapsed": "2m14s"
+  },
+  "tool_calls": {
+    "total": 23,
+    "by_tool": {
+      "code_comment": 3,
+      "code_search": 7,
+      "file_find": 3,
+      "file_read": 9,
+      "file_read_diff": 1
+    },
+    "failure": 0,
+    "failure_by_tool": {},
+    "failure_details": []
+  },
+  "comments": [
+    {
+      "path": "app/src/main/java/com/nuvio/tv/ui/screens/account/AccountViewModel.kt",
+      "content": "Reordering fixes `invalid_credentials`, but the bug behind it is still here. The raw Supabase body contains `\"error_code\":...`, so `contains(\"code\")` matches every auth error body. Any of those that also contains \"invalid\" and misses the specific checks above will still show \"Invalid sync code\". One example is the signup reply `{\"error_code\":\"email_address_invalid\",\"msg\":\"Email address \\\"x\\\" is invalid\"}`, which does not contain the exact text \"invalid email\". Matching \"sync code\" or the RPC's own exception text would be tighter, or you could exclude bodies that contain `error_code`. Also, nothing in `app/src/test` covers `accountErrorResId`. A small test with the `invalid_credentials` body and a real sync-code error body would lock in the new order.",
+      "suggestion_code": "        (message.contains(\"invalid\") \u0026\u0026 message.contains(\"sync code\")) ||\n            (message.contains(\"invalid\") \u0026\u0026 message.contains(\"code\") \u0026\u0026 !message.contains(\"error_code\")) -\u003e\n            R.string.account_error_invalid_sync_code",
+      "existing_code": "        message.contains(\"invalid\") \u0026\u0026 message.contains(\"code\") -\u003e R.string.account_error_invalid_sync_code",
+      "start_line": 814,
+      "end_line": 814,
+      "category": "bug",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileSignIn.kt",
+      "content": "`AuthState.Loading` doesn't always clear on its own. In `AuthManager.observeSessionStatus`, the `NotAuthenticated` branch with `SessionRefreshResult.TRANSIENT_FAILURE` only logs \"keeping current auth state\", and that state is still the initial `Loading`. The `Authenticated` branch also blocks on `validateAuthenticatedSession` (a network call) before it sets `FullAccount`. So when the TV starts offline or on a slow network, the state can stay `Loading` well beyond 5 s, even with a valid session for the same account the file names.\n\nIn that case this code calls `signOut()`, which runs `clearAfterSignOut` and wipes the profiles and history. `signInWithEmail` then fails for the same network reason. The customer ends up signed out with their data deleted, on a box that was already signed in to their own account. The spec accepts that cost only for a *different* account (Decisions, AC-10).\n\nThere is a second problem: `signOut()` runs inside the processor's 20 s `withTimeoutOrNull`. Its network call uses up the sign-in budget, and a timeout can land in the middle of `clearAfterSignOut`, whose `runCatching` blocks swallow the cancellation and leave a partial wipe.\n\nSuggestion: if the state is still `Loading` after the wait, don't wipe on a guess. Sign in directly, or compare against the email in the stored session (`auth.currentSessionOrNull()?.user?.email`). Only sign out when you know the account is different.",
+      "existing_code": "        } ?: authManager.authState.value\n        if (loginFileAccountAction(state, email) == LoginFileAccountAction.SignOutThenSignIn) {",
+      "start_line": 75,
+      "end_line": 76,
+      "category": "bug",
+      "severity": "high"
+    },
+    {
+      "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessor.kt",
+      "content": "This only trims the ends of the email, but `loginFileAccountAction` strips every whitespace character before comparing. So `\"a b@x.com\"` counts as the same account as `\"ab@x.com\"`, yet the version with the space is what gets sent to the server. Use one normalisation for both, or compare only trimmed, lowercased emails.",
+      "existing_code": "        val email = (obj[\"email\"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()",
+      "start_line": 108,
+      "end_line": 108,
+      "category": "maintainability",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessor.kt",
+      "content": "This timeout can't cut off the network call, so the 20 s budget isn't enforced. `AuthManager.executeSupabaseJsonRequestAttempt` makes a blocking `client.newCall(request).execute()` call inside `withContext(Dispatchers.IO)`. Cancelling the coroutine doesn't interrupt that call, and `withTimeoutOrNull` can only return after the child block finishes. That block can include the 5 s settle wait, `signOut()` (another network call) and the primary request plus the fallback-origin retry, each limited only by OkHttp's connect/read timeouts. Together they can easily go past the phone's 30 s window, and then the result file shows up too late. Also, `signInWithEmail` catches `Exception`, which includes `CancellationException`, so a timed-out attempt is turned into an ordinary failure. Fix: make the HTTP call cancellable (`Call.cancel()` on cancellation via `suspendCancellableCoroutine`/`invokeOnCancellation`, or set an OkHttp `callTimeout`), or race the sign-in against a timer that writes the timeout result without waiting for the sign-in to finish.",
+      "existing_code": "            withTimeoutOrNull(timeoutMs) { signIn(login.email, login.password) }",
+      "start_line": 89,
+      "end_line": 89,
+      "category": "bug",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileErrors.kt",
+      "content": "`text` is built from `AuthHttpException.message`, which contains the whole server response body. A 5xx body that happens to include \"timeout\" (for example \"upstream request timeout\") will be reported as \"could not reach the internet\". Going the other way, `NoRouteToHostException` and `SSLException` aren't `ConnectException`s, so real connectivity failures fall through to the generic message. Match on exception types, plus the HTTP status for `AuthHttpException`, instead of substrings of the server body.",
+      "existing_code": "        chain.any { it is UnknownHostException || it is SocketTimeoutException || it is ConnectException } ||\n            has(\"timeout\", \"unable to resolve host\") -\u003e",
+      "start_line": 21,
+      "end_line": 22,
+      "category": "bug",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessor.kt",
+      "content": "A result file left over from an earlier attempt is never removed before the new sign-in starts. If KevBox Setup polls for `kevbox-login.result.json` and doesn't delete it itself first, it can read the old result straight away. Delete any existing result and `.tmp` file once the login file has been accepted.",
+      "existing_code": "        log(\"login file read and deleted, signing in\")",
+      "start_line": 87,
+      "end_line": 87,
+      "category": "bug",
+      "severity": "low"
+    }
+  ],
+  "groups": [
+    {
+      "label": "Login file sign-in core logic",
+      "files": [
+        "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileErrors.kt",
+        "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessor.kt",
+        "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileSignIn.kt"
+      ]
+    },
+    {
+      "label": "Integrate login file sign-in into app and account screen",
+      "files": [
+        "app/src/main/java/com/nuvio/tv/MainActivity.kt",
+        "app/src/main/java/com/nuvio/tv/ui/screens/account/AccountViewModel.kt"
+      ]
+    }
+  ],
+  "session_id": "6659d191-9a15-42bb-a8a4-a1dfe3d7c719",
+  "manifest": {
+    "schema_version": "ocr.run-manifest/v1",
+    "run_id": "6659d191-9a15-42bb-a8a4-a1dfe3d7c719",
+    "operation": "review",
+    "terminal_state": "complete",
+    "repository": {
+      "identity_sha256": "e22ee2aa744b7795f4a03c50d70f6c8f98e9662b61352b6c00b1cd8d4fc31c90"
+    },
+    "input": {
+      "mode": "range",
+      "requested_from": "kevbox",
+      "requested_head": "quick/login-file-signin",
+      "resolved_base": "2ddce968dcb0c45a3cc2d7b3f106703649aa3425",
+      "resolved_head": "b5367dc811aa192a015ab92f60981b609f699369",
+      "exact_range": "2ddce968dcb0c45a3cc2d7b3f106703649aa3425..b5367dc811aa192a015ab92f60981b609f699369",
+      "source_artifact_sha256": "a85f4af03add0e8bbfd71981414ed90260f457dbfcc1979e4d48ec559e538c85"
+    },
+    "execution": {
+      "ocr_version": "v1.13.3",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "configured_concurrency": 8,
+      "rule_config_sha256": "7bdde30da0c66ee5643876474d879e4d72b8803bf0501749f82291f5b9b2b87a",
+      "runtime_config_sha256": "93c1bae68fa824e3eb9a388b389d2b0cdbe98c00e45b7638e3c4d5afe2dbc39f"
+    },
+    "coverage": {
+      "selected": [
+        {
+          "item_id": "03583840728677ed2c7eb68785990698a22c2e049f5088212afe409c3f196c9c",
+          "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileSignIn.kt",
+          "fingerprint": "5305451735dae3fd428fc434c3c9f77f22b0763e44bade4543ead3838217c575"
+        },
+        {
+          "item_id": "4c5de6b858fb4808b3a7f2b68c981d8d70f31ccaaec362a8067062637afb3054",
+          "path": "app/src/main/java/com/nuvio/tv/MainActivity.kt",
+          "fingerprint": "35ff8de4b3fd9ccf4617f41d9ef5265fb113a4741bc487632ed5502e3135a14f"
+        },
+        {
+          "item_id": "b93870b053cc57a3fa1bae3e0c81d4bf62b76faf8227c58bd29dc8c8fa1cbfa6",
+          "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessor.kt",
+          "fingerprint": "b3bb44716544282751a55c8f8a4effec5dbf678de3d377169ada58583d80c7b8"
+        },
+        {
+          "item_id": "c558a1a53f04bc4d1ed3237b273f9b94884bd7a87d1c2006222cc516a2510099",
+          "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileErrors.kt",
+          "fingerprint": "c1244414e63282912a490f61182901c6d567bed753ee8bbe7bb07a8c06f09af2"
+        },
+        {
+          "item_id": "e73374c7b6fdbbec777f44afc56cd8fa593343681b62ec4b016e3d460cdb8bc2",
+          "path": "app/src/main/java/com/nuvio/tv/ui/screens/account/AccountViewModel.kt",
+          "fingerprint": "c9f5f23da46342c6ab634673fe3ac875e71f04ce6be4eb34a8b4ef5e5fe21b6a"
+        }
+      ],
+      "completed": [
+        {
+          "item_id": "03583840728677ed2c7eb68785990698a22c2e049f5088212afe409c3f196c9c",
+          "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileSignIn.kt",
+          "fingerprint": "5305451735dae3fd428fc434c3c9f77f22b0763e44bade4543ead3838217c575"
+        },
+        {
+          "item_id": "4c5de6b858fb4808b3a7f2b68c981d8d70f31ccaaec362a8067062637afb3054",
+          "path": "app/src/main/java/com/nuvio/tv/MainActivity.kt",
+          "fingerprint": "35ff8de4b3fd9ccf4617f41d9ef5265fb113a4741bc487632ed5502e3135a14f"
+        },
+        {
+          "item_id": "b93870b053cc57a3fa1bae3e0c81d4bf62b76faf8227c58bd29dc8c8fa1cbfa6",
+          "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessor.kt",
+          "fingerprint": "b3bb44716544282751a55c8f8a4effec5dbf678de3d377169ada58583d80c7b8"
+        },
+        {
+          "item_id": "c558a1a53f04bc4d1ed3237b273f9b94884bd7a87d1c2006222cc516a2510099",
+          "path": "app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileErrors.kt",
+          "fingerprint": "c1244414e63282912a490f61182901c6d567bed753ee8bbe7bb07a8c06f09af2"
+        },
+        {
+          "item_id": "e73374c7b6fdbbec777f44afc56cd8fa593343681b62ec4b016e3d460cdb8bc2",
+          "path": "app/src/main/java/com/nuvio/tv/ui/screens/account/AccountViewModel.kt",
+          "fingerprint": "c9f5f23da46342c6ab634673fe3ac875e71f04ce6be4eb34a8b4ef5e5fe21b6a"
+        }
+      ],
+      "reused": [],
+      "failed": [],
+      "waived": []
+    },
+    "elapsed_ms": 133767
+  }
+}
