@@ -342,9 +342,7 @@ class SilentInstallGuardTest {
     fun `the key recorder records each key event and passes every call through unchanged`() {
         val original = mockk<Window.Callback>(relaxed = true)
         val event = mockk<KeyEvent>()
-        val touch = mockk<MotionEvent>()
         every { original.dispatchKeyEvent(event) } returns true
-        every { original.dispatchTouchEvent(touch) } returns false
         val keys = KeyPressLog()
         var clock = 5_000L
         val recorder = KeyRecordingCallback(original, keys) { clock }
@@ -357,19 +355,48 @@ class SilentInstallGuardTest {
         assertEquals(7_000L, keys.lastPressElapsedMs())
         verify(exactly = 2) { original.dispatchKeyEvent(event) }
 
-        assertFalse(recorder.dispatchTouchEvent(touch))
+        clock = 9_000L
         recorder.onWindowFocusChanged(true)
         recorder.onPointerCaptureChanged(true)
         val shortcuts = mutableListOf<KeyboardShortcutGroup>()
         val menu = mockk<Menu>()
         recorder.onProvideKeyboardShortcuts(shortcuts, menu, 3)
-        verify { original.dispatchTouchEvent(touch) }
         verify { original.onWindowFocusChanged(true) }
         // Java default methods, which Kotlin's `by` delegation does not forward on its own.
         verify { original.onPointerCaptureChanged(true) }
         verify { original.onProvideKeyboardShortcuts(shortcuts, menu, 3) }
-        // Only key events count as a press.
+        // Calls that are not input do not count as a press.
         assertEquals(7_000L, keys.lastPressElapsedMs())
+    }
+
+    @Test
+    fun `the key recorder counts touch and generic motion events as presses and passes them through`() {
+        val original = mockk<Window.Callback>(relaxed = true)
+        val touch = mockk<MotionEvent>()
+        val motion = mockk<MotionEvent>()
+        every { original.dispatchTouchEvent(touch) } returns true
+        every { original.dispatchGenericMotionEvent(motion) } returns false
+        val keys = KeyPressLog()
+        var clock = 5_000L
+        val recorder = KeyRecordingCallback(original, keys) { clock }
+
+        // A touch screen or an air-mouse click.
+        assertTrue(recorder.dispatchTouchEvent(touch))
+        assertEquals(5_000L, keys.lastPressElapsedMs())
+        verify(exactly = 1) { original.dispatchTouchEvent(touch) }
+
+        // An air-mouse pointer move or scroll.
+        clock = 8_000L
+        assertFalse(recorder.dispatchGenericMotionEvent(motion))
+        assertEquals(8_000L, keys.lastPressElapsedMs())
+        verify(exactly = 1) { original.dispatchGenericMotionEvent(motion) }
+
+        every { original.dispatchTouchEvent(touch) } returns false
+        every { original.dispatchGenericMotionEvent(motion) } returns true
+        clock = 9_000L
+        assertFalse(recorder.dispatchTouchEvent(touch))
+        assertTrue(recorder.dispatchGenericMotionEvent(motion))
+        assertEquals(9_000L, keys.lastPressElapsedMs())
     }
 
     @Test

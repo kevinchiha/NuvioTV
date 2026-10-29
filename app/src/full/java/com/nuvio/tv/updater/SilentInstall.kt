@@ -27,7 +27,10 @@ object SilentClock {
     fun nowFor(serverTimeMs: Long?, boxNowMs: Long): Long = serverTimeMs ?: boxNowMs
 }
 
-/** What started a silent attempt; shown in the evaluation log line. */
+/**
+ * What started a silent attempt; shown in the evaluation log line. DAILY_CHECK is the 6-hourly
+ * check; its "daily-check" label stays because tests and the emulator steps grep it.
+ */
 enum class SilentTrigger(val label: String) { JOB("job"), DAILY_CHECK("daily-check") }
 
 /**
@@ -65,7 +68,7 @@ internal interface SilentInstallEnv {
     fun rememberCommitted(versionCode: Int)
     /**
      * Deletes the cached APK at [path] and its compile profile, and clears the pre-download
-     * pointer while it still names [path], so the next daily check downloads the APK again.
+     * pointer while it still names [path], so the next 6-hourly check downloads the APK again.
      */
     suspend fun discardPredownload(path: String)
     fun log(message: String)
@@ -289,7 +292,7 @@ private class AndroidSilentInstallEnv(private val context: Context) : SilentInst
         val apk = File(path)
         runCatching { apk.delete() }
         runCatching { File(apk.parentFile, InstallProfile.fileNameFor(apk.name)).delete() }
-        // A daily check may have stored a newer pre-download meanwhile; leave that one alone.
+        // A 6-hourly check may have stored a newer pre-download meanwhile; leave that one alone.
         if (prefs.predownloadApkPath.first() == path) prefs.clearPredownload()
     }
 

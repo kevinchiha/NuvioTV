@@ -16,7 +16,7 @@ object SilentPromptHold {
      * [liveUpdate] is this check's version.json result, null when the fetch failed: a silent
      * attempt needs the live manifest, so an offline box gets the prompt. [predownloadReady] is
      * true when the cached pre-download is for [liveUpdate]'s versionCode and its file exists;
-     * without one, the hold lasts only while [unmeteredNetwork] lets the daily check fetch it.
+     * without one, the hold lasts only while [unmeteredNetwork] lets the 6-hourly check fetch it.
      */
     fun holdsPrompt(
         sdkInt: Int,
@@ -37,7 +37,7 @@ object SilentPromptHold {
         if (state?.refused == true) return false
         if ((state?.attempts ?: 0) >= SilentInstallDecision.MAX_ATTEMPTS) return false
 
-        // No APK to install and no network the daily check downloads on: silent cannot happen.
+        // No APK to install and no network the 6-hourly check downloads on: silent cannot happen.
         if (!predownloadReady && !unmeteredNetwork) return false
 
         // Overflow-safe form of `nowMs < afterMs + SAFETY_NET_MS`.

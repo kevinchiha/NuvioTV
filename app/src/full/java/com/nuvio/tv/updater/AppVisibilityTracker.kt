@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.Menu
+import android.view.MotionEvent
 import android.view.Window
 import androidx.annotation.RequiresApi
 import java.util.concurrent.atomic.AtomicInteger
@@ -58,7 +59,10 @@ internal class VisibilityLog(private val store: VisibilityStore) {
     fun lastStopElapsedMs(): Long? = store.getLong(AppVisibilityTracker.KEY_LAST_STOP)
 }
 
-/** When a remote key was last pressed in an activity window. In memory only, like the count. */
+/**
+ * When a remote key was last pressed, or a pointer moved, in an activity window. In memory only,
+ * like the count.
+ */
 internal class KeyPressLog {
     @Volatile
     private var lastElapsedMs: Long? = null
@@ -73,7 +77,9 @@ internal class KeyPressLog {
 
 /**
  * Wraps an activity window's callback to record each key event in [keys], so the idle-on-screen
- * rule sees remote presses without an upstream change. Every call goes to [original] unchanged.
+ * rule sees remote presses without an upstream change. Touch and generic motion events count as
+ * presses too: air-mouse and other pointer remotes send those instead of key events. Every call
+ * goes to [original] unchanged.
  */
 internal class KeyRecordingCallback(
     private val original: Window.Callback,
@@ -83,6 +89,16 @@ internal class KeyRecordingCallback(
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         keys.pressed(clock())
         return original.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        keys.pressed(clock())
+        return original.dispatchTouchEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        keys.pressed(clock())
+        return original.dispatchGenericMotionEvent(event)
     }
 
     // `by original` skips Java default methods; these two would otherwise never reach it.

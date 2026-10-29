@@ -34,7 +34,7 @@ Run 1 (after passed):
   adb -s $E shell am start -n tv.kevbox.debug/com.nuvio.tv.MainActivity
   Wait for "Pre-downloaded + verified" in: adb -s $E logcat -d -s UpdateCheckWorker
   adb -s $E shell input keyevent KEYCODE_HOME
-  Wait 5 minutes with no input, then:
+  Wait 16 minutes with no input (the job runs 15 minutes after HOME), then:
   adb -s $E shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
   adb -s $E logcat -d -s KevboxSilentUpdate InstallResultReceiver ApkInstaller UpdateCheckWorker
      -> "Silent job queued", "Silent check [job] versionCode=2002: ELIGIBLE",
@@ -48,7 +48,7 @@ Run 2 (not yet, one early user that is not this box; 2002 is installed after run
   adb -s $E shell appops set tv.kevbox.debug REQUEST_INSTALL_PACKAGES allow
   setsid python3 scripts/updater_test_server.py --apk /tmp/kevbox-2003.apk --version-code 2003 --after-hours 24 --early-user 00000000-0000-0000-0000-000000000000 >/tmp/kevbox-updater-server.log 2>&1 < /dev/null & echo $! > /tmp/kevbox-updater-server.pid
   adb -s $E logcat -c
-  Open the app as in run 1, wait for the pre-download line, press HOME, wait 5 minutes.
+  Open the app as in run 1, wait for the pre-download line, press HOME, wait 16 minutes.
   adb -s $E shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
   adb -s $E logcat -d -s KevboxSilentUpdate  -> "Silent check [job] versionCode=2003: NOT_YET early=false"
   Open the app again: no update prompt appears (AC-15), and logcat -s KevboxSilentUpdate shows
