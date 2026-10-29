@@ -17,7 +17,7 @@ import kotlinx.serialization.encodeToString
 import java.io.File
 
 /**
- * Once-a-day background check. If a newer, non-ignored build exists on a trusted URL (see
+ * Background check that runs every 6 hours. If a newer, non-ignored build exists on a trusted URL (see
  * [UpdaterBuild.isTrusted]: https on the configured host; a debug build made with
  * `-PupdaterTestBaseUrl` trusts only that test URL's scheme, host and port) and the device is on
  * an unmetered network, downloads + SHA-256-verifies
@@ -36,7 +36,7 @@ class UpdateCheckWorker(
         // debug build made with -PupdaterTestBaseUrl. Benchmark and plain debug builds stay off.
         if (!UpdaterBuild.enabled) return Result.success()
 
-        // The daily periodic job and the one-time startup kick can fire concurrently in the same
+        // The 6-hourly periodic job and the one-time startup kick can fire concurrently in the same
         // process; serialize so two runs never race on the shared cacheDir/updates files (the
         // loser then sees alreadyCached and cleanly no-ops). withLock releases on any return/throw.
         return runMutex.withLock { runCheck() }
@@ -144,6 +144,8 @@ class UpdateCheckWorker(
     }
 
     companion object {
+        // The check runs every 6 hours now, but the name stays: UPDATE replaces the job queued
+        // under it on installed TVs, and a new name would leave the old daily job running too.
         const val UNIQUE_NAME = "kevbox-daily-update-check"
         const val UNIQUE_NAME_ONESHOT = "kevbox-update-check-now"
         private const val TAG = "UpdateCheckWorker"

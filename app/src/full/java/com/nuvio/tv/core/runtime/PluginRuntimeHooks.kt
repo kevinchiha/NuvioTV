@@ -25,7 +25,7 @@ object PluginRuntimeHooks {
         this.application = application
         AcraApplication.context = application
 
-        // KevBox TV: register the once-a-day background update check (full flavor only).
+        // KevBox TV: register the background update check, every 6 hours (full flavor only).
         // Idempotent (UPDATE periodic + KEEP one-time), best-effort so a WorkManager hiccup
         // never blocks startup.
         try {

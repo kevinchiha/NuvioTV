@@ -2,6 +2,7 @@ package com.nuvio.tv.updater
 
 import android.app.ActivityManager
 import android.content.Context
+import android.media.AudioManager
 import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.sync.Mutex
@@ -120,6 +121,25 @@ object SilentInstallGuard {
         }
     }
 
+    /**
+     * True while any audio plays (`AudioManager.isMusicActive`): the app's players, a trailer,
+     * or another app. A state that cannot be read counts as playing, so the idle-on-screen path
+     * waits for the next trigger.
+     */
+    fun isPlaying(context: Context): Boolean {
+        return try {
+            val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (audio == null) {
+                Log.w(SILENT_LOG_TAG, "No AudioManager; counting audio as playing")
+                return true
+            }
+            audio.isMusicActive
+        } catch (t: Throwable) {
+            Log.w(SILENT_LOG_TAG, "Could not read the audio state: ${t.javaClass.simpleName}")
+            true
+        }
+    }
+
     fun quietInput(context: Context): QuietInput = buildQuietInput(
         startedActivities = if (AppVisibilityTracker.isRegistered) AppVisibilityTracker.startedActivities else null,
         store = AppVisibilityTracker.storeFor(context),
@@ -127,11 +147,14 @@ object SilentInstallGuard {
         nowElapsedMs = SystemClock.elapsedRealtime(),
         externalPlaybackRunning = isExternalPlaybackRunning(context),
         installScreenWaiting = PendingInstallScreen.pending.value != null,
+        playing = isPlaying(context),
+        lastKeyPressElapsedMs = AppVisibilityTracker.lastKeyPressElapsedMs,
     )
 
     /**
      * [quietInput] with every Android fact passed in, for tests. A null [startedActivities] means
-     * the tracker is not registered: visibility is unknown, so it counts as one started activity.
+     * the tracker is not registered: visibility is unknown, so it counts as one started activity
+     * that never goes idle.
      */
     internal fun buildQuietInput(
         startedActivities: Int?,
@@ -140,6 +163,8 @@ object SilentInstallGuard {
         nowElapsedMs: Long,
         externalPlaybackRunning: Boolean,
         installScreenWaiting: Boolean,
+        playing: Boolean,
+        lastKeyPressElapsedMs: Long?,
     ): QuietInput = QuietInput(
         startedActivities = startedActivities ?: 1,
         lastStartElapsedMs = store?.getLong(AppVisibilityTracker.KEY_LAST_START),
@@ -149,5 +174,8 @@ object SilentInstallGuard {
         memberInstallRunning = members.isRunning,
         installScreenWaiting = installScreenWaiting,
         lastMemberCommitElapsedMs = members.lastCommitElapsedMs(store, nowElapsedMs),
+        playing = playing,
+        lastKeyPressElapsedMs = lastKeyPressElapsedMs,
+        visibilityKnown = startedActivities != null,
     )
 }

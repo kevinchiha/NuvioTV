@@ -9,6 +9,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,16 +32,17 @@ class UpdateRepository @Inject constructor(
                 .header("Cache-Control", "no-cache")
                 .build()
 
-            val raw = withContext(Dispatchers.IO) {
+            val (raw, dateHeader) = withContext(Dispatchers.IO) {
                 okHttpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         error("Update manifest error: HTTP ${response.code}")
                     }
-                    response.body?.string() ?: error("Empty update manifest response")
+                    val body = response.body?.string() ?: error("Empty update manifest response")
+                    body to response.header("Date")
                 }
             }
 
-            parseManifest(raw, Build.VERSION.SDK_INT)
+            parseManifest(raw, Build.VERSION.SDK_INT).copy(serverTimeMs = parseHttpDate(dateHeader))
         }
     }
 
@@ -47,6 +50,17 @@ class UpdateRepository @Inject constructor(
         private val json = Json {
             ignoreUnknownKeys = true
             isLenient = true
+        }
+
+        /**
+         * The epoch ms of an HTTP `Date` header (RFC 1123), or null when [header] is missing,
+         * blank or unreadable. Pure so it can be unit-tested.
+         */
+        fun parseHttpDate(header: String?): Long? {
+            if (header.isNullOrBlank()) return null
+            return runCatching {
+                ZonedDateTime.parse(header.trim(), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()
+            }.getOrNull()
         }
 
         /**

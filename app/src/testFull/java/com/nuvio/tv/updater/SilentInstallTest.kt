@@ -46,8 +46,11 @@ class SilentInstallTest {
         memberInstallRunning = false,
         installScreenWaiting = false,
         lastMemberCommitElapsedMs = null,
+        playing = false,
+        lastKeyPressElapsedMs = null,
+        visibilityKnown = true,
     )
-    private val onScreen = outOfSight.copy(startedActivities = 1)
+    private val onScreen = outOfSight.copy(startedActivities = 1, lastStartElapsedMs = 9_999_000L)
 
     /** Every check passes unless a test changes a field. Records each call in [calls]. */
     private class FakeEnv(
@@ -73,7 +76,8 @@ class SilentInstallTest {
         val committed = mutableSetOf<Int>()
         val discarded = mutableListOf<String>()
 
-        override fun nowMs() = 5_000_000L
+        var boxNowMs = 5_000_000L
+        override fun nowMs() = boxNowMs
         override suspend fun predownloadPath(): String? = path
         override suspend fun predownloadVersionCode(): Int? = 1030
         override fun fileExists(path: String) = exists
@@ -216,6 +220,40 @@ class SilentInstallTest {
         for (env in listOf(passed, noEarly, early)) {
             assertFalse(env.lines.any { it.contains(userId, ignoreCase = true) || it.contains(email) })
         }
+    }
+
+    private val twoDaysMs = 2 * 24 * 60 * 60 * 1000L
+
+    @Test
+    fun `a box clock 2 days ahead still waits when the server time is before after`() = runTest {
+        val env = env(outOfSight).apply { boxNowMs = nowMs + twoDaysMs }
+        val update = update(afterMs = nowMs + 1).copy(serverTimeMs = nowMs)
+        SilentInstall.run(env, Result.success(update), SilentTrigger.JOB, Mutex())
+
+        assertEquals("Silent check [job] versionCode=1030: NOT_YET early=false", env.lines.single())
+        assertEquals(emptyList<String>(), sessionCalls(env))
+    }
+
+    @Test
+    fun `a box clock 2 days behind installs once the server time is past after`() = runTest {
+        val env = env(outOfSight).apply { boxNowMs = nowMs - twoDaysMs }
+        val update = update(afterMs = nowMs - 1).copy(serverTimeMs = nowMs)
+        SilentInstall.run(env, Result.success(update), SilentTrigger.JOB, Mutex())
+
+        assertEquals("Silent check [job] versionCode=1030: ELIGIBLE early=false", env.lines.single())
+        assertEquals(listOf("open", "commit:42:1030:kevbox-1030.dm"), sessionCalls(env))
+    }
+
+    @Test
+    fun `the early-user evaluation uses the server time too`() = runTest {
+        // Box clock past after, server time before it: only an early user proceeds.
+        val env = env(outOfSight).apply { boxNowMs = nowMs + twoDaysMs }
+        env.auth.value = AuthState.FullAccount("someone-else", email)
+        val update = update(afterMs = nowMs + 1, earlyUsers = listOf(userId)).copy(serverTimeMs = nowMs)
+        SilentInstall.run(env, Result.success(update), SilentTrigger.JOB, Mutex())
+
+        assertEquals(1, env.authReads)
+        assertEquals("Silent check [job] versionCode=1030: NOT_YET early=false", env.lines.single())
     }
 
     @Test

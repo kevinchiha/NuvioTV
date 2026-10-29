@@ -4,7 +4,15 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
+import android.os.Build
 import android.os.SystemClock
+import android.util.Log
+import android.view.KeyEvent
+import android.view.KeyboardShortcutGroup
+import android.view.Menu
+import android.view.MotionEvent
+import android.view.Window
+import androidx.annotation.RequiresApi
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Long values kept across process death. A small seam so the logic runs in unit tests. */
@@ -52,10 +60,75 @@ internal class VisibilityLog(private val store: VisibilityStore) {
 }
 
 /**
- * Tells whether any activity of the app is on screen, and since when it is not. Registered once
- * from `PluginRuntimeHooks.onApplicationCreate`. Times are `SystemClock.elapsedRealtime()` values.
- * When the last started activity stops, it asks [SilentInstallScheduler] to queue the silent job.
- * It does not cancel a queued silent job when an activity starts: that job checks again and stops.
+ * When a remote key was last pressed, or a pointer moved, in an activity window. In memory only,
+ * like the count.
+ */
+internal class KeyPressLog {
+    @Volatile
+    private var lastElapsedMs: Long? = null
+
+    fun pressed(nowElapsedMs: Long) {
+        lastElapsedMs = nowElapsedMs
+    }
+
+    /** Null until a key is pressed in this process. */
+    fun lastPressElapsedMs(): Long? = lastElapsedMs
+}
+
+/**
+ * Wraps an activity window's callback to record each key event in [keys], so the idle-on-screen
+ * rule sees remote presses without an upstream change. Touch and generic motion events count as
+ * presses too: air-mouse and other pointer remotes send those instead of key events. Every call
+ * goes to [original] unchanged.
+ */
+internal class KeyRecordingCallback(
+    private val original: Window.Callback,
+    private val keys: KeyPressLog,
+    private val clock: () -> Long,
+) : Window.Callback by original {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        keys.pressed(clock())
+        return original.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        keys.pressed(clock())
+        return original.dispatchTouchEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        keys.pressed(clock())
+        return original.dispatchGenericMotionEvent(event)
+    }
+
+    // `by original` skips Java default methods; these two would otherwise never reach it.
+    // Android calls each only on the API level that added it.
+    @RequiresApi(Build.VERSION_CODES.N)
+    override fun onProvideKeyboardShortcuts(data: MutableList<KeyboardShortcutGroup>?, menu: Menu?, deviceId: Int) {
+        original.onProvideKeyboardShortcuts(data, menu, deviceId)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    override fun onPointerCaptureChanged(hasCapture: Boolean) {
+        original.onPointerCaptureChanged(hasCapture)
+    }
+
+    companion object {
+        /** Wraps [window]'s callback, unless it is wrapped already or there is none. */
+        fun install(window: Window, keys: KeyPressLog, clock: () -> Long) {
+            val current = window.callback ?: return
+            if (current is KeyRecordingCallback) return
+            window.callback = KeyRecordingCallback(current, keys, clock)
+        }
+    }
+}
+
+/**
+ * Tells whether any activity of the app is on screen, since when it is not, and when a remote key
+ * was last pressed in one. Registered once from `PluginRuntimeHooks.onApplicationCreate`. Times
+ * are `SystemClock.elapsedRealtime()` values. When the last started activity stops, it asks
+ * [SilentInstallScheduler] to queue the silent job. It does not cancel a queued silent job when an
+ * activity starts: that job checks again and stops.
  */
 object AppVisibilityTracker {
     internal const val PREFS_NAME = "kevbox_app_visibility"
@@ -71,12 +144,17 @@ object AppVisibilityTracker {
     @Volatile
     private var log: VisibilityLog? = null
 
+    private val keys = KeyPressLog()
+
+    /** The last key press in an activity window of this process, or null. */
+    val lastKeyPressElapsedMs: Long? get() = keys.lastPressElapsedMs()
+
     fun register(application: Application) {
         synchronized(this) {
             if (log != null) return
             val opened = PrefsVisibilityStore(application)
             val visibility = VisibilityLog(opened)
-            application.registerActivityLifecycleCallbacks(Callbacks(visibility))
+            application.registerActivityLifecycleCallbacks(Callbacks(visibility, keys))
             store = opened
             log = visibility
         }
@@ -94,13 +172,22 @@ object AppVisibilityTracker {
     internal fun storeFor(context: Context): VisibilityStore =
         store ?: PrefsVisibilityStore(context.applicationContext ?: context)
 
-    private class Callbacks(private val visibility: VisibilityLog) : Application.ActivityLifecycleCallbacks {
+    private class Callbacks(
+        private val visibility: VisibilityLog,
+        private val keys: KeyPressLog,
+    ) : Application.ActivityLifecycleCallbacks {
         override fun onActivityStarted(activity: Activity) {
             visibility.activityStarted(SystemClock.elapsedRealtime())
+            // A recorder that cannot be installed only costs the idle-on-screen path; the app goes on.
+            try {
+                KeyRecordingCallback.install(activity.window, keys, SystemClock::elapsedRealtime)
+            } catch (t: Throwable) {
+                Log.w(SILENT_LOG_TAG, "Could not record key presses: ${t.javaClass.simpleName}")
+            }
         }
 
         override fun onActivityStopped(activity: Activity) {
-            // The stop time is stored first: the queued job measures its 2 minutes from it.
+            // The stop time is stored first: the queued job measures its 15 minutes from it.
             val left = visibility.activityStopped(SystemClock.elapsedRealtime())
             // A rotation or other config change stops and restarts the activity at once.
             if (left == 0 && !activity.isChangingConfigurations) {

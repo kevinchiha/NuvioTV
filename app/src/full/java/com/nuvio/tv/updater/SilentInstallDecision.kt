@@ -45,7 +45,7 @@ data class SilentEligibilityInput(
 
 /**
  * Everything [SilentInstallDecision.quiet] needs (AC-3, AC-10). Times are
- * `SystemClock.elapsedRealtime()` values.
+ * `SystemClock.elapsedRealtime()` values, so a wall-clock jump never fakes an idle box.
  */
 data class QuietInput(
     val startedActivities: Int,
@@ -56,6 +56,9 @@ data class QuietInput(
     val memberInstallRunning: Boolean,
     val installScreenWaiting: Boolean,
     val lastMemberCommitElapsedMs: Long?,
+    val playing: Boolean,                  // audio is playing; true when that could not be read
+    val lastKeyPressElapsedMs: Long?,      // null: no key pressed in this process
+    val visibilityKnown: Boolean,          // false: the visibility tracker is not registered
 )
 
 /**
@@ -64,7 +67,8 @@ data class QuietInput(
  */
 object SilentInstallDecision {
     const val MIN_SDK = 31
-    const val OUT_OF_SIGHT_MS = 120_000L
+    const val OUT_OF_SIGHT_MS = 900_000L         // 15 min with no started activity
+    const val IDLE_ON_SCREEN_MS = 10_800_000L    // 3 h on screen with no key press and nothing playing
     const val MEMBER_INSTALL_QUIET_MS = 600_000L
     const val MAX_ATTEMPTS = 3
 
@@ -107,18 +111,24 @@ object SilentInstallDecision {
     }
 
     /**
-     * The first reason the app is not out of sight and free (AC-3, AC-10), or
-     * [SilentReason.ELIGIBLE]. A stored time above now means the box rebooted since, so it is
+     * The first reason the app is not out of sight, or idle on screen, and free (AC-3, AC-10),
+     * or [SilentReason.ELIGIBLE]. A stored time above now means the box rebooted since, so it is
      * dropped; with no time left the app counts as out of sight since boot.
+     *
+     * On screen, the box counts as idle (KevBox Live's rule) once nothing plays and
+     * [IDLE_ON_SCREEN_MS] passed since the later of the last key press and the last activity
+     * start. With visibility unknown it never does.
      */
     fun quiet(input: QuietInput): SilentReason {
         val now = input.nowElapsedMs
-        if (input.startedActivities > 0) return SilentReason.APP_ON_SCREEN
-
-        val lastSeen = listOfNotNull(input.lastStartElapsedMs, input.lastStopElapsedMs)
-            .filter { it <= now }
-            .maxOrNull() ?: 0L
-        if (now - lastSeen < OUT_OF_SIGHT_MS) return SilentReason.APP_RECENTLY_ON_SCREEN
+        if (input.startedActivities > 0) {
+            if (!input.visibilityKnown || input.playing) return SilentReason.APP_ON_SCREEN
+            val lastActive = latestUpTo(now, input.lastKeyPressElapsedMs, input.lastStartElapsedMs)
+            if (now - lastActive < IDLE_ON_SCREEN_MS) return SilentReason.APP_ON_SCREEN
+        } else {
+            val lastSeen = latestUpTo(now, input.lastStartElapsedMs, input.lastStopElapsedMs)
+            if (now - lastSeen < OUT_OF_SIGHT_MS) return SilentReason.APP_RECENTLY_ON_SCREEN
+        }
 
         if (input.externalPlaybackRunning) return SilentReason.EXTERNAL_PLAYBACK
         if (input.memberInstallRunning) return SilentReason.MEMBER_INSTALL_RUNNING
@@ -130,6 +140,10 @@ object SilentInstallDecision {
         }
         return SilentReason.ELIGIBLE
     }
+
+    /** The latest of [times] not above [now] (a later one is from before a reboot), else 0 (boot). */
+    private fun latestUpTo(now: Long, vararg times: Long?): Long =
+        times.filterNotNull().filter { it <= now }.maxOrNull() ?: 0L
 }
 
 /**

@@ -205,13 +205,26 @@ class SilentInstallDecisionTest {
     /** Out of sight for long enough, nothing else running. */
     private fun quietInput() = QuietInput(
         startedActivities = 0,
-        lastStartElapsedMs = now - 900_000,
-        lastStopElapsedMs = now - 800_000,
+        lastStartElapsedMs = now - 2_000_000,
+        lastStopElapsedMs = now - 1_900_000,
         nowElapsedMs = now,
         externalPlaybackRunning = false,
         memberInstallRunning = false,
         installScreenWaiting = false,
         lastMemberCommitElapsedMs = null,
+        playing = false,
+        lastKeyPressElapsedMs = null,
+        visibilityKnown = true,
+    )
+
+    private val idleMs = 10_800_000L
+
+    /** On screen, nothing playing, started and last pressed long enough ago to count as idle. */
+    private fun idleOnScreen() = quietInput().copy(
+        startedActivities = 1,
+        lastStartElapsedMs = now - idleMs,
+        lastStopElapsedMs = null,
+        lastKeyPressElapsedMs = now - idleMs - 5_000,
     )
 
     private fun quiet(input: QuietInput) = SilentInstallDecision.quiet(input)
@@ -222,34 +235,94 @@ class SilentInstallDecisionTest {
     }
 
     @Test
-    fun `quiet returns APP_ON_SCREEN while an activity is started`() {
-        assertEquals(SilentReason.APP_ON_SCREEN, quiet(quietInput().copy(startedActivities = 1)))
+    fun `quiet returns APP_ON_SCREEN while an activity started a moment ago`() {
+        assertEquals(
+            SilentReason.APP_ON_SCREEN,
+            quiet(quietInput().copy(startedActivities = 1, lastStartElapsedMs = now - 1_000)),
+        )
     }
 
     @Test
-    fun `quiet returns APP_RECENTLY_ON_SCREEN within 120 000 ms of the later stored time`() {
+    fun `the idle time on screen is 3 hours`() {
+        assertEquals(10_800_000L, SilentInstallDecision.IDLE_ON_SCREEN_MS)
+    }
+
+    @Test
+    fun `on screen, 3 h minus 1 ms since the activity started is still APP_ON_SCREEN, 3 h is ELIGIBLE`() {
         assertEquals(
-            SilentReason.APP_RECENTLY_ON_SCREEN,
-            quiet(quietInput().copy(lastStopElapsedMs = now - 119_999)),
-        )
-        assertEquals(SilentReason.ELIGIBLE, quiet(quietInput().copy(lastStopElapsedMs = now - 120_000)))
-        // The later of the two counts, whichever it is.
-        assertEquals(
-            SilentReason.APP_RECENTLY_ON_SCREEN,
-            quiet(quietInput().copy(lastStartElapsedMs = now - 119_999, lastStopElapsedMs = now - 500_000)),
+            SilentReason.APP_ON_SCREEN,
+            quiet(idleOnScreen().copy(lastStartElapsedMs = now - idleMs + 1, lastKeyPressElapsedMs = null)),
         )
         assertEquals(
             SilentReason.ELIGIBLE,
-            quiet(quietInput().copy(lastStartElapsedMs = now - 120_000, lastStopElapsedMs = now - 500_000)),
+            quiet(idleOnScreen().copy(lastStartElapsedMs = now - idleMs, lastKeyPressElapsedMs = null)),
+        )
+    }
+
+    @Test
+    fun `on screen, a key press resets the idle time`() {
+        val startedLongAgo = idleOnScreen().copy(lastStartElapsedMs = now - 4 * 3_600_000L)
+        assertEquals(SilentReason.ELIGIBLE, quiet(startedLongAgo))
+        assertEquals(
+            SilentReason.APP_ON_SCREEN,
+            quiet(startedLongAgo.copy(lastKeyPressElapsedMs = now - idleMs + 1)),
+        )
+        assertEquals(SilentReason.ELIGIBLE, quiet(startedLongAgo.copy(lastKeyPressElapsedMs = now - idleMs)))
+    }
+
+    @Test
+    fun `on screen, playing blocks the idle path`() {
+        assertEquals(SilentReason.APP_ON_SCREEN, quiet(idleOnScreen().copy(playing = true)))
+    }
+
+    @Test
+    fun `on screen, unknown visibility blocks even when idle`() {
+        assertEquals(SilentReason.APP_ON_SCREEN, quiet(idleOnScreen().copy(visibilityKnown = false)))
+    }
+
+    @Test
+    fun `on screen, a key press time above now is dropped as a reboot`() {
+        val input = idleOnScreen().copy(lastStartElapsedMs = now - 4 * 3_600_000L, lastKeyPressElapsedMs = now + 5)
+        assertEquals(SilentReason.ELIGIBLE, quiet(input))
+    }
+
+    @Test
+    fun `idle on screen still waits for external playback and the member install guards`() {
+        assertEquals(SilentReason.ELIGIBLE, quiet(idleOnScreen()))
+        assertEquals(SilentReason.EXTERNAL_PLAYBACK, quiet(idleOnScreen().copy(externalPlaybackRunning = true)))
+        assertEquals(SilentReason.MEMBER_INSTALL_RUNNING, quiet(idleOnScreen().copy(memberInstallRunning = true)))
+        assertEquals(SilentReason.INSTALL_SCREEN_WAITING, quiet(idleOnScreen().copy(installScreenWaiting = true)))
+        assertEquals(
+            SilentReason.MEMBER_INSTALL_RECENT,
+            quiet(idleOnScreen().copy(lastMemberCommitElapsedMs = now - 1)),
+        )
+    }
+
+    @Test
+    fun `quiet returns APP_RECENTLY_ON_SCREEN within 900 000 ms of the later stored time`() {
+        assertEquals(900_000L, SilentInstallDecision.OUT_OF_SIGHT_MS)
+        assertEquals(
+            SilentReason.APP_RECENTLY_ON_SCREEN,
+            quiet(quietInput().copy(lastStopElapsedMs = now - 899_999)),
+        )
+        assertEquals(SilentReason.ELIGIBLE, quiet(quietInput().copy(lastStopElapsedMs = now - 900_000)))
+        // The later of the two counts, whichever it is.
+        assertEquals(
+            SilentReason.APP_RECENTLY_ON_SCREEN,
+            quiet(quietInput().copy(lastStartElapsedMs = now - 899_999, lastStopElapsedMs = now - 2_000_000)),
+        )
+        assertEquals(
+            SilentReason.ELIGIBLE,
+            quiet(quietInput().copy(lastStartElapsedMs = now - 900_000, lastStopElapsedMs = now - 2_000_000)),
         )
     }
 
     @Test
     fun `quiet treats a stored time above now as out of sight since boot`() {
-        val afterReboot = quietInput().copy(lastStartElapsedMs = null, lastStopElapsedMs = 5_000_000, nowElapsedMs = 200_000)
+        val afterReboot = quietInput().copy(lastStartElapsedMs = null, lastStopElapsedMs = 5_000_000, nowElapsedMs = 1_000_000)
         assertEquals(SilentReason.ELIGIBLE, quiet(afterReboot))
 
-        val justBooted = quietInput().copy(lastStartElapsedMs = null, lastStopElapsedMs = null, nowElapsedMs = 60_000)
+        val justBooted = quietInput().copy(lastStartElapsedMs = null, lastStopElapsedMs = null, nowElapsedMs = 600_000)
         assertEquals(SilentReason.APP_RECENTLY_ON_SCREEN, quiet(justBooted))
     }
 
@@ -283,6 +356,7 @@ class SilentInstallDecisionTest {
     fun `quiet checks in AC-3 then AC-10 order`() {
         val everything = quietInput().copy(
             startedActivities = 1,
+            lastStartElapsedMs = now - 1,
             lastStopElapsedMs = now - 1,
             externalPlaybackRunning = true,
             memberInstallRunning = true,
@@ -291,7 +365,11 @@ class SilentInstallDecisionTest {
         )
         assertEquals(SilentReason.APP_ON_SCREEN, quiet(everything))
         assertEquals(SilentReason.APP_RECENTLY_ON_SCREEN, quiet(everything.copy(startedActivities = 0)))
-        val outOfSight = everything.copy(startedActivities = 0, lastStopElapsedMs = now - 800_000)
+        val outOfSight = everything.copy(
+            startedActivities = 0,
+            lastStartElapsedMs = now - 2_000_000,
+            lastStopElapsedMs = now - 1_900_000,
+        )
         assertEquals(SilentReason.EXTERNAL_PLAYBACK, quiet(outOfSight))
         assertEquals(SilentReason.MEMBER_INSTALL_RUNNING, quiet(outOfSight.copy(externalPlaybackRunning = false)))
         assertEquals(

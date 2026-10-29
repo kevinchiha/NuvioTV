@@ -119,7 +119,8 @@ class UpdateViewModel @Inject constructor(
                     canRequestInstalls = ApkInstaller.canRequestPackageInstalls(context),
                     liveUpdate = live.getOrNull(),
                     silentState = silentState,
-                    nowMs = System.currentTimeMillis(),
+                    // The server's clock when the response carried one, like the silent wait.
+                    nowMs = SilentClock.nowFor(live.getOrNull()?.serverTimeMs, System.currentTimeMillis()),
                     // installableApkPath is set only for a cached file of decision.update's versionCode.
                     predownloadReady = decision.installableApkPath != null,
                     unmeteredNetwork = UpdateCheckWorker.isUnmetered(context),
