@@ -31,6 +31,7 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 - Task 4: landed d2ee7ccad, review clean (gate green: 2364 tests, only the baseline failure). No interface deviation (internal helpers only).
 - Task 5: landed ae02425a3, review clean (gate green: 2364 tests, only the baseline failure). No interface deviation. Carry to Task 7: call the @RequiresApi(31) silent functions only after the SDK check; abandon the session when commit throws. Carry to Task 6: branch on EXTRA_SILENT before the member path.
 - Task 6: landed 4b5f8451b, review clean (gate green: 2370 tests, only the baseline failure). Added internal helper silentResultLogLine (additive).
+- Task 7: landed e3c85ba0d, review clean (gate green: 2383 tests, only the baseline failure). No interface deviation.
 
 ## Rolled-up minors
 - Task 1, app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt:20-21: class doc still says trusted means https + configured host; test builds also trust http on the test host and port.
@@ -38,3 +39,5 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 - Task 4, app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt:66,73: memberSessionCommitted and lastMemberCommitElapsedMs use AppVisibilityTracker.store (null if register() failed) while quietInput uses storeFor(context); two store sources.
 - Task 4, app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt:88: storeFor builds a new PrefsVisibilityStore per call when register() has not run (same two-sources design).
 - Task 5 review note (spec level): AC-10's 10-minute window does not cover a member who leaves Android's confirm screen open longer than that; a silent attempt then abandons the member's session (same update, low impact).
+- Task 7, app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt:97-131: a read that throws during evaluation logs only "Silent attempt failed: <class>", no "Silent check" line (AC-13 one line per attempt, rare error path).
+- Task 7, SilentInstall.kt:70: internal entry point named `run` shadows Kotlin's `run` inside the object.
