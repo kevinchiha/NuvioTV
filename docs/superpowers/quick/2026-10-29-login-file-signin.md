@@ -9,11 +9,14 @@ exactly.
 New package `app/src/main/java/com/nuvio/tv/core/auth/loginfile/`, one call in `MainActivity.onResume`,
 and the error-message order in `AccountViewModel.kt`.
 
-**Gate:** `set -o pipefail; ./gradlew :app:compileFullDebugKotlin :app:testFullDebugUnitTest && ./gradlew :app:assembleFullRelease --dry-run`
-(full flavor only; the unit tests have a known baseline of failures, recorded in the Build log.)
+**Gate:** run each separately, with `set -o pipefail`:
+`./gradlew :app:compileFullDebugKotlin`, `./gradlew :app:testFullDebugUnitTest --continue`,
+`./gradlew :app:assembleFullRelease --dry-run`. Full flavor only. The unit-test run is green when its
+only failures are the ones on the Build log's `baseline:` line.
 
 ## Acceptance criteria
-- **AC-1** A login file with `requestedAt` within 10 minutes of the box clock leads to exactly one
+- **AC-1** A login file whose `requestedAt` is not more than 10 minutes older than the box clock
+  (a date in the future counts as fresh, as the contract says) leads to exactly one
   call to `AuthManager.signInWithEmail(email, password)`, and the login file no longer exists at the
   moment that call starts.
 - **AC-2** A login file whose `requestedAt` is more than 600 000 ms older than
@@ -40,6 +43,9 @@ and the error-message order in `AccountViewModel.kt`.
   password, the email, or the login file's text.
 - **AC-12** On the sign-in screen, a wrong password now shows "Incorrect email or password." instead
   of "Invalid sync code.".
+- **AC-14** If deleting a valid, fresh login file fails, no sign-in happens and the result file holds
+  `{"ok":false,"error":"The TV could not clear the login file. Try again."}`; a stale or invalid file
+  whose delete fails gets no result file.
 - **AC-13** On the emulator, a hand-pushed fresh file for `tv.kevbox.debug` is gone within a few
   seconds of launch and the result file matches the outcome; a stale file and a bad-JSON file are
   deleted with no result file.
@@ -71,9 +77,10 @@ and the error-message order in `AccountViewModel.kt`.
   strings, because the phone shows the text as-is and Kevin reads it in Telegram.
 - kotlinx.serialization `Json` for reading and writing, over `org.json`, because unit tests run with
   `isReturnDefaultValues = true` and `org.json` there returns empty stubs.
-- If deleting the login file fails, do not sign in and write
-  `{"ok":false,"error":"The TV could not clear the login file. Try again."}`, because the contract
-  forbids signing in while the password sits on disk.
+- If deleting the login file fails, do not sign in. For a valid, fresh file write
+  `{"ok":false,"error":"The TV could not clear the login file. Try again."}`; for a stale or invalid
+  one write nothing (AC-2 and AC-3 still hold). The contract forbids signing in while the password
+  sits on disk.
 - Fix the sign-in screen's wrong message by moving the auth checks in `userFriendlyError` above the
   sync-code checks (the server reply `Auth request failed endpoint=... "error_code":"invalid_credentials"`
   contains both "invalid" and "code", so the sync-code branch caught it first). The `when` moves into
@@ -82,7 +89,7 @@ and the error-message order in `AccountViewModel.kt`.
 ## Tasks
 
 ### Task 1: Login file processor and error text
-**Delivers:** AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-9, AC-11
+**Delivers:** AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-9, AC-11, AC-14
 **Files:** `app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessor.kt`,
 `app/src/main/java/com/nuvio/tv/core/auth/loginfile/LoginFileErrors.kt`,
 `app/src/test/java/com/nuvio/tv/core/auth/loginfile/LoginFileProcessorTest.kt`
@@ -104,12 +111,16 @@ and the error-message order in `AccountViewModel.kt`.
 **Does:**
 - No dir, or no file: returns without touching anything.
 - Reads the file, then deletes it, then validates; stale or invalid → stop, no result.
+- Delete failed (`File.delete()` false and the file still exists): stale or invalid → stop, no result;
+  valid and fresh → write the AC-14 result, no sign-in.
 - Calls `signIn` under `withTimeoutOrNull(timeoutMs)`; null → the AC-9 text; a thrown exception
   (other than cancellation) → `Failed(loginFileErrorText(e))`.
 - Writes the result to `kevbox-login.result.json.tmp`, then renames it over the result file.
 **Tests:** fresh/stale/bad-JSON/missing-key cases (file gone, sign-in called or not, result present or
 not); the `signIn` lambda asserts the login file is already gone; result shapes for Ok, a wrong-password
-exception, and a timeout, each checked to contain no password.
+exception, and a timeout, each checked to contain no password; a delete that fails (for example a
+`dir` lambda pointing at a read-only folder, or the login path made a non-empty directory) gives the
+AC-14 result for a fresh file and nothing for a stale one.
 **Verify:** `./gradlew :app:testFullDebugUnitTest --tests "*LoginFileProcessorTest"`
 
 ### Task 2: Wire it into the app and fix the sign-in screen message
@@ -130,12 +141,15 @@ exception, and a timeout, each checked to contain no password.
 **Does:**
 - `checkNow()` builds a `LoginFileProcessor` on `context.getExternalFilesDir(null)` and
   `System::currentTimeMillis`; its `signIn` waits up to 5 s for auth state to leave `Loading`, applies
-  the account action, then returns `Ok` or `Failed(loginFileErrorText(e))` from
-  `authManager.signInWithEmail`.
+  the account action, then folds the `Result<Unit>` that `authManager.signInWithEmail` returns (it
+  never throws): success → `Ok`, failure → `Failed(loginFileErrorText(it))`.
 - `MainActivity` injects `LoginFileSignIn` and calls `checkNow()` at the top of `onResume`.
+- AC-13 (the emulator check) is run by the orchestrator after the final review, not by the implementer.
 **Tests:** account action for signed out / same email with different case / different email;
 `accountErrorResId` on the real wrong-password reply text gives `account_error_invalid_credentials`,
 and a real "invalid sync code" text still gives the sync-code string.
 **Verify:** `./gradlew :app:compileFullDebugKotlin :app:testFullDebugUnitTest --tests "*LoginFileAccountActionTest" --tests "*AccountErrorResIdTest"`
 
 ## Build log
+
+baseline: TraktProgressServiceRefreshTest > change seen by a cancelled refresh is fetched by the next poll (2300 tests, 1 failed, on kevbox 2ddce968d)
