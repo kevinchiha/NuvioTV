@@ -662,10 +662,13 @@ Build both APKs (both use the release key through the debug signing config):
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2001.apk
   ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2002 2>&1 | tail -5
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2002.apk
+  ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2003 2>&1 | tail -5
+  cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2003.apk
+Never uninstall: the emulator's debug app holds Kevin's sign-in. Each run installs a higher
+versionCode over what is there (same release key), so no downgrade is ever needed.
 
 Run 1 (after passed):
-  adb -e uninstall tv.kevbox.debug || true
-  adb -e install /tmp/kevbox-2001.apk
+  adb -e install -r /tmp/kevbox-2001.apk
   adb -e shell appops set tv.kevbox.debug REQUEST_INSTALL_PACKAGES allow
   python3 scripts/updater_test_server.py --apk /tmp/kevbox-2002.apk --version-code 2002 --after-hours -1 &
   adb -e logcat -c
@@ -681,15 +684,13 @@ Run 1 (after passed):
   No package-installer screen: adb -e shell dumpsys activity activities | grep -ci packageinstaller -> 0
   Stop the server (kill %1).
 
-Run 2 (not yet, one early user that is not this box):
-  adb -e uninstall tv.kevbox.debug
-  adb -e install /tmp/kevbox-2001.apk
+Run 2 (not yet, one early user that is not this box; 2002 is installed after run 1):
   adb -e shell appops set tv.kevbox.debug REQUEST_INSTALL_PACKAGES allow
-  python3 scripts/updater_test_server.py --apk /tmp/kevbox-2002.apk --version-code 2002 --after-hours 24 --early-user 00000000-0000-0000-0000-000000000000 &
+  python3 scripts/updater_test_server.py --apk /tmp/kevbox-2003.apk --version-code 2003 --after-hours 24 --early-user 00000000-0000-0000-0000-000000000000 &
   adb -e logcat -c
   Open the app as in run 1, wait for the pre-download line, press HOME, wait 5 minutes.
-  adb -e shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2001
-  adb -e logcat -d -s KevboxSilentUpdate  -> "Silent check [job] versionCode=2002: NOT_YET early=false"
+  adb -e shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
+  adb -e logcat -d -s KevboxSilentUpdate  -> "Silent check [job] versionCode=2003: NOT_YET early=false"
   Open the app again: the update prompt offers Install.
 
 AC-13 privacy check, when an account is signed in on the emulator:

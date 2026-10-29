@@ -110,8 +110,9 @@ prompt.
 - **AC-13** Every silent evaluation logs one line under one tag with the reason from AC-2/AC-3/AC-10
   (or "eligible"), and logs mark job queued, session committed, and result status. The early-user
   match is logged as `early=true|false`. No updater log line contains the user id, an email, or a
-  token: the AC-14 logcat contains neither the emulator account's id nor its email when an
-  account is signed in.
+  token: the AC-14 logcat, filtered to the updater's own tags, contains neither the emulator
+  account's id nor its email when an account is signed in. (Upstream AuthManager logs the raw
+  user id under its own tag today; that is outside this phase.)
 - **AC-14** On the `kevbox_tv` emulator (Android 16, API 36, x86_64), with debug APKs from AC-12
   (application id `tv.kevbox.debug`, both signed with the release key), "install unknown apps"
   allowed for `tv.kevbox.debug`, and a host server at `http://10.0.2.2:<port>` serving
@@ -120,9 +121,10 @@ prompt.
     the pre-download log line appears, then press HOME. Within 5 minutes of HOME, with no input,
     `dumpsys package tv.kevbox.debug` shows `versionCode=N+1`, no package-installer screen
     appeared, and logcat shows the committed silent session and a success status.
-  - Run 2: install N again, serve N+1 with `after` 24 hours ahead and
+  - Run 2: with N+1 installed after run 1 (never uninstall: the emulator's debug app holds
+    Kevin's sign-in), serve N+2 with `after` 24 hours ahead and
     `earlyUsers: ["00000000-0000-0000-0000-000000000000"]`. 5 minutes after HOME, the package is
-    still at N and logcat shows the not-yet reason. Opening the app shows the prompt with Install.
+    still at N+1 and logcat shows the not-yet reason. Opening the app shows the prompt with Install.
 
 ## Non-goals
 - Installing on a real TV box. Those are 32-bit armeabi-v7a; the TCL test needs Kevin's yes and
