@@ -6,7 +6,7 @@ import androidx.work.WorkerParameters
 import dagger.hilt.android.EntryPointAccessors
 
 /**
- * The job [SilentInstallScheduler] queues 2 minutes after the app leaves the screen (AC-4).
+ * The job [SilentInstallScheduler] queues 15 minutes after the app leaves the screen (AC-4).
  * Fetches version.json and makes one silent attempt, which checks every condition again. It has
  * no network constraint: offline, the fetch fails and nothing installs. The attempt checks
  * "out of sight" first, so it logs MANIFEST_FETCH_FAILED only when the app is quiet; otherwise it
@@ -32,6 +32,6 @@ class SilentInstallWorker(
 
     companion object {
         const val UNIQUE_NAME = "kevbox-silent-install"
-        const val DELAY_MS = 120_000L
+        const val DELAY_MS = 900_000L
     }
 }

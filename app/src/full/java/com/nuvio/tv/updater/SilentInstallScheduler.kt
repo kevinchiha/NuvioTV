@@ -18,7 +18,7 @@ import kotlinx.serialization.decodeFromString
 import java.util.concurrent.TimeUnit
 
 /**
- * Queues [SilentInstallWorker] when the app leaves the screen (AC-4). The job runs 2 minutes
+ * Queues [SilentInstallWorker] when the app leaves the screen (AC-4). The job runs 15 minutes
  * later and checks everything again, so this only filters out boxes with nothing to install.
  */
 object SilentInstallScheduler {
@@ -43,7 +43,7 @@ object SilentInstallScheduler {
                 val request = OneTimeWorkRequestBuilder<SilentInstallWorker>()
                     .setInitialDelay(SilentInstallWorker.DELAY_MS, TimeUnit.MILLISECONDS)
                     .build()
-                // REPLACE: leaving again restarts the 2-minute clock from this leave.
+                // REPLACE: leaving again restarts the 15-minute clock from this leave.
                 WorkManager.getInstance(appContext).enqueueUniqueWork(
                     SilentInstallWorker.UNIQUE_NAME,
                     ExistingWorkPolicy.REPLACE,

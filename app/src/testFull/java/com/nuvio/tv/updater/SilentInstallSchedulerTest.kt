@@ -1,6 +1,7 @@
 package com.nuvio.tv.updater
 
 import com.nuvio.tv.updater.model.AppUpdate
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,6 +28,11 @@ class SilentInstallSchedulerTest {
         updaterEnabled: Boolean = true,
         sdkInt: Int = 36,
     ) = SilentInstallScheduler.shouldQueue(cached, current, updaterEnabled, sdkInt)
+
+    @Test
+    fun `the job runs 15 minutes after the app leaves the screen`() {
+        assertEquals(900_000L, SilentInstallWorker.DELAY_MS)
+    }
 
     @Test
     fun `queues for a cached upgrade with a silent block`() {

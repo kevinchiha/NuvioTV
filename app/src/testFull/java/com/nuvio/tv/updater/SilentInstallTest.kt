@@ -46,8 +46,11 @@ class SilentInstallTest {
         memberInstallRunning = false,
         installScreenWaiting = false,
         lastMemberCommitElapsedMs = null,
+        playing = false,
+        lastKeyPressElapsedMs = null,
+        visibilityKnown = true,
     )
-    private val onScreen = outOfSight.copy(startedActivities = 1)
+    private val onScreen = outOfSight.copy(startedActivities = 1, lastStartElapsedMs = 9_999_000L)
 
     /** Every check passes unless a test changes a field. Records each call in [calls]. */
     private class FakeEnv(

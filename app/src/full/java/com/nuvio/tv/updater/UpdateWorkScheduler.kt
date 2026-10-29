@@ -13,11 +13,12 @@ import androidx.work.WorkRequest
 import java.util.concurrent.TimeUnit
 
 /**
- * Schedules the once-a-day [UpdateCheckWorker] plus a prompt one-time kick. Idempotent — safe to
- * call on every app start. The CONNECTED constraint gates only the cheap version check; the
- * worker itself enforces unmetered-only for the actual APK download.
+ * Schedules [UpdateCheckWorker] every 6 hours (KevBox Live's period) plus a prompt one-time
+ * kick. Idempotent — safe to call on every app start. The CONNECTED constraint gates only the
+ * cheap version check; the worker itself enforces unmetered-only for the actual APK download.
  */
 object UpdateWorkScheduler {
+    private const val PERIOD_HOURS = 6L
 
     fun ensureScheduled(context: Context) {
         val constraints = Constraints.Builder()
@@ -26,7 +27,7 @@ object UpdateWorkScheduler {
 
         val wm = WorkManager.getInstance(context)
 
-        val periodic = PeriodicWorkRequestBuilder<UpdateCheckWorker>(1, TimeUnit.DAYS)
+        val periodic = PeriodicWorkRequestBuilder<UpdateCheckWorker>(PERIOD_HOURS, TimeUnit.HOURS)
             .setConstraints(constraints)
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,
@@ -35,16 +36,17 @@ object UpdateWorkScheduler {
             )
             .build()
 
-        // UPDATE (not KEEP): a future change to the period/constraints/backoff propagates to
-        // already-installed TVs instead of being frozen at the first-ever enqueue. An unchanged
-        // request is a no-op (no reschedule), so this stays safe to call on every app start.
+        // UPDATE (not KEEP): a change to the period/constraints/backoff (like the move from 1 day
+        // to 6 hours) propagates to already-installed TVs instead of being frozen at the
+        // first-ever enqueue. An unchanged request is a no-op (no reschedule), so this stays safe
+        // to call on every app start.
         wm.enqueueUniquePeriodicWork(
             UpdateCheckWorker.UNIQUE_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,
             periodic,
         )
 
-        // PeriodicWork's first run is deferred up to the interval (~24h). Kick a one-time run so a
+        // PeriodicWork's first run is deferred up to the interval (~6h). Kick a one-time run so a
         // freshly set-up TV pre-downloads promptly. KEEP = at most one in flight; the worker's own
         // debug/trust/metered/already-cached gates still apply.
         val initial = OneTimeWorkRequestBuilder<UpdateCheckWorker>()
