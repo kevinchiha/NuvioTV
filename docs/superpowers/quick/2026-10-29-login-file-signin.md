@@ -165,3 +165,4 @@ review: minor LoginFileSignIn.kt:77 misleading log when Loading -> fix with the 
 review: minor LoginFileProcessor.kt:124 .tmp left behind if the app dies mid-rename -> fix: delete a leftover .tmp at the start of a check
 review: minor AccountViewModel.kt:785 reorder also changes QR-expired, rate-limit, invalid-email messages -> skip: each new message is the more accurate one
 ocr medium AccountViewModel.kt:814 "invalid"+"code" still catches other auth replies -> fix: skip the sync-code branch when the reply carries "error_code"
+fix round 1: 9c6472c51 (timeout race in app scope, once-a-second check while resumed, stored-session email decides while Loading, .tmp cleanup, error_code guard). Known and accepted: Loading before the stored session is read counts as no session (sign in on top); a timed-out sign-in can still finish later.
