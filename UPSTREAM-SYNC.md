@@ -1163,6 +1163,28 @@ the `StreamRepositoryImpl` param order and the dropped `onNavigateToTracking`.
   a 1080p WEB-DL via Torrentio/Premiumize played on ExoPlayer past 1:00, no MPV fallback. Startup log:
   member config applied, one manifest-cache load, no 429s, no Watch Party calls, the one media-server 404.
 
+### KevBox-only: login file and silent self-update (2026-10-29, released in 1.2.0-beta.7.3)
+
+Two fork features that touch upstream files. Re-check each after every upstream merge.
+
+- **Login file** (`core/auth/loginfile/`, contract `~/projects/kevbox-setup/docs/login-file.md`).
+  `MainActivity.onCreate` starts one `repeatOnLifecycle(RESUMED)` loop that calls
+  `loginFileSignIn.checkNow()` once a second; there is no call in `onResume` (a launcher intent on an
+  app already in front fires no `onResume`). If upstream rewrites `onCreate`, keep exactly one loop.
+- **Wrong-password message.** `AccountViewModel.accountErrorResId` (bottom of the file) checks the auth
+  errors before the sync-code errors and skips the sync-code branch for replies containing
+  `error_code`. Upstream's order shows "Invalid sync code." for a wrong password, because GoTrue's
+  reply contains both "invalid" and "code". `AccountErrorResIdTest` pins it.
+- **Updater gate.** `MainActivity.kt` and `AboutScreen.kt` read `BuildConfig.UPDATER_ENABLED` where they
+  used to read `!IS_DEBUG_BUILD` (`// KevBox:` comments). The flag is true in release builds and in
+  debug builds made with `-PupdaterTestBaseUrl=...`.
+- **Silent self-update** lives in `app/src/full/.../updater/`; no other upstream file changes.
+  `release.sh` writes a `silent` block into `version.json` (`--no-silent` leaves it out), with
+  `SILENT_EARLY_USERS` from `release.env`. Emulator check: `scripts/updater_test_server.py` docstring.
+- **Tests:** `LoginFileProcessorTest`, `LoginFileAccountActionTest`, `AccountErrorResIdTest`,
+  `SilentInstallDecisionTest`, `SilentInstallTest`, `SilentPromptHoldTest`, `SilentInstallGuardTest`;
+  Python tests in `scripts/tests/`. Baseline after the merge: 2446 tests, still 1 failure (the Trakt one).
+
 ## Verify before shipping
 
 > **Run these with `set -o pipefail`.** Piping gradle into `tail`/`grep` reports the *pipe's* exit
