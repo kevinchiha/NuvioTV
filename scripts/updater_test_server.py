@@ -14,11 +14,11 @@ over network adb, so every command names the serial: E=emulator-5554, and first 
   adb -s $E emu avd name   -> kevbox_tv   (stop if it is anything else)
 Start the emulator first (run-emulator skill). PORT=8765, N=2001.
 
-Build both APKs (both use the release key through the debug signing config):
+Build all three APKs (all use the release key through the debug signing config):
   set -o pipefail
   ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2001 -Pdebuggable=true 2>&1 | tail -5
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2001.apk
-  ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2002 2>&1 | tail -5
+  ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2002 -Pdebuggable=true 2>&1 | tail -5
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2002.apk
   ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2003 -Pdebuggable=true 2>&1 | tail -5
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2003.apk
