@@ -107,3 +107,5 @@ review: gate green (2474 tests, only the baseline failure; release dry run ok; 3
 ocr: medium AppVisibilityTracker.kt:83 pointer events not counted (same as review 3); 3 low dropped.
 fix list: (1) important: run steps wait 16 minutes after HOME (run 1 and run 2). (2) stale wording. (3) review 3 + ocr medium: record dispatchTouchEvent and dispatchGenericMotionEvent as presses too.
 skipped: review 4 (one-line call site; SilentClock.nowFor is tested), review 5 (worst case each press recorded twice, harmless).
+fix round 1: 1e84a0e0d (16-minute waits; 6-hour wording, old work name and log label kept; touch and generic motion count as presses). Re-review (orchestrator, read the diff; fixer gate: 2475 tests, only the baseline failure; release dry run ok; 39 script tests): all 3 addressed.
+final review: done
