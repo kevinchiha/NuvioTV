@@ -1,0 +1,313 @@
+{
+  "status": "complete",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-5-5"
+  },
+  "message": "Review complete: 4 finding(s) across 17 selected item(s).",
+  "summary": {
+    "files_reviewed": 17,
+    "comments": 4,
+    "total_tokens": 1093256,
+    "input_tokens": 1060324,
+    "output_tokens": 32932,
+    "cache_read_tokens": 819118,
+    "cache_write_tokens": 241108,
+    "elapsed": "2m38s"
+  },
+  "tool_calls": {
+    "total": 44,
+    "by_tool": {
+      "code_comment": 4,
+      "code_search": 15,
+      "file_find": 2,
+      "file_read": 15,
+      "file_read_diff": 8
+    },
+    "failure": 0,
+    "failure_by_tool": {},
+    "failure_details": []
+  },
+  "comments": [
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt",
+      "content": "`serverTimeMs` is the server's time at the moment the response arrived, and it only means something for that response. But `AppUpdate` gets persisted: `UpdateCheckWorker` saves the whole object with `prefs.setPredownload(..., encodeToString(update))`. So the cached pre-download JSON now also stores a server time that stops moving at fetch time. Nothing reads it from the cache today, because every `SilentClock.nowFor` call site uses the live result. Still, if any code later passes a cached `AppUpdate` to `nowFor`, \"now\" would be stuck at the fetch time and the 24 h wait and 72 h net would never pass. Marking the field `@Transient` (it already has a default) keeps it out of the cache and blocks this mistake.",
+      "suggestion_code": "    @kotlinx.serialization.Transient\n    val serverTimeMs: Long? = null",
+      "existing_code": "    val serverTimeMs: Long? = null",
+      "start_line": 87,
+      "end_line": 87,
+      "category": "maintainability",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+      "content": "Only `dispatchKeyEvent` counts as activity. Air-mouse remotes are common on Android TV boxes, and their pointer movement and clicks come through `dispatchGenericMotionEvent` and `dispatchTouchEvent`, not as key events. Touch-capable boxes work the same way. A member who browses with a pointer and has no audio playing (menus, settings, the search screen) still looks idle after 3 hours. The idle-on-screen path would then install and kill the app while they are using it. The new test pins this behaviour (\"Only key events count as a press\"). I suggest recording these input paths too, since the cost is the same: one volatile write.",
+      "suggestion_code": "    override fun dispatchKeyEvent(event: KeyEvent): Boolean {\n        keys.pressed(clock())\n        return original.dispatchKeyEvent(event)\n    }\n\n    override fun dispatchTouchEvent(event: MotionEvent): Boolean {\n        keys.pressed(clock())\n        return original.dispatchTouchEvent(event)\n    }\n\n    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {\n        keys.pressed(clock())\n        return original.dispatchGenericMotionEvent(event)\n    }",
+      "existing_code": "    override fun dispatchKeyEvent(event: KeyEvent): Boolean {\n        keys.pressed(clock())\n        return original.dispatchKeyEvent(event)\n    }",
+      "start_line": 83,
+      "end_line": 86,
+      "category": "bug",
+      "severity": "medium"
+    },
+    {
+      "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt",
+      "content": "`DELAY_MS` and `SilentInstallDecision.OUT_OF_SIGHT_MS` are two separate literals that must stay equal. This PR had to change both, plus a separate test for each. WorkManager also computes the delay from `System.currentTimeMillis()` at enqueue time, while `quiet()` measures `elapsedRealtime` from the stored stop time. With zero margin, a small clock adjustment or a scheduling skew can run the job a few ms early. The job then logs APP_RECENTLY_ON_SCREEN and nothing retries until the next 6 h check. Derive the delay from the constant and add a small margin.",
+      "suggestion_code": "        const val DELAY_MS = SilentInstallDecision.OUT_OF_SIGHT_MS + 5_000L",
+      "existing_code": "        const val DELAY_MS = 900_000L",
+      "start_line": 35,
+      "end_line": 35,
+      "category": "maintainability",
+      "severity": "low"
+    },
+    {
+      "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt",
+      "content": "`now` is `10_000_000L`, which is less than `IDLE_ON_SCREEN_MS` (10_800_000). So `now - idleMs` is -800_000, `now - 4 * 3_600_000L` is -4_400_000, and the key press is set to -805_000. `elapsedRealtime()` never returns a negative value, so none of these inputs can happen on a box: it has only been up for about 2.8 h, yet the tests call it idle for 3 h. The tests pass only because `latestUpTo` keeps negative values (they are ≤ now). They don't cover the realistic case where `lastStart`/`lastKeyPress` are null or dropped, `lastActive` falls back to 0 (boot), and `now` \u003c 3 h, which should give APP_ON_SCREEN. Use a larger `now` for the idle-on-screen tests (e.g. `20_000_000L` or more), and add a case for the boot fallback with `now` just under and just over `IDLE_ON_SCREEN_MS`.",
+      "existing_code": "    private fun idleOnScreen() = quietInput().copy(\n        startedActivities = 1,\n        lastStartElapsedMs = now - idleMs,\n        lastStopElapsedMs = null,\n        lastKeyPressElapsedMs = now - idleMs - 5_000,\n    )",
+      "start_line": 223,
+      "end_line": 228,
+      "category": "test",
+      "severity": "low"
+    }
+  ],
+  "groups": [
+    {
+      "label": "App visibility tracking and silent install guard with clock/prompt-hold tests",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentClockTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallGuardTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt"
+      ]
+    },
+    {
+      "label": "Silent install decision, execution, scheduling and worker with tests",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallDecision.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallScheduler.kt",
+        "app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallSchedulerTest.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt"
+      ]
+    },
+    {
+      "label": "Update repository, model, view model, work scheduler and manifest mapping test",
+      "files": [
+        "app/src/full/java/com/nuvio/tv/updater/UpdateRepository.kt",
+        "app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt",
+        "app/src/full/java/com/nuvio/tv/updater/UpdateWorkScheduler.kt",
+        "app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt",
+        "app/src/testFull/java/com/nuvio/tv/updater/UpdateManifestMappingTest.kt"
+      ]
+    }
+  ],
+  "session_id": "38dbe451-d615-46f8-9754-b1cfeb214e5f",
+  "manifest": {
+    "schema_version": "ocr.run-manifest/v1",
+    "run_id": "38dbe451-d615-46f8-9754-b1cfeb214e5f",
+    "operation": "review",
+    "terminal_state": "complete",
+    "repository": {
+      "identity_sha256": "e22ee2aa744b7795f4a03c50d70f6c8f98e9662b61352b6c00b1cd8d4fc31c90"
+    },
+    "input": {
+      "mode": "range",
+      "requested_from": "kevbox",
+      "requested_head": "quick/silent-match-live",
+      "resolved_base": "8501998fc85129d52d5f92e06e2fd8745d4e9dc8",
+      "resolved_head": "c4e9de01b08aa454de4468c906f5186cab3c9d2d",
+      "exact_range": "8501998fc85129d52d5f92e06e2fd8745d4e9dc8..c4e9de01b08aa454de4468c906f5186cab3c9d2d",
+      "source_artifact_sha256": "a1c7a1a166866d5e030811ce75335a48afcda13d5e4d7ef33cf49b012e7fd7a4"
+    },
+    "execution": {
+      "ocr_version": "v1.13.3",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "configured_concurrency": 8,
+      "rule_config_sha256": "7bdde30da0c66ee5643876474d879e4d72b8803bf0501749f82291f5b9b2b87a",
+      "runtime_config_sha256": "93c1bae68fa824e3eb9a388b389d2b0cdbe98c00e45b7638e3c4d5afe2dbc39f"
+    },
+    "coverage": {
+      "selected": [
+        {
+          "item_id": "027c104e19c09cdcf447712dd7636be39f24666302a7d10ce57487fffb795607",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentClockTest.kt",
+          "fingerprint": "326c6186aaf1565d6e081b510cc57817c782314f4ecbac1d3d87d0b1121f11e4"
+        },
+        {
+          "item_id": "2beab392b19cb815594ec68cdfe262915c18ab064d1330335ddf0ec08fe8ac34",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+          "fingerprint": "fc3a55f1796a91ea3c9ecea9efd732fa5b5073bdc5106f8572f89b14a0782614"
+        },
+        {
+          "item_id": "2dfdf2c49f6a94cfbf03e86026806ede1ce54850a089e72727302db4a7be7f6a",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt",
+          "fingerprint": "5febc9e844a65b05ace5da1d7fca20eb312491334209d5e299cad70bc39824ac"
+        },
+        {
+          "item_id": "45411808e87ef862145e0a3bf61730cdf45eb1e56397c9587edafd3d06149177",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallScheduler.kt",
+          "fingerprint": "e0fff85c83685a8aa916988a42ea94322205dc6f75a260d42cf2055bb30263fd"
+        },
+        {
+          "item_id": "47eb431ae88645737b74c80ddb182dc87953ab5e430803988001ff9ea18ed3e6",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt",
+          "fingerprint": "fae191e469a569ac395d757d7ccc232b4d662d094ce32fada7a4b4dfba717b99"
+        },
+        {
+          "item_id": "54362dfdca3cb9acb4709deafbb7180415847f90e1ebcc23c00a2bb732df4682",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdateManifestMappingTest.kt",
+          "fingerprint": "4cb9b593ec6ddb7ee02b9c8c9904e5600ca070638e9a174f8299cf1722ccbc2f"
+        },
+        {
+          "item_id": "5ecec9ba7069d82174f1fe8ccd03fc67c61fe532e5f0cb6259a8afa817b1b832",
+          "path": "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+          "fingerprint": "8b8c3e2f6e5bf6ee509e5f098ac86287782f7ca99131d539b87223c6ba34d2f5"
+        },
+        {
+          "item_id": "60b9d35d8f6c75379c7edaa8a27586134c2077da83f89e68e3aba8caf75c6da2",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateRepository.kt",
+          "fingerprint": "49731bb9adbfa8cf683a1c9b256f92de1d38ff258a3ee831a6fe5ac492bbc460"
+        },
+        {
+          "item_id": "6ad07da47050f0aa019ceced0b8507831c4a59e232d62b83612720645edf40b8",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt",
+          "fingerprint": "87932a6c7cd42fba8cd64872c4a4482ad646ec4d0da281f9a30b7a385565f8ad"
+        },
+        {
+          "item_id": "7c8f6dddc025da26ba16c45249796f9cbf0a1cf41895b9b6508c0da893a9a98c",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallDecision.kt",
+          "fingerprint": "8e470cd9e2d023235d5a79397f6965b3271e576bb6a851c9fd403af1d5f4c8cf"
+        },
+        {
+          "item_id": "8bcf4ab42d6dce12faa00a68e1257862c15628598816d0dd86bf76ed5b2b2d69",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallSchedulerTest.kt",
+          "fingerprint": "c02bd66e891b25ade8fdcc087723320d236b7ec9ff5f898dc854b5a3908035aa"
+        },
+        {
+          "item_id": "a10e59cb23c8f233e13747bc2a907500410f1ce31c6a8a63b95b3c152cba68b3",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt",
+          "fingerprint": "58f0455e270bb8402656b40cedacf9a836f2f20f87511f7b3653594afdc0e9d2"
+        },
+        {
+          "item_id": "aba615befdde85c32b87602f4a444580bc83687667ea39fed1a2398dbf4b87fa",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallGuardTest.kt",
+          "fingerprint": "90b5e08f576b28e58a0d384753d20d967a9fdbbfaed76f1b5796a2a02a85d91a"
+        },
+        {
+          "item_id": "b6196c28f66476abd7046a4885234c3dc3414f27232fc7cbe62fb8a2ec45ca7b",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt",
+          "fingerprint": "3ecebabe8c219964ee941e1622fbcd3aaa6f2978e9b07aa09c37eca079faaf0b"
+        },
+        {
+          "item_id": "b81ae8969225e94abf006db0a95ee551e30cc4d75025b8c0be4310eabd91c7c7",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt",
+          "fingerprint": "40c18d9743ffc92b1b1fd761d2b4e60e3f40fea0f6c8b2da72350918de28c166"
+        },
+        {
+          "item_id": "e3357f333a11292892831c133269f48b5aebd79c61e040e8e875d0765a225ad5",
+          "path": "app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt",
+          "fingerprint": "412b81d22732ebf22368b5bb3ff99c25e39214cf9dd8287cae1cb7289a556e9e"
+        },
+        {
+          "item_id": "f8ccbc52d30ba6f059fee86adf8c62a9af213fed7f64b2d32a38f1d6ae42487d",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateWorkScheduler.kt",
+          "fingerprint": "c182f4af2e707da93f44607332ca953c111bc4b0a326a84c15f56f3c1b8b17b1"
+        }
+      ],
+      "completed": [
+        {
+          "item_id": "027c104e19c09cdcf447712dd7636be39f24666302a7d10ce57487fffb795607",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentClockTest.kt",
+          "fingerprint": "326c6186aaf1565d6e081b510cc57817c782314f4ecbac1d3d87d0b1121f11e4"
+        },
+        {
+          "item_id": "2beab392b19cb815594ec68cdfe262915c18ab064d1330335ddf0ec08fe8ac34",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallTest.kt",
+          "fingerprint": "fc3a55f1796a91ea3c9ecea9efd732fa5b5073bdc5106f8572f89b14a0782614"
+        },
+        {
+          "item_id": "2dfdf2c49f6a94cfbf03e86026806ede1ce54850a089e72727302db4a7be7f6a",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt",
+          "fingerprint": "5febc9e844a65b05ace5da1d7fca20eb312491334209d5e299cad70bc39824ac"
+        },
+        {
+          "item_id": "45411808e87ef862145e0a3bf61730cdf45eb1e56397c9587edafd3d06149177",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallScheduler.kt",
+          "fingerprint": "e0fff85c83685a8aa916988a42ea94322205dc6f75a260d42cf2055bb30263fd"
+        },
+        {
+          "item_id": "47eb431ae88645737b74c80ddb182dc87953ab5e430803988001ff9ea18ed3e6",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt",
+          "fingerprint": "fae191e469a569ac395d757d7ccc232b4d662d094ce32fada7a4b4dfba717b99"
+        },
+        {
+          "item_id": "54362dfdca3cb9acb4709deafbb7180415847f90e1ebcc23c00a2bb732df4682",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/UpdateManifestMappingTest.kt",
+          "fingerprint": "4cb9b593ec6ddb7ee02b9c8c9904e5600ca070638e9a174f8299cf1722ccbc2f"
+        },
+        {
+          "item_id": "5ecec9ba7069d82174f1fe8ccd03fc67c61fe532e5f0cb6259a8afa817b1b832",
+          "path": "app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt",
+          "fingerprint": "8b8c3e2f6e5bf6ee509e5f098ac86287782f7ca99131d539b87223c6ba34d2f5"
+        },
+        {
+          "item_id": "60b9d35d8f6c75379c7edaa8a27586134c2077da83f89e68e3aba8caf75c6da2",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateRepository.kt",
+          "fingerprint": "49731bb9adbfa8cf683a1c9b256f92de1d38ff258a3ee831a6fe5ac492bbc460"
+        },
+        {
+          "item_id": "6ad07da47050f0aa019ceced0b8507831c4a59e232d62b83612720645edf40b8",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstall.kt",
+          "fingerprint": "87932a6c7cd42fba8cd64872c4a4482ad646ec4d0da281f9a30b7a385565f8ad"
+        },
+        {
+          "item_id": "7c8f6dddc025da26ba16c45249796f9cbf0a1cf41895b9b6508c0da893a9a98c",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallDecision.kt",
+          "fingerprint": "8e470cd9e2d023235d5a79397f6965b3271e576bb6a851c9fd403af1d5f4c8cf"
+        },
+        {
+          "item_id": "8bcf4ab42d6dce12faa00a68e1257862c15628598816d0dd86bf76ed5b2b2d69",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallSchedulerTest.kt",
+          "fingerprint": "c02bd66e891b25ade8fdcc087723320d236b7ec9ff5f898dc854b5a3908035aa"
+        },
+        {
+          "item_id": "a10e59cb23c8f233e13747bc2a907500410f1ce31c6a8a63b95b3c152cba68b3",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt",
+          "fingerprint": "58f0455e270bb8402656b40cedacf9a836f2f20f87511f7b3653594afdc0e9d2"
+        },
+        {
+          "item_id": "aba615befdde85c32b87602f4a444580bc83687667ea39fed1a2398dbf4b87fa",
+          "path": "app/src/testFull/java/com/nuvio/tv/updater/SilentInstallGuardTest.kt",
+          "fingerprint": "90b5e08f576b28e58a0d384753d20d967a9fdbbfaed76f1b5796a2a02a85d91a"
+        },
+        {
+          "item_id": "b6196c28f66476abd7046a4885234c3dc3414f27232fc7cbe62fb8a2ec45ca7b",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt",
+          "fingerprint": "3ecebabe8c219964ee941e1622fbcd3aaa6f2978e9b07aa09c37eca079faaf0b"
+        },
+        {
+          "item_id": "b81ae8969225e94abf006db0a95ee551e30cc4d75025b8c0be4310eabd91c7c7",
+          "path": "app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt",
+          "fingerprint": "40c18d9743ffc92b1b1fd761d2b4e60e3f40fea0f6c8b2da72350918de28c166"
+        },
+        {
+          "item_id": "e3357f333a11292892831c133269f48b5aebd79c61e040e8e875d0765a225ad5",
+          "path": "app/src/full/java/com/nuvio/tv/updater/model/AppUpdate.kt",
+          "fingerprint": "412b81d22732ebf22368b5bb3ff99c25e39214cf9dd8287cae1cb7289a556e9e"
+        },
+        {
+          "item_id": "f8ccbc52d30ba6f059fee86adf8c62a9af213fed7f64b2d32a38f1d6ae42487d",
+          "path": "app/src/full/java/com/nuvio/tv/updater/UpdateWorkScheduler.kt",
+          "fingerprint": "c182f4af2e707da93f44607332ca953c111bc4b0a326a84c15f56f3c1b8b17b1"
+        }
+      ],
+      "reused": [],
+      "failed": [],
+      "waived": []
+    },
+    "elapsed_ms": 157916
+  }
+}
