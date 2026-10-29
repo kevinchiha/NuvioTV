@@ -34,6 +34,7 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 - Task 6: landed 4b5f8451b, review clean (gate green: 2370 tests, only the baseline failure). Added internal helper silentResultLogLine (additive).
 - Task 7: landed e3c85ba0d, review clean (gate green: 2383 tests, only the baseline failure). No interface deviation.
 - Task 8: landed 81700eb39, review clean (gate green: 2386 tests, only the baseline failure). Deviation: hold check guarded by showDialog (ruling above); VisibilityLog.activityStopped (internal) now returns the remaining count.
+- Task 9: landed c7faaf582, review clean (gate green: 2386 tests, only the baseline failure; 30 script tests OK). Additions: render refuses a non-array --profiles-json; notes passed as --notes=.
 
 ## Rolled-up minors
 - Task 1, app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt:20-21: class doc still says trusted means https + configured host; test builds also trust http on the test host and port.
@@ -45,3 +46,6 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 - Task 7, SilentInstall.kt:70: internal entry point named `run` shadows Kotlin's `run` inside the object.
 - Task 8, app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt:36-55: one test method with a labelled assertion per condition; AC-15 says one unit test per condition.
 - Task 8, app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt:112-121: hold reads the silent block from decision.update, which is the cached manifest when the live fetch fails (AC-15 says live manifest); bounded by the 72 h net.
+- Task 9, release.sh:153: `printf '%s' "$MANIFEST"` drops the trailing newline the renderer adds (version.json now ends at `}`); `printf '%s\n'` restores it.
+- Task 9, release.sh:59-72: release.env now sourced before SSH_ALIAS/WEB_ROOT etc.; checked key names only: release.env sets only NUVIO_RELEASE_* and SENTRY_*, so nothing changes. It has no SILENT_EARLY_USERS line yet (Kevin to add; agents never edit release.env).
+- Task 9 review, outside the diff: release.sh header says the ABI default is arm64-v8a (code: armeabi-v7a) and step 5 is optional (script always commits and pushes).
