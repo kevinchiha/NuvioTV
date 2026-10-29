@@ -29,9 +29,11 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 - Task 2: landed b9456143a, review clean (gate green: 2328 tests, only the baseline failure). No interface deviation.
 - Task 3: landed e4ef73235, review clean (gate green: 2355 tests, only the baseline failure). No interface deviation.
 - Task 4: landed d2ee7ccad, review clean (gate green: 2364 tests, only the baseline failure). No interface deviation (internal helpers only).
+- Task 5: landed ae02425a3, review clean (gate green: 2364 tests, only the baseline failure). No interface deviation. Carry to Task 7: call the @RequiresApi(31) silent functions only after the SDK check; abandon the session when commit throws. Carry to Task 6: branch on EXTRA_SILENT before the member path.
 
 ## Rolled-up minors
 - Task 1, app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt:20-21: class doc still says trusted means https + configured host; test builds also trust http on the test host and port.
 - Task 3, app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt:151-161: the checksum-not-computed test breaks only checks 6, 8, 9; checks 1-5 and 7 are not pinned.
 - Task 4, app/src/full/java/com/nuvio/tv/updater/SilentInstallGuard.kt:66,73: memberSessionCommitted and lastMemberCommitElapsedMs use AppVisibilityTracker.store (null if register() failed) while quietInput uses storeFor(context); two store sources.
 - Task 4, app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt:88: storeFor builds a new PrefsVisibilityStore per call when register() has not run (same two-sources design).
+- Task 5 review note (spec level): AC-10's 10-minute window does not cover a member who leaves Android's confirm screen open longer than that; a silent attempt then abandons the member's session (same update, low impact).
