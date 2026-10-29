@@ -30,6 +30,7 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 - Task 3: landed e4ef73235, review clean (gate green: 2355 tests, only the baseline failure). No interface deviation.
 - Task 4: landed d2ee7ccad, review clean (gate green: 2364 tests, only the baseline failure). No interface deviation (internal helpers only).
 - Task 5: landed ae02425a3, review clean (gate green: 2364 tests, only the baseline failure). No interface deviation. Carry to Task 7: call the @RequiresApi(31) silent functions only after the SDK check; abandon the session when commit throws. Carry to Task 6: branch on EXTRA_SILENT before the member path.
+- Task 6: landed 4b5f8451b, review clean (gate green: 2370 tests, only the baseline failure). Added internal helper silentResultLogLine (additive).
 
 ## Rolled-up minors
 - Task 1, app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt:20-21: class doc still says trusted means https + configured host; test builds also trust http on the test host and port.
