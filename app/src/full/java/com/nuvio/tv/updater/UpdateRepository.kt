@@ -62,6 +62,7 @@ class UpdateRepository @Inject constructor(
             val assetName = manifest.url.substringAfterLast('/').takeIf { it.isNotBlank() }
                 ?: "kevbox-tv-${manifest.versionName}.apk"
             val profile = InstallProfile.pick(manifest.profiles, sdkInt)
+            val silent = SilentBlock.parse(manifest.silent)
 
             // Map manifest -> AppUpdate: versionName drives the dialog's version tag/title and
             // notes drives the dialog's markdown release-notes section (kept non-blank).
@@ -76,7 +77,9 @@ class UpdateRepository @Inject constructor(
                 assetUrl = manifest.url,
                 assetSizeBytes = null,
                 profileUrl = profile?.url,
-                profileSha256 = profile?.sha256
+                profileSha256 = profile?.sha256,
+                silentAfterMs = silent?.afterMs,
+                silentEarlyUsers = silent?.earlyUsers ?: emptyList()
             )
         }
     }
