@@ -156,3 +156,12 @@ baseline: TraktProgressServiceRefreshTest > change seen by a cancelled refresh i
 Task 1+2: started at 21429ae59
 Task 1+2: landed (b7348ab21, 31b0a2ee1). Bent: internal LoginFileProcessor constructor with a deleteFile hook for tests; email trimmed before sign-in; auth still Loading after 5 s counts as a different account (sign out first).
 ocr: 1 high (LoginFileSignIn.kt:75 Loading after 5 s wipes on a guess), 2 medium (LoginFileProcessor.kt:89 timeout cannot cut the blocking HTTP call; AccountViewModel.kt:814 "invalid"+"code" still catches other auth replies), 3 low dropped
+review: important LoginFileProcessor.kt:89 timeout cannot stop the blocking HTTP call; a timeout landing inside signInWithEmail/signOut reads as a plain failure or a half reset (AC-9) [same item as ocr medium :89]
+review: important MainActivity.kt:1418 app already on screen: monkey brings it forward with no onResume, so the file is never seen (AC-7)
+review: important LoginFileSignIn.kt:73-78 Loading after 5 s wipes a box signed in to the same customer (AC-10) [same item as ocr high :75]
+review: minor LoginFileProcessor.kt:83 phone never reads the AC-14 result (it waits for the login file to go) -> skip: rare, phone-side change, noted for Kevin
+review: minor AuthManager.kt:819/849 existing sign-in code logs and uploads the email (password filtered) -> skip: same as the TV's own sign-in screen, noted for Kevin
+review: minor LoginFileSignIn.kt:77 misleading log when Loading -> fix with the Loading item
+review: minor LoginFileProcessor.kt:124 .tmp left behind if the app dies mid-rename -> fix: delete a leftover .tmp at the start of a check
+review: minor AccountViewModel.kt:785 reorder also changes QR-expired, rate-limit, invalid-email messages -> skip: each new message is the more accurate one
+ocr medium AccountViewModel.kt:814 "invalid"+"code" still catches other auth replies -> fix: skip the sync-code branch when the reply carries "error_code"
