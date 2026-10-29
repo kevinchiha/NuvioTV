@@ -149,6 +149,7 @@ import com.nuvio.tv.core.access.DeviceGuardService
 import com.nuvio.tv.core.access.RefreshOutcome
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.auth.DeviceSessionRegistration
+import com.nuvio.tv.core.auth.loginfile.LoginFileSignIn
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.core.deeplink.DeepLinkHandler
 import com.nuvio.tv.core.deeplink.DeepLinkParser
@@ -314,6 +315,9 @@ open class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var deviceSessionRegistration: DeviceSessionRegistration
+
+    @Inject
+    lateinit var loginFileSignIn: LoginFileSignIn
 
     @Inject
     lateinit var authSessionNoticeDataStore: AuthSessionNoticeDataStore
@@ -1410,6 +1414,8 @@ open class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // KevBox Setup login file, see ~/projects/kevbox-setup/docs/login-file.md.
+        loginFileSignIn.checkNow()
         ambientIdleController.dismiss()
         if (::jankStats.isInitialized) jankStats.isTrackingEnabled = true
         // KevBox TV access kill-switch / device-limit catch-up. The foreground poller is a

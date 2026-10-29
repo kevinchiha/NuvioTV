@@ -577,53 +577,7 @@ class AccountViewModel @Inject constructor(
         val compactRaw = raw.bodySnippetForLog()
         Log.w(TAG, "Raw error: $compactRaw")
 
-        val resId = when {
-            // PIN errors (from PG RAISE EXCEPTION or any wrapper)
-            message.contains("incorrect pin") || message.contains("invalid pin") || message.contains("wrong pin") -> R.string.account_error_incorrect_pin
-
-            // Sync code errors
-            message.contains("expired") -> R.string.account_error_sync_code_expired
-            message.contains("invalid") && message.contains("code") -> R.string.account_error_invalid_sync_code
-            message.contains("not found") || message.contains("no sync code") -> R.string.account_error_sync_code_not_found
-            message.contains("already linked") -> R.string.account_error_device_already_linked
-            message.contains("empty response") -> R.string.account_error_generic_retry
-
-            // Auth errors
-            message.contains("invalid login credentials") -> R.string.account_error_invalid_credentials
-            message.contains("email not confirmed") -> R.string.account_error_email_not_confirmed
-            message.contains("user already registered") -> R.string.account_error_email_already_registered
-            message.contains("invalid email") -> R.string.account_error_invalid_email
-            message.contains("password") && message.contains("short") -> R.string.account_error_password_too_short
-            message.contains("password") && message.contains("weak") -> R.string.account_error_password_too_weak
-            message.contains("signup is disabled") -> R.string.account_error_signup_disabled
-            message.contains("rate limit") || message.contains("too many requests") -> R.string.account_error_rate_limited
-            message.contains("tv login") && message.contains("expired") -> R.string.account_error_qr_login_expired
-            message.contains("tv login") && message.contains("invalid") -> R.string.account_error_invalid_qr_login
-            message.contains("tv login") && message.contains("nonce") -> R.string.account_error_qr_login_other_device
-            message.contains("start_tv_login_session") && message.contains("could not find the function") ->
-                R.string.account_error_qr_login_outdated
-            message.contains("gen_random_bytes") && message.contains("does not exist") ->
-                R.string.account_error_qr_login_missing_setup
-            message.contains("invalid tv login redirect base url") ->
-                R.string.account_error_qr_login_misconfigured
-            message.contains("invalid device nonce") ->
-                R.string.account_error_qr_login_invalid_request
-
-            // Network errors
-            message.contains("unable to resolve host") || message.contains("no address associated") -> R.string.account_error_no_internet
-            message.contains("timeout") || message.contains("timed out") -> R.string.account_error_connection_timeout
-            message.contains("connection refused") || message.contains("connect failed") -> R.string.account_error_connection_refused
-
-            // Auth state
-            message.contains("not authenticated") -> R.string.account_error_not_authenticated
-
-            // Supabase HTTP errors (e.g. 404 for missing RPC, 400 for bad params)
-            message.contains("404") || message.contains("could not find") -> R.string.account_error_service_unavailable
-            message.contains("400") || message.contains("bad request") -> R.string.account_error_invalid_request
-
-            // Fallback
-            else -> R.string.account_error_unexpected
-        }
+        val resId = accountErrorResId(message)
         return context.getString(resId)
     }
 
@@ -825,3 +779,56 @@ private fun AuthState.nameForLog(): String =
 
 private fun parseTimestampMillis(value: String): Long? =
     runCatching { OffsetDateTime.parse(value.trim()).toInstant().toEpochMilli() }.getOrNull()
+
+// Auth errors sit above the sync-code errors on purpose: the wrong-password reply
+// ("error_code":"invalid_credentials") contains both "invalid" and "code", so the
+// sync-code branch used to catch it and show "Invalid sync code". Takes a lowercased message.
+internal fun accountErrorResId(message: String): Int {
+    return when {
+        // PIN errors (from PG RAISE EXCEPTION or any wrapper)
+        message.contains("incorrect pin") || message.contains("invalid pin") || message.contains("wrong pin") -> R.string.account_error_incorrect_pin
+
+        // Auth errors
+        message.contains("invalid login credentials") -> R.string.account_error_invalid_credentials
+        message.contains("email not confirmed") -> R.string.account_error_email_not_confirmed
+        message.contains("user already registered") -> R.string.account_error_email_already_registered
+        message.contains("invalid email") -> R.string.account_error_invalid_email
+        message.contains("password") && message.contains("short") -> R.string.account_error_password_too_short
+        message.contains("password") && message.contains("weak") -> R.string.account_error_password_too_weak
+        message.contains("signup is disabled") -> R.string.account_error_signup_disabled
+        message.contains("rate limit") || message.contains("too many requests") -> R.string.account_error_rate_limited
+        message.contains("tv login") && message.contains("expired") -> R.string.account_error_qr_login_expired
+        message.contains("tv login") && message.contains("invalid") -> R.string.account_error_invalid_qr_login
+        message.contains("tv login") && message.contains("nonce") -> R.string.account_error_qr_login_other_device
+        message.contains("start_tv_login_session") && message.contains("could not find the function") ->
+            R.string.account_error_qr_login_outdated
+        message.contains("gen_random_bytes") && message.contains("does not exist") ->
+            R.string.account_error_qr_login_missing_setup
+        message.contains("invalid tv login redirect base url") ->
+            R.string.account_error_qr_login_misconfigured
+        message.contains("invalid device nonce") ->
+            R.string.account_error_qr_login_invalid_request
+
+        // Sync code errors
+        message.contains("expired") -> R.string.account_error_sync_code_expired
+        message.contains("invalid") && message.contains("code") -> R.string.account_error_invalid_sync_code
+        message.contains("not found") || message.contains("no sync code") -> R.string.account_error_sync_code_not_found
+        message.contains("already linked") -> R.string.account_error_device_already_linked
+        message.contains("empty response") -> R.string.account_error_generic_retry
+
+        // Network errors
+        message.contains("unable to resolve host") || message.contains("no address associated") -> R.string.account_error_no_internet
+        message.contains("timeout") || message.contains("timed out") -> R.string.account_error_connection_timeout
+        message.contains("connection refused") || message.contains("connect failed") -> R.string.account_error_connection_refused
+
+        // Auth state
+        message.contains("not authenticated") -> R.string.account_error_not_authenticated
+
+        // Supabase HTTP errors (e.g. 404 for missing RPC, 400 for bad params)
+        message.contains("404") || message.contains("could not find") -> R.string.account_error_service_unavailable
+        message.contains("400") || message.contains("bad request") -> R.string.account_error_invalid_request
+
+        // Fallback
+        else -> R.string.account_error_unexpected
+    }
+}
