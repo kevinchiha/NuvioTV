@@ -153,3 +153,4 @@ and a real "invalid sync code" text still gives the sync-code string.
 ## Build log
 
 baseline: TraktProgressServiceRefreshTest > change seen by a cancelled refresh is fetched by the next poll (2300 tests, 1 failed, on kevbox 2ddce968d)
+Task 1: started at 21429ae59
