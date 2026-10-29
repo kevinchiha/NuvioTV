@@ -1,10 +1,17 @@
 package com.nuvio.tv.updater
 
 import com.nuvio.tv.updater.model.AppUpdate
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.decodeFromString
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.time.Instant
 
 class UpdateManifestMappingTest {
 
@@ -64,6 +71,64 @@ class UpdateManifestMappingTest {
         val update = UpdateJson.json.decodeFromString<AppUpdate>(cached)
         assertEquals(1055, update.versionCode)
         assertNull(update.profileUrl)
+        assertNull(update.serverTimeMs)
+    }
+
+    // --- server clock (Date header) ---
+
+    @Test
+    fun `parseHttpDate reads an RFC 1123 Date header`() {
+        assertEquals(
+            Instant.parse("2026-10-29T08:00:00Z").toEpochMilli(),
+            UpdateRepository.parseHttpDate("Thu, 29 Oct 2026 08:00:00 GMT"),
+        )
+        assertEquals(
+            Instant.parse("2026-10-29T08:00:00Z").toEpochMilli(),
+            UpdateRepository.parseHttpDate("  Thu, 29 Oct 2026 08:00:00 GMT  "),
+        )
+    }
+
+    @Test
+    fun `parseHttpDate gives null for a missing or blank header`() {
+        assertNull(UpdateRepository.parseHttpDate(null))
+        assertNull(UpdateRepository.parseHttpDate(""))
+        assertNull(UpdateRepository.parseHttpDate("   "))
+    }
+
+    @Test
+    fun `parseHttpDate gives null for garbage`() {
+        assertNull(UpdateRepository.parseHttpDate("soon"))
+        assertNull(UpdateRepository.parseHttpDate("2026-10-29T08:00:00Z"))
+        assertNull(UpdateRepository.parseHttpDate("Thu, 32 Oct 2026 08:00:00 GMT"))
+    }
+
+    private fun repositoryAnswering(dateHeader: String?): UpdateRepository {
+        val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val response = Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(oldManifest.toResponseBody("application/json".toMediaType()))
+                if (dateHeader != null) response.header("Date", dateHeader)
+                response.build()
+            }
+            .build()
+        return UpdateRepository(client)
+    }
+
+    @Test
+    fun `getLatestUpdate stores the Date header as serverTimeMs`() = runTest {
+        val update = repositoryAnswering("Thu, 29 Oct 2026 08:00:00 GMT").getLatestUpdate().getOrThrow()
+        assertEquals(1055, update.versionCode)
+        assertEquals(Instant.parse("2026-10-29T08:00:00Z").toEpochMilli(), update.serverTimeMs)
+    }
+
+    @Test
+    fun `getLatestUpdate without a Date header, or with a garbage one, has no server time`() = runTest {
+        assertNull(repositoryAnswering(null).getLatestUpdate().getOrThrow().serverTimeMs)
+        assertNull(repositoryAnswering("yesterday").getLatestUpdate().getOrThrow().serverTimeMs)
     }
 
     // --- silent install block (AC-1) ---

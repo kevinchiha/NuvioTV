@@ -87,6 +87,18 @@ class SilentPromptHoldTest {
     }
 
     @Test
+    fun `the 72 h net follows the server time when the box clock is 2 days wrong`() {
+        val twoDaysMs = 2 * 24 * 60 * 60 * 1000L
+        val serverWithinNet = afterMs + SilentPromptHold.SAFETY_NET_MS - 1
+        // Box clock 2 days ahead, past the net; the server says it is not over yet.
+        assertTrue(holds(nowMs = SilentClock.nowFor(serverWithinNet, serverWithinNet + twoDaysMs)))
+
+        val serverPastNet = afterMs + SilentPromptHold.SAFETY_NET_MS
+        // Box clock 2 days behind, inside the net; the server says it is over.
+        assertFalse(holds(nowMs = SilentClock.nowFor(serverPastNet, serverPastNet - twoDaysMs)))
+    }
+
+    @Test
     fun `an after near Long MAX does not overflow into showing the prompt`() {
         assertTrue(holds(liveUpdate = update(silentAfterMs = Long.MAX_VALUE)))
     }

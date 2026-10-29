@@ -18,6 +18,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import java.io.File
 
+/**
+ * The wall clock the silent wait (`after`) and the prompt's 72 h net count by. Some boxes have a
+ * wrong date, so the update server's time wins when the manifest response carried one.
+ */
+object SilentClock {
+    /** Pure: [serverTimeMs] when known, else [boxNowMs]. */
+    fun nowFor(serverTimeMs: Long?, boxNowMs: Long): Long = serverTimeMs ?: boxNowMs
+}
+
 /** What started a silent attempt; shown in the evaluation log line. */
 enum class SilentTrigger(val label: String) { JOB("job"), DAILY_CHECK("daily-check") }
 
@@ -128,7 +137,8 @@ object SilentInstall {
                 cachedFileExists = path != null && env.fileExists(path),
                 cachedSha256Matches = { shaMatches },
                 ignoredVersionCode = env.ignoredVersionCode(),
-                nowMs = env.nowMs(),
+                // The early-user evaluation below copies this input, so both use the same clock.
+                nowMs = SilentClock.nowFor(update?.serverTimeMs, env.nowMs()),
                 signedInUserId = null,
                 silentState = env.silentState(),
             )

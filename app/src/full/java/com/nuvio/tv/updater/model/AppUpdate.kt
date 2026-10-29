@@ -80,5 +80,9 @@ data class AppUpdate(
     // The manifest's silent-install block, flattened. Null / empty when the manifest has no
     // valid block; the defaults also keep cached JSON from older builds decodable.
     val silentAfterMs: Long? = null,
-    val silentEarlyUsers: List<String> = emptyList()
+    val silentEarlyUsers: List<String> = emptyList(),
+    // The update server's clock (epoch ms) from the version.json response's Date header, or
+    // null when the header was missing or unreadable. Some boxes have a wrong date, so the
+    // silent wait and the prompt net count by this one when it is known.
+    val serverTimeMs: Long? = null
 )
