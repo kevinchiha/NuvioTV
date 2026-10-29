@@ -113,3 +113,9 @@ Ruling: the list has more than 8 items, which would send it to a split fix pass 
 14. minor [review 7] UpdateCheckWorker.kt:64 / SilentInstall: on PREDOWNLOAD_CHECKSUM_MISMATCH delete the cached APK (and its .dm) and clear the pre-download pointer, so the next daily check downloads it again.
 15. minor [review 11] stale comments in SilentInstallDecision.kt:11-13, ApkInstaller.kt:114-115, SilentInstallWorker.kt:11.
 16. minor [review 12] delete AppVisibilityTracker.lastStartElapsedMs/lastStopElapsedMs(context) and SilentInstallGuard.lastMemberCommitElapsedMs if still unused after item 12.
+
+Outcomes (fixer `6329c564`, commits df5fba2b7 + 179fc3075; scoped re-review `f49a290b`): items 1-16 all fixed. Gate: compile ok; 2411 tests, only the baseline failure; release dry run ok; 39 script tests ok; `bash -n release.sh` ok; AC-9 files and UpdateResolution.kt untouched.
+Interface changes in the fix pass: SilentPromptHold.holdsPrompt(liveUpdate: AppUpdate?, ..., predownloadReady, unmeteredNetwork); SilentReason.ALREADY_COMMITTED; AppVisibilityTracker.isRegistered added; three unused readers removed; with a test URL set the trust check accepts only that URL's exact scheme, host and port.
+Raised during the fix pass, skipped:
+- minor, SilentInstall.kt:192-193: the committed versionCode is remembered after commitSession returns; a failure broadcast arriving first leaves it marked for the life of the process (no more silent tries until the process restarts). Tiny window.
+- minor, UpdaterBuild.kt:7-8: doc still says the test URL lets plain http through; the rule is now the test URL's own scheme.
