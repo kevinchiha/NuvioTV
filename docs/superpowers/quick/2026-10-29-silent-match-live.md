@@ -102,3 +102,4 @@ visibility unknown blocks even when idle; 15 min out-of-sight boundary.
 plan check (62f11a5a): 5 problems folded: visibility-unknown flag always blocks; env.nowMs() seam kept; SilentClock.nowFor as the tested clock choice; dialog-window key presses recorded as a non-goal (upstream-private timer); the queued log line lives in SilentInstallScheduler.kt.
 baseline: TraktProgressServiceRefreshTest "change seen by a cancelled refresh is fetched by the next poll" (gate on kevbox 8501998fc, 2026-10-29 10:0x: 2446 tests, 1 failed)
 Task 1+2: started at 085b73dd0
+Task 1+2: landed (f5ed0c339, 519853815). Additions: SilentInstallGuard.isPlaying, KeyPressLog, KeyRecordingCallback (overrides the two Window.Callback default methods Kotlin delegation skips), AppVisibilityTracker.lastKeyPressElapsedMs. Touched SilentInstallScheduler.kt comments only. Tests pinning the old numbers updated on purpose.
