@@ -35,6 +35,7 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 - Task 7: landed e3c85ba0d, review clean (gate green: 2383 tests, only the baseline failure). No interface deviation.
 - Task 8: landed 81700eb39, review clean (gate green: 2386 tests, only the baseline failure). Deviation: hold check guarded by showDialog (ruling above); VisibilityLog.activityStopped (internal) now returns the remaining count.
 - Task 9: landed c7faaf582, review clean (gate green: 2386 tests, only the baseline failure; 30 script tests OK). Additions: render refuses a non-array --profiles-json; notes passed as --notes=.
+- Task 10: landed 44432a74f + fix round 1/3 d9fd92b48 (2002 test build debuggable; heading; plan text fixed in 3b8fa05d0, the gap fold had hit the wrong line). Re-review: both addressed, gate green (2386 tests, only the baseline failure; 34 script tests OK). Added helpers prepare_dir/make_server (additive).
 
 ## Rolled-up minors
 - Task 1, app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt:20-21: class doc still says trusted means https + configured host; test builds also trust http on the test host and port.
