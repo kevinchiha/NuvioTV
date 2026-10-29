@@ -1,7 +1,22 @@
 package com.nuvio.tv.core.auth.loginfile
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,6 +25,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class LoginFileProcessorTest {
 
@@ -39,6 +56,15 @@ class LoginFileProcessorTest {
         }
     }
 
+    // The work runs in a scope the caller owns, as LoginFileSignIn does, on the test's clock.
+    private fun TestScope.start(recorder: Recorder): (String, String) -> Deferred<LoginFileOutcome> {
+        val work = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        return { e, p -> work.async { recorder.signIn(e, p) } }
+    }
+
+    private val timeoutJson =
+        """{"ok":false,"error":"The TV took too long to sign in. Check its internet connection and try again."}"""
+
     private fun assertNoSecrets(text: String) {
         assertFalse("contains password: $text", text.contains(password))
         assertFalse("contains email: $text", text.contains(email))
@@ -47,14 +73,14 @@ class LoginFileProcessorTest {
     @Test
     fun `no folder does nothing`() = runTest {
         val recorder = Recorder { LoginFileOutcome.Ok }
-        processor(dir = null).process(recorder::signIn)
+        processor(dir = null).process(start(recorder))
         assertTrue(recorder.calls.isEmpty())
     }
 
     @Test
     fun `no login file does nothing`() = runTest {
         val recorder = Recorder { LoginFileOutcome.Ok }
-        processor().process(recorder::signIn)
+        processor().process(start(recorder))
         assertTrue(recorder.calls.isEmpty())
         assertFalse(resultFile().exists())
     }
@@ -67,7 +93,7 @@ class LoginFileProcessorTest {
             assertFalse("login file still on disk during sign-in", loginFile().exists())
             LoginFileOutcome.Ok
         }
-        processor(logs = logs).process(recorder::signIn)
+        processor(logs = logs).process(start(recorder))
 
         assertEquals(listOf(email to password), recorder.calls)
         assertFalse(loginFile().exists())
@@ -80,7 +106,7 @@ class LoginFileProcessorTest {
     fun `email is trimmed`() = runTest {
         writeLogin(emailValue = "  $email ")
         val recorder = Recorder { LoginFileOutcome.Ok }
-        processor().process(recorder::signIn)
+        processor().process(start(recorder))
         assertEquals(listOf(email to password), recorder.calls)
     }
 
@@ -88,7 +114,7 @@ class LoginFileProcessorTest {
     fun `file dated in the future counts as fresh`() = runTest {
         writeLogin(requestedAt = now + 3_600_000L)
         val recorder = Recorder { LoginFileOutcome.Ok }
-        processor().process(recorder::signIn)
+        processor().process(start(recorder))
         assertEquals(1, recorder.calls.size)
         assertEquals("""{"ok":true}""", resultFile().readText())
     }
@@ -97,7 +123,7 @@ class LoginFileProcessorTest {
     fun `file exactly ten minutes old is still fresh`() = runTest {
         writeLogin(requestedAt = now - LOGIN_FILE_MAX_AGE_MS)
         val recorder = Recorder { LoginFileOutcome.Ok }
-        processor().process(recorder::signIn)
+        processor().process(start(recorder))
         assertEquals(1, recorder.calls.size)
     }
 
@@ -106,7 +132,7 @@ class LoginFileProcessorTest {
         writeLogin(requestedAt = now - LOGIN_FILE_MAX_AGE_MS - 1)
         val logs = mutableListOf<String>()
         val recorder = Recorder { LoginFileOutcome.Ok }
-        processor(logs = logs).process(recorder::signIn)
+        processor(logs = logs).process(start(recorder))
 
         assertTrue(recorder.calls.isEmpty())
         assertFalse(loginFile().exists())
@@ -132,7 +158,7 @@ class LoginFileProcessorTest {
             loginFile().writeText(text)
             val logs = mutableListOf<String>()
             val recorder = Recorder { LoginFileOutcome.Ok }
-            processor(logs = logs).process(recorder::signIn)
+            processor(logs = logs).process(start(recorder))
 
             assertTrue("signed in for: $text", recorder.calls.isEmpty())
             assertFalse("file left for: $text", loginFile().exists())
@@ -145,7 +171,7 @@ class LoginFileProcessorTest {
     fun `failed sign-in writes the error text`() = runTest {
         writeLogin()
         val recorder = Recorder { LoginFileOutcome.Failed("Wrong email or password") }
-        processor().process(recorder::signIn)
+        processor().process(start(recorder))
         assertEquals("""{"ok":false,"error":"Wrong email or password"}""", resultFile().readText())
     }
 
@@ -156,7 +182,7 @@ class LoginFileProcessorTest {
             """body={"code":400,"error_code":"invalid_credentials","msg":"Invalid login credentials","p":"$password"}"""
         val logs = mutableListOf<String>()
         val recorder = Recorder { throw IllegalStateException(serverReply) }
-        processor(logs = logs).process(recorder::signIn)
+        processor(logs = logs).process(start(recorder))
 
         val result = resultFile().readText()
         assertEquals("""{"ok":false,"error":"Wrong email or password"}""", result)
@@ -170,7 +196,7 @@ class LoginFileProcessorTest {
     fun `sign-in that does not finish in time writes the timeout text`() = runTest {
         writeLogin()
         val recorder = Recorder { awaitCancellation() }
-        processor(timeoutMs = 20_000L).process(recorder::signIn)
+        processor(timeoutMs = 20_000L).process(start(recorder))
 
         val result = resultFile().readText()
         assertEquals(
@@ -180,12 +206,82 @@ class LoginFileProcessorTest {
         assertNoSecrets(result)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class) // currentTime
+    @Test
+    fun `sign-in that ignores cancellation is answered at the timeout`() = runTest {
+        writeLogin()
+        val recorder = Recorder {
+            withContext(NonCancellable) { delay(60_000L) }
+            LoginFileOutcome.Ok
+        }
+        processor(timeoutMs = 20_000L).process(start(recorder))
+
+        assertEquals(20_000L, currentTime)
+        assertEquals(timeoutJson, resultFile().readText())
+    }
+
+    @Test
+    fun `sign-in stuck in a blocking call still gets the timeout text on time`() = runBlocking {
+        writeLogin()
+        val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val release = CountDownLatch(1)
+        var job: Deferred<LoginFileOutcome>? = null
+        try {
+            val startedAt = System.nanoTime()
+            processor(timeoutMs = 200L).process { _, _ ->
+                work.async {
+                    // Blocks the thread like OkHttp's execute(); cancelling does not wake it.
+                    release.await(10, TimeUnit.SECONDS)
+                    LoginFileOutcome.Ok
+                }.also { job = it }
+            }
+            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+            assertTrue("timeout answer took $elapsedMs ms", elapsedMs < 5_000)
+            assertEquals(timeoutJson, resultFile().readText())
+            val stalled = checkNotNull(job)
+            assertTrue("sign-in work should still be running", stalled.isActive)
+
+            // When the stalled work ends later, the answer already given stays.
+            release.countDown()
+            assertEquals(LoginFileOutcome.Ok, stalled.await())
+            assertEquals(timeoutJson, resultFile().readText())
+        } finally {
+            release.countDown()
+            work.cancel()
+        }
+    }
+
+    @Test
+    fun `sign-in work cancelled by someone else gives the generic failure`() = runTest {
+        writeLogin()
+        processor().process { _, _ -> CompletableDeferred<LoginFileOutcome>().apply { cancel() } }
+        assertEquals(
+            """{"ok":false,"error":"Sign-in did not work. Try again, or sign in on the TV"}""",
+            resultFile().readText(),
+        )
+    }
+
+    @Test
+    fun `leftover result tmp is deleted when a login file is found`() = runTest {
+        val leftover = File(folder(), "$LOGIN_RESULT_FILE_NAME.tmp")
+        leftover.writeText("""{"ok":tr""")
+        val recorder = Recorder { LoginFileOutcome.Ok }
+
+        processor().process(start(recorder))
+        assertTrue("no login file: the check should not touch the folder", leftover.exists())
+
+        writeLogin(requestedAt = now - LOGIN_FILE_MAX_AGE_MS - 1)
+        processor().process(start(recorder))
+        assertFalse(leftover.exists())
+        assertTrue(recorder.calls.isEmpty())
+    }
+
     @Test
     fun `fresh file in a read-only folder is not used for sign-in`() = runTest {
         writeLogin()
         val recorder = Recorder { LoginFileOutcome.Ok }
         withReadOnlyFolder {
-            processor().process(recorder::signIn)
+            processor().process(start(recorder))
         }
         assertTrue(recorder.calls.isEmpty())
         assertTrue("delete should have failed", loginFile().exists())
@@ -196,7 +292,7 @@ class LoginFileProcessorTest {
     fun `fresh file whose delete fails writes the clear-file result and does not sign in`() = runTest {
         writeLogin()
         val recorder = Recorder { LoginFileOutcome.Ok }
-        failingDeleteProcessor().process(recorder::signIn)
+        failingDeleteProcessor().process(start(recorder))
 
         assertTrue(recorder.calls.isEmpty())
         val result = resultFile().readText()
@@ -208,7 +304,7 @@ class LoginFileProcessorTest {
     fun `stale file whose delete fails gets no result`() = runTest {
         writeLogin(requestedAt = now - LOGIN_FILE_MAX_AGE_MS - 1)
         val recorder = Recorder { LoginFileOutcome.Ok }
-        failingDeleteProcessor().process(recorder::signIn)
+        failingDeleteProcessor().process(start(recorder))
         assertTrue(recorder.calls.isEmpty())
         assertFalse(resultFile().exists())
     }
@@ -218,7 +314,7 @@ class LoginFileProcessorTest {
         writeLogin(requestedAt = now - LOGIN_FILE_MAX_AGE_MS - 1)
         val recorder = Recorder { LoginFileOutcome.Ok }
         withReadOnlyFolder {
-            processor().process(recorder::signIn)
+            processor().process(start(recorder))
         }
         assertTrue(recorder.calls.isEmpty())
         assertFalse(resultFile().exists())
@@ -229,7 +325,7 @@ class LoginFileProcessorTest {
         loginFile().mkdir()
         File(loginFile(), "inside").writeText("x")
         val recorder = Recorder { LoginFileOutcome.Ok }
-        processor().process(recorder::signIn)
+        processor().process(start(recorder))
         assertTrue(recorder.calls.isEmpty())
         assertFalse(resultFile().exists())
         assertTrue(loginFile().isDirectory)

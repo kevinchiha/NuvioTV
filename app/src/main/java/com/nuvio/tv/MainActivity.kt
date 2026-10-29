@@ -123,7 +123,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.os.ConfigurationCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.metrics.performance.JankStats
 import androidx.metrics.performance.PerformanceMetricsState
 import androidx.navigation.NavHostController
@@ -394,6 +396,18 @@ open class MainActivity : ComponentActivity() {
         externalPlaybackTracker.activityLauncher = externalPlayerLauncher
 
         PluginRuntimeHooks.onActivityCreate(this)
+
+        // KevBox Setup login file, see ~/projects/kevbox-setup/docs/login-file.md. Checked on
+        // every resume and then once a second while resumed: the phone's launch command brings
+        // an app that is already on screen forward without a new onResume.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (isActive) {
+                    loginFileSignIn.checkNow()
+                    delay(1_000)
+                }
+            }
+        }
 
         window?.decorView?.post {
             val snapshot = com.nuvio.tv.core.player.DisplayCapabilities.detect(this)
@@ -1414,8 +1428,6 @@ open class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // KevBox Setup login file, see ~/projects/kevbox-setup/docs/login-file.md.
-        loginFileSignIn.checkNow()
         ambientIdleController.dismiss()
         if (::jankStats.isInitialized) jankStats.isTrackingEnabled = true
         // KevBox TV access kill-switch / device-limit catch-up. The foreground poller is a

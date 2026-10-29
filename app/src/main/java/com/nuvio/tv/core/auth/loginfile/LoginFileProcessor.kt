@@ -1,6 +1,9 @@
 package com.nuvio.tv.core.auth.loginfile
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -20,6 +23,7 @@ const val LOGIN_FILE_MAX_AGE_MS = 600_000L
 internal const val LOGIN_FILE_TIMEOUT_ERROR =
     "The TV took too long to sign in. Check its internet connection and try again."
 internal const val LOGIN_FILE_DELETE_ERROR = "The TV could not clear the login file. Try again."
+private const val LOGIN_RESULT_TMP_NAME = "$LOGIN_RESULT_FILE_NAME.tmp"
 
 // True when the file is gone afterwards, even if another process removed it first.
 private fun deleteLoginFile(file: File): Boolean =
@@ -55,10 +59,22 @@ class LoginFileProcessor internal constructor(
 
     private class Login(val email: String, val password: String, val requestedAt: Long)
 
-    suspend fun process(signIn: suspend (email: String, password: String) -> LoginFileOutcome) {
+    /**
+     * [startSignIn] starts the sign-in in a scope the caller owns and returns it at once. Only
+     * the wait for it is timed: the work may sit in a blocking HTTP call that cancelling cannot
+     * stop, so on a timeout it is left to finish on its own and the timeout text goes out now.
+     */
+    suspend fun process(startSignIn: (email: String, password: String) -> Deferred<LoginFileOutcome>) {
         val folder = dir() ?: return
         val file = File(folder, LOGIN_FILE_NAME)
         if (!file.exists()) return
+
+        // An app killed between write and rename leaves this behind.
+        try {
+            File(folder, LOGIN_RESULT_TMP_NAME).delete()
+        } catch (e: SecurityException) {
+            log("leftover login result tmp could not be deleted")
+        }
 
         val text = try {
             file.readText()
@@ -86,10 +102,14 @@ class LoginFileProcessor internal constructor(
 
         log("login file read and deleted, signing in")
         val outcome = try {
-            withTimeoutOrNull(timeoutMs) { signIn(login.email, login.password) }
+            val work = startSignIn(login.email, login.password)
+            withTimeoutOrNull(timeoutMs) { work.await() }
                 ?: LoginFileOutcome.Failed(LOGIN_FILE_TIMEOUT_ERROR).also { log("login file sign-in timed out") }
         } catch (e: CancellationException) {
-            throw e
+            // Rethrows when this check itself was cancelled; otherwise the sign-in work was.
+            currentCoroutineContext().ensureActive()
+            log("login file sign-in was cancelled")
+            LoginFileOutcome.Failed(loginFileErrorText(e))
         } catch (e: Exception) {
             log("login file sign-in threw ${e::class.java.simpleName}")
             LoginFileOutcome.Failed(loginFileErrorText(e))
@@ -121,7 +141,7 @@ class LoginFileProcessor internal constructor(
                 put("error", outcome.error)
             }
         }.toString()
-        val tmp = File(folder, "$LOGIN_RESULT_FILE_NAME.tmp")
+        val tmp = File(folder, LOGIN_RESULT_TMP_NAME)
         val result = File(folder, LOGIN_RESULT_FILE_NAME)
         try {
             tmp.writeText(json)

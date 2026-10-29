@@ -33,10 +33,39 @@ class LoginFileAccountActionTest {
     }
 
     @Test
-    fun `still loading signs out first`() {
+    fun `still loading with no saved session signs in only`() {
+        assertEquals(
+            LoginFileAccountAction.SignInOnly,
+            loginFileAccountAction(AuthState.Loading, "customer@example.com", storedSessionEmail = null),
+        )
+        assertEquals(
+            LoginFileAccountAction.SignInOnly,
+            loginFileAccountAction(AuthState.Loading, "customer@example.com", storedSessionEmail = " "),
+        )
+    }
+
+    @Test
+    fun `still loading with the same saved account signs in only`() {
+        assertEquals(
+            LoginFileAccountAction.SignInOnly,
+            loginFileAccountAction(AuthState.Loading, " customer@EXAMPLE.com", storedSessionEmail = "Customer@Example.com "),
+        )
+    }
+
+    @Test
+    fun `still loading with another saved account signs out first`() {
         assertEquals(
             LoginFileAccountAction.SignOutThenSignIn,
-            loginFileAccountAction(AuthState.Loading, "customer@example.com"),
+            loginFileAccountAction(AuthState.Loading, "customer@example.com", storedSessionEmail = "someone.else@example.com"),
+        )
+    }
+
+    @Test
+    fun `saved session email is ignored once auth has settled`() {
+        val state = AuthState.FullAccount(userId = "u1", email = "someone.else@example.com")
+        assertEquals(
+            LoginFileAccountAction.SignOutThenSignIn,
+            loginFileAccountAction(state, "customer@example.com", storedSessionEmail = "customer@example.com"),
         )
     }
 }

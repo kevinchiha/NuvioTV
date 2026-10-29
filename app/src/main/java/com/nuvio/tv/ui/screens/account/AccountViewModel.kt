@@ -811,7 +811,10 @@ internal fun accountErrorResId(message: String): Int {
 
         // Sync code errors
         message.contains("expired") -> R.string.account_error_sync_code_expired
-        message.contains("invalid") && message.contains("code") -> R.string.account_error_invalid_sync_code
+        // Every Supabase auth reply carries "error_code"; the sync-code RPC errors
+        // ({"code":"P0001",...,"message":"Invalid sync code"}) never do.
+        !message.contains("error_code") && message.contains("invalid") && message.contains("code") ->
+            R.string.account_error_invalid_sync_code
         message.contains("not found") || message.contains("no sync code") -> R.string.account_error_sync_code_not_found
         message.contains("already linked") -> R.string.account_error_device_already_linked
         message.contains("empty response") -> R.string.account_error_generic_retry
