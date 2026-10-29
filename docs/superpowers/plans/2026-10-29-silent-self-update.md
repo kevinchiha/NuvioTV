@@ -26,7 +26,7 @@
 - No new library dependencies.
 - `scripts/*` is gitignored except the files already tracked and `scripts/tests/*.py`; new files directly under `scripts/` need `git add -f`. `docs/` is gitignored too (`git add -f`).
 - No line added to `app/build.gradle.kts` may start with `versionCode =` or `versionName =`: `release.sh` and `scripts/release-metadata.sh` read and rewrite the first such line.
-- Gated, never run: `./release.sh` (edit it freely, never execute it); `git push`; anything that reads `SUPABASE_DB_URL` from `local.properties`; `ssh persovps` writes under `/var/www/kevbox-tv`; any `adb install` or `adb push` to a device that is not the local emulator (use `adb -e`). Never print values from `local.properties` or `~/secrets/kevbox-keys/release.env`, and never edit that `release.env`.
+- Gated, never run: `./release.sh` (edit it freely, never execute it); `git push`; anything that reads `SUPABASE_DB_URL` from `local.properties`; `ssh persovps` writes under `/var/www/kevbox-tv`; any `adb install` or `adb push` to a device that is not the local emulator. Name the emulator by serial (`adb -s emulator-5554`, after checking `adb -s emulator-5554 emu avd name` prints `kevbox_tv`); never `adb -e` or a bare `adb`, because a real TV box (192.168.68.71:5555) is attached over network adb and `-e` can select it. Never print values from `local.properties` or `~/secrets/kevbox-keys/release.env`, and never edit that `release.env`.
 - The AC-14 emulator runs are the orchestrator's job after the build. No task runs them.
 
 ---
@@ -92,7 +92,7 @@ fun isTrustedAssetUrl(assetUrl: String, baseUrl: String, testBaseUrl: String = "
 ```bash
 set -o pipefail
 ./gradlew :app:testFullDebugUnitTest --tests 'com.nuvio.tv.updater.UpdaterTestUrlTrustTest' --tests 'com.nuvio.tv.updater.UpdateDownloadDecisionTest' 2>&1 | tail -20
-./gradlew :app:generateFullDebugBuildConfig :app:generateFullReleaseBuildConfig -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2002 2>&1 | tail -5
+./gradlew :app:generateFullDebugBuildConfig :app:generateFullReleaseBuildConfig -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2002 -Pdebuggable=true 2>&1 | tail -5
 grep -E 'VERSION_CODE|IS_DEBUG_BUILD|UPDATER_|UPDATE_BASE_URL' app/build/generated/source/buildConfig/full/debug/com/nuvio/tv/BuildConfig.java app/build/generated/source/buildConfig/full/release/com/nuvio/tv/BuildConfig.java
 ./gradlew :app:generateFullDebugBuildConfig 2>&1 | tail -3
 grep -E 'VERSION_CODE|UPDATER_' app/build/generated/source/buildConfig/full/debug/com/nuvio/tv/BuildConfig.java
@@ -202,7 +202,7 @@ data class SilentEligibilityInput(
     val currentVersionCode: Int,
     val cachedVersionCode: Int?,
     val cachedFileExists: Boolean,
-    val cachedSha256Matches: () -> Boolean, // called only once checks 1-4 and the rest of 5 pass
+    val cachedSha256Matches: () -> Boolean, // called last, only once every other check passes
     val ignoredVersionCode: Int?,
     val nowMs: Long,
     val signedInUserId: String?,           // null: not read, or not a FullAccount
@@ -237,21 +237,21 @@ suspend fun markSilentRefused(versionCode: Int)
 ```
 
 **Behaviour:**
-1. `eligibility` returns the first failing reason in AC-2 order. (1) `UPDATER_OFF`. (2) `SDK_TOO_OLD` when `sdkInt < 31`. (3) `NO_INSTALL_PERMISSION`. (4) `MANIFEST_FETCH_FAILED` when `liveUpdate == null`, `NOT_AN_UPGRADE` when its versionCode is not above `currentVersionCode`. (5) `NO_PREDOWNLOAD` when `cachedVersionCode != live.versionCode` or the file is missing, `PREDOWNLOAD_CHECKSUM_MISMATCH` when `cachedSha256Matches()` is false. (6) `VERSION_IGNORED` when `ignoredVersionCode == live.versionCode`. (7) `NO_SILENT_BLOCK` when `live.silentBlock()` is null. (8) `NOT_YET` when `nowMs < afterMs` and `isEarlyUser` is false. (9) `SILENT_REFUSED`, then `TOO_MANY_ATTEMPTS` when `attempts >= 3`. Otherwise `ELIGIBLE`.
+1. `eligibility` returns the first failing reason in AC-2 order. (1) `UPDATER_OFF`. (2) `SDK_TOO_OLD` when `sdkInt < 31`. (3) `NO_INSTALL_PERMISSION`. (4) `MANIFEST_FETCH_FAILED` when `liveUpdate == null`, `NOT_AN_UPGRADE` when its versionCode is not above `currentVersionCode`. (5) `NO_PREDOWNLOAD` when `cachedVersionCode != live.versionCode` or the file is missing. (6) `VERSION_IGNORED` when `ignoredVersionCode == live.versionCode`. (7) `NO_SILENT_BLOCK` when `live.silentBlock()` is null. (8) `NOT_YET` when `nowMs < afterMs` and `isEarlyUser` is false. (9) `SILENT_REFUSED`, then `TOO_MANY_ATTEMPTS` when `attempts >= 3`. Last, the rest of AC-2 check 5: `PREDOWNLOAD_CHECKSUM_MISMATCH` when `cachedSha256Matches()` is false. Otherwise `ELIGIBLE`.
 2. Check 9 reads `silentState` only when `silentState.versionCode == live.versionCode`. State stored for any other versionCode counts as 0 attempts, not refused (AC-8).
 3. `isEarlyUser`: false for a null or blank id; otherwise true when any entry, trimmed, equals the trimmed id ignoring case.
 4. `quiet` returns, in this order: `APP_ON_SCREEN` when `startedActivities > 0`; `APP_RECENTLY_ON_SCREEN` when `nowElapsedMs - ref < 120_000`, where `ref` is the larger of the two stored times after dropping any value that is null or greater than `nowElapsedMs` (that means a reboot), and `ref = 0` when both are dropped ("out of sight since boot"); `EXTERNAL_PLAYBACK`; `MEMBER_INSTALL_RUNNING`; `INSTALL_SCREEN_WAITING`; `MEMBER_INSTALL_RECENT` when a member commit time exists, is not above now, and `now - it < 600_000`. Otherwise `ELIGIBLE`.
 5. `UpdatePreferences` stores one state under three keys: `silent_version_code` (int), `silent_attempts` (int), `silent_refused` (boolean). `silentInstallState` emits null when no versionCode is stored.
-6. `recordSilentAttempt(v)`: when the stored versionCode differs from `v`, reset to `(v, 1, false)`; otherwise increment attempts. `markSilentRefused(v)`: when the stored versionCode differs, reset to `(v, 0, true)`; otherwise set `refused = true`. Each change is one `dataStore.edit`.
+6. `recordSilentAttempt(v)`: when the stored versionCode differs from `v`, reset to `(v, 1, false)`; otherwise increment attempts. `markSilentRefused(v)`: when the stored versionCode differs, reset to `(v, 0, true)`; otherwise set `refused = true`. Each change is one `dataStore.edit`, and both compute the new state through one pure function in `SilentInstallDecision.kt`: `fun nextSilentState(current: SilentInstallState?, versionCode: Int, event: SilentStateEvent): SilentInstallState` with `enum class SilentStateEvent { ATTEMPT, REFUSED }`, so the transition is unit-tested without the cached DataStore.
 
 **Constraints:**
-- `eligibility` calls `cachedSha256Matches` at most once and only when it reaches that check. The APK is ~100 MB, and hashing it on every leave-the-app event when an earlier check already fails is wasted work on a TV.
+- `eligibility` calls `cachedSha256Matches` at most once, as its very last check, after every cheap check has passed. The APK is ~100 MB, and hashing it on every leave-the-app event when an earlier check already fails is wasted work on a TV.
 - No Android calls in `SilentInstallDecision.kt`: no `Build`, no `SystemClock`, no `Log`. Callers pass the values in.
 - Do not touch the existing keys or the corruption handler in `UpdatePreferences` (KEVBOX-TV-5).
 
 **Test intents:**
 - `eligibility returns <REASON> when only that check fails`: one test per AC-2 reason (12), each starting from one all-pass fixture and breaking one field, plus `eligibility is ELIGIBLE when every check passes` and `an early user passes before after`. AC-2 requires one test per reason; this intent covers that family.
-- `silent state for another versionCode is ignored`: a state `(v-1, 3, true)` still gives `ELIGIBLE`.
+- `per-version silent state resets on a new versionCode`: on read, a state `(v-1, 3, true)` still gives `ELIGIBLE`; through `nextSilentState`, ATTEMPT on `(v-1, 3, true)` gives `(v, 1, false)`, REFUSED on it gives `(v, 0, true)`, ATTEMPT on `(v, 1, false)` gives `(v, 2, false)`, REFUSED on `(v, 2, false)` gives `(v, 2, true)`, and both work from `null`.
 - `the checksum is not computed when an earlier check fails`: a lambda that counts its calls.
 - `quiet treats a stored time above now as out of sight since boot`: last stop 5 000 000, now 200 000 gives `ELIGIBLE`; now 60 000 with no stored times gives `APP_RECENTLY_ON_SCREEN`.
 - `quiet returns each AC-3 and AC-10 reason it owns`: one assertion per reason at its boundary (119 999 vs 120 000 ms; 599 999 vs 600 000 ms). `ANOTHER_SILENT_ATTEMPT` is not one of them; Task 7 sets it from the lock.
@@ -316,6 +316,7 @@ object SilentInstallGuard {
 - Keep the counting and storage logic testable without Android: callbacks delegate to internal functions that take a clock value and a small store interface. Unit tests cannot use `SharedPreferences` (the stub returns null).
 - The member path's behaviour does not change (AC-9): same session, same `base.dm` rule, same fallbacks. Only the two guard calls are added.
 - Deliberate omission: the tracker does not cancel a queued silent job when an activity starts. The job re-checks `quiet` and stops on `APP_ON_SCREEN`.
+- Minor gap install-6: also store the member commit time in `kevbox_app_visibility` (key `last_member_commit_elapsed_ms`), and have `lastMemberCommitElapsedMs` fall back to it, so a fresh process still waits 10 minutes after a member commit; a stored value above now means a reboot and is dropped.
 
 **Test intents:**
 - `member install running while started without finish, and not after finish`
@@ -463,7 +464,7 @@ fun authManager(): com.nuvio.tv.core.auth.AuthManager
 1. `attempt` calls `SilentInstallGuard.attemptLock.tryLock()`. When the lock is held, it logs the evaluation line with `ANOTHER_SILENT_ATTEMPT` and returns. It always unlocks in a `finally`.
 2. It builds `SilentEligibilityInput` from `UpdaterBuild.enabled`, `Build.VERSION.SDK_INT`, `ApkInstaller.canRequestPackageInstalls`, `live.getOrNull()`, `BuildConfig.VERSION_CODE`, the cached pre-download (path + decoded `AppUpdate` versionCode from `UpdatePreferences`), a memoized `Checksum.verify(file, live.sha256)`, the ignored versionCode, `System.currentTimeMillis()`, `signedInUserId = null`, and `silentInstallState.first()`.
 3. When the result is `NOT_YET` and the live block's `earlyUsers` is non-empty, it waits up to 15 000 ms for `authManager.authState` to leave `AuthState.Loading`, takes `FullAccount.userId` (anything else gives null), and evaluates again. `early` is `isEarlyUser(userId, earlyUsers)`; it is false when the account was not read.
-4. When eligibility passes, it evaluates `SilentInstallDecision.quiet(SilentInstallGuard.quietInput(context))`.
+4. It evaluates `SilentInstallDecision.quiet(SilentInstallGuard.quietInput(context))` BEFORE `eligibility`, and runs `eligibility` (with its checksum last) only when quiet is `ELIGIBLE`, so a box whose member is back on screen never hashes the APK. The logged reason is the quiet reason when quiet fails, else the eligibility reason.
 5. It logs exactly one evaluation line per attempt, verbatim: `Silent check [<trigger.label>] versionCode=<live versionCode|none>: <REASON> early=<true|false>`. The reason is the first failure or `ELIGIBLE`. A non-eligible attempt returns here.
 6. It fetches the profile with `ProfileFetcher.fetch(downloader, live, apkFile) { UpdaterBuild.isTrusted(it) }`.
 7. It calls `openSilentSession`. If that throws: `recordSilentAttempt(versionCode)`, log `Silent session for versionCode <n> could not be written (attempt counted): <exception class simple name>`, return.
@@ -477,6 +478,7 @@ fun authManager(): com.nuvio.tv.core.auth.AuthManager
 - `attempt` never throws: wrap the body in `runCatching` and log unexpected failures as `Silent attempt failed: <exception class simple name>`. Cancellation is the exception: rethrow `CancellationException` so WorkManager can stop the job.
 - Run on `Dispatchers.IO`. Hashing and the session copy are blocking.
 - Deliberate omission: no retry, no rescheduling. The next leave-the-app event or daily check tries again (AC-4).
+- Minor gap flow-2: if the attempt is cancelled after `openSilentSession` and before `commit` (REPLACE re-queue, network constraint lost), abandon the open session in a `finally` under `withContext(NonCancellable)`, then rethrow.
 
 **Test intents:**
 - `a failed second quiet check abandons the session and counts no attempt`
@@ -530,7 +532,7 @@ object SilentInstallScheduler {
 2. `onAppLeftScreen` launches on a process-wide `CoroutineScope(SupervisorJob() + Dispatchers.IO)`. It reads and decodes `predownloadUpdateJson` through `UpdateWorkerEntryPoint`, and when `shouldQueue(...)` is true it enqueues `OneTimeWorkRequestBuilder<SilentInstallWorker>()` with `setInitialDelay(120 000 ms)` and no constraints, via `enqueueUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.REPLACE, ...)`. It then logs verbatim: `Silent job queued (versionCode <n>, delay 120 s)`.
 3. `shouldQueue` is true only when `updaterEnabled`, `sdkInt >= 31`, `cached != null`, `cached.versionCode > currentVersionCode`, and `cached.silentBlock() != null`.
 4. `SilentInstallWorker.doWork`: when `!UpdaterBuild.enabled`, return success. Otherwise fetch with `updateRepository().getLatestUpdate()`, call `SilentInstall.attempt(applicationContext, result, SilentTrigger.JOB)`, and return `Result.success()` on every path, a failed fetch included.
-5. `UpdateCheckWorker.runCheck`: on the success path only (never before a `Result.retry()`), after the final `pruneStale`, when the run kept a valid pre-download for the fetched `update` (`keepName != null`, which covers both "downloaded now" and "already cached" for an upgrade), call `SilentInstall.attempt(applicationContext, Result.success(update), SilentTrigger.DAILY_CHECK)`.
+5. `UpdateCheckWorker.runCheck`: on the success path only (never before a `Result.retry()`), after the final `pruneStale`, when the run kept a valid pre-download for the fetched `update` (`keepName != null`, which covers both "downloaded now" and "already cached" for an upgrade), call `SilentInstall.attempt(applicationContext, kotlin.Result.success(update), SilentTrigger.DAILY_CHECK)` (inside the worker a bare `Result` is `ListenableWorker.Result`).
 6. A failure inside `onAppLeftScreen` (WorkManager or DataStore) is caught and logged; it never reaches the lifecycle callback.
 
 **Constraints:**
@@ -587,7 +589,7 @@ Both read `SILENT_EARLY_USERS` from the environment.
 2. `silent_block(now, users)` returns `{"after": now + 86400000, "earlyUsers": users}`.
 3. `render_manifest` returns `json.dumps(..., indent=2, ensure_ascii=False) + "\n"` with keys in this order: `versionCode`, `versionName`, `url`, `sha256`, `notes`, `profiles`, then `silent` only when `silent` is not None. `notes` gets every control character (newline, tab, CR included) replaced by a space, as today's bash escaping does.
 4. `check` exits 0 when the list is valid, else prints the error to stderr and exits 1. `render` without `--no-silent` validates the same way (exit 1, no stdout on failure) and uses `--now-ms` or the current epoch ms. With `--no-silent` it writes no `silent` key and skips validation.
-5. `release.sh`: an optional first argument `--no-silent` sets `NO_SILENT=1` and is shifted off before `VER`. The `[[ -f "$KEYENV" ]] || err ...; source "$KEYENV"` pair moves up to just after argument parsing. Then, unless `NO_SILENT=1`, `SILENT_EARLY_USERS="${SILENT_EARLY_USERS:-}" python3 "$REPO/scripts/release_manifest.py" check || err "Fix SILENT_EARLY_USERS in $KEYENV"` runs, all before step 1 (the bump).
+5. `release.sh`: an optional first argument `--no-silent` sets `NO_SILENT=1` and is shifted off before `VER`. The `[[ -f "$KEYENV" ]] || err ...; source "$KEYENV"` pair moves up to right after `REPO`, `GRADLE` and `KEYENV` are assigned (the script runs under `set -u`, so it cannot sit before them), still before step 1. Then, unless `NO_SILENT=1`, `SILENT_EARLY_USERS="${SILENT_EARLY_USERS:-}" python3 "$REPO/scripts/release_manifest.py" check || err "Fix SILENT_EARLY_USERS in $KEYENV"` runs, all before step 1 (the bump).
 6. Step 4 renders the manifest with `render` (passing `--no-silent` when set and `--profiles-json "[$PROFILES_JSON]"`). It replaces the remote heredoc with: `printf '%s' "$MANIFEST" | ssh "$SSH_ALIAS" -p "$SSH_PORT" "sudo tee $WEB_ROOT/version.json > /dev/null"`. Remove the bash `NOTES_ESC` lines and the comment about the quoted heredoc, which no longer apply.
 7. The header comment gains, verbatim:
 ```
@@ -653,48 +655,58 @@ and `build_manifest(apk_path, version_code, after_hours, early_users, port, now_
 
 Docstring run steps (verbatim):
 ```
-AC-14 emulator run. Local kevbox_tv emulator only (adb -e); never a real TV box.
+AC-14 emulator run. Local kevbox_tv emulator only; never a real TV box. A real TV is attached
+over network adb, so every command names the serial: E=emulator-5554, and first check
+  adb -s $E emu avd name   -> kevbox_tv   (stop if it is anything else)
 Start the emulator first (run-emulator skill). PORT=8765, N=2001.
 
 Build both APKs (both use the release key through the debug signing config):
   set -o pipefail
-  ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2001 2>&1 | tail -5
+  ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2001 -Pdebuggable=true 2>&1 | tail -5
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2001.apk
   ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2002 2>&1 | tail -5
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2002.apk
-  ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2003 2>&1 | tail -5
+  ./gradlew :app:assembleFullDebug -PupdaterTestBaseUrl=http://10.0.2.2:8765 -PupdaterTestVersionCode=2003 -Pdebuggable=true 2>&1 | tail -5
   cp app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk /tmp/kevbox-2003.apk
 Never uninstall: the emulator's debug app holds Kevin's sign-in. Each run installs a higher
-versionCode over what is there (same release key), so no downgrade is ever needed.
+versionCode over what is there (same release key). The test APKs are debuggable
+(-Pdebuggable=true) so that the restore step at the end can go back down to the normal build.
 
 Run 1 (after passed):
-  adb -e install -r /tmp/kevbox-2001.apk
-  adb -e shell appops set tv.kevbox.debug REQUEST_INSTALL_PACKAGES allow
-  python3 scripts/updater_test_server.py --apk /tmp/kevbox-2002.apk --version-code 2002 --after-hours -1 &
-  adb -e logcat -c
-  adb -e shell am start -n tv.kevbox.debug/com.nuvio.tv.MainActivity
-  Wait for "Pre-downloaded + verified" in: adb -e logcat -d -s UpdateCheckWorker
-  adb -e shell input keyevent KEYCODE_HOME
+  adb -s $E install -r /tmp/kevbox-2001.apk
+  adb -s $E shell appops set tv.kevbox.debug REQUEST_INSTALL_PACKAGES allow
+  setsid python3 scripts/updater_test_server.py --apk /tmp/kevbox-2002.apk --version-code 2002 --after-hours -1 >/tmp/kevbox-updater-server.log 2>&1 < /dev/null & echo $! > /tmp/kevbox-updater-server.pid
+  adb -s $E logcat -c
+  adb -s $E shell am start -n tv.kevbox.debug/com.nuvio.tv.MainActivity
+  Wait for "Pre-downloaded + verified" in: adb -s $E logcat -d -s UpdateCheckWorker
+  adb -s $E shell input keyevent KEYCODE_HOME
   Wait 5 minutes with no input, then:
-  adb -e shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
-  adb -e logcat -d -s KevboxSilentUpdate InstallResultReceiver ApkInstaller UpdateCheckWorker
+  adb -s $E shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
+  adb -s $E logcat -d -s KevboxSilentUpdate InstallResultReceiver ApkInstaller UpdateCheckWorker
      -> "Silent job queued", "Silent check [job] versionCode=2002: ELIGIBLE",
         "Committed silent session", and "Silent result ... status 0 (INSTALLED)" if the
         result arrived before Android killed the process.
-  No package-installer screen: adb -e shell dumpsys activity activities | grep -ci packageinstaller -> 0
-  Stop the server (kill %1).
+  No package-installer screen: adb -s $E shell dumpsys activity activities | grep -ci packageinstaller -> 0
+  Stop the server: kill "$(cat /tmp/kevbox-updater-server.pid)"; wait until port 8765 is free
+  (ss -ltn | grep -c :8765 -> 0) before run 2.
 
 Run 2 (not yet, one early user that is not this box; 2002 is installed after run 1):
-  adb -e shell appops set tv.kevbox.debug REQUEST_INSTALL_PACKAGES allow
-  python3 scripts/updater_test_server.py --apk /tmp/kevbox-2003.apk --version-code 2003 --after-hours 24 --early-user 00000000-0000-0000-0000-000000000000 &
-  adb -e logcat -c
+  adb -s $E shell appops set tv.kevbox.debug REQUEST_INSTALL_PACKAGES allow
+  setsid python3 scripts/updater_test_server.py --apk /tmp/kevbox-2003.apk --version-code 2003 --after-hours 24 --early-user 00000000-0000-0000-0000-000000000000 >/tmp/kevbox-updater-server.log 2>&1 < /dev/null & echo $! > /tmp/kevbox-updater-server.pid
+  adb -s $E logcat -c
   Open the app as in run 1, wait for the pre-download line, press HOME, wait 5 minutes.
-  adb -e shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
-  adb -e logcat -d -s KevboxSilentUpdate  -> "Silent check [job] versionCode=2003: NOT_YET early=false"
+  adb -s $E shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
+  adb -s $E logcat -d -s KevboxSilentUpdate  -> "Silent check [job] versionCode=2003: NOT_YET early=false"
   Open the app again: the update prompt offers Install.
+  Stop the server as in run 1.
+
+Restore the normal debug build (keeps Kevin's sign-in; works because 2002 is debuggable):
+  ./gradlew :app:assembleFullDebug 2>&1 | tail -5
+  adb -s $E install -r -d app/build/outputs/apk/full/debug/app-full-x86_64-debug.apk
+  adb -s $E shell dumpsys package tv.kevbox.debug | grep versionCode   -> the defaultConfig versionCode
 
 AC-13 privacy check, when an account is signed in on the emulator:
-  adb -e logcat -d -s KevboxSilentUpdate InstallResultReceiver ApkInstaller UpdateCheckWorker ProfileFetcher | grep -ci -e '<account user id>' -e '<account email>'   -> 0
+  adb -s $E logcat -d -s KevboxSilentUpdate InstallResultReceiver ApkInstaller UpdateCheckWorker ProfileFetcher | grep -ci -e '<account user id>' -e '<account email>'   -> 0
   (The filter keeps to updater tags on purpose: AuthManager's own debug log prints the raw user id today, and that is outside this phase.)
 
 If UpdateCheckWorker logs "No download this run" on an emulator network that counts as metered,
