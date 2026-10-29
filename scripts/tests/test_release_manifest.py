@@ -99,6 +99,46 @@ class EarlyUsersTests(unittest.TestCase):
         self.assertEqual((code, out, err), (0, "", ""))
 
 
+class ReleaseArgsTests(unittest.TestCase):
+    def check_args(self, *args: str) -> tuple[int, str, str]:
+        return run_cli(["check-args", *args], None)
+
+    def test_valid_argument_lists_pass(self) -> None:
+        for args in ((), ("1.2.3",), ("1.2.3", "Fix", "login"), ("--no-silent", "1.2.3", "notes"),
+                     ("1.2.3", "-1 crash on start")):
+            with self.subTest(args=args):
+                self.assertEqual(self.check_args(*args), (0, "", ""))
+
+    def test_no_silent_after_the_version_stops_the_release(self) -> None:
+        code, out, err = self.check_args("1.2.3", "--no-silent", "notes")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("Argument 2: --no-silent must come first", err)
+
+        code, _, err = self.check_args("1.2.3", "notes", "--no-silent")
+        self.assertEqual(code, 1)
+        self.assertIn("Argument 3", err)
+
+    def test_no_silent_twice_stops_the_release(self) -> None:
+        code, _, err = self.check_args("--no-silent", "--no-silent", "1.2.3")
+        self.assertEqual(code, 1)
+        self.assertIn("Argument 2: --no-silent must come first", err)
+
+    def test_any_other_double_dash_argument_stops_the_release(self) -> None:
+        for args, position in ((("--no-silnet", "1.2.3"), 1), (("1.2.3", "--force"), 2),
+                               (("--no-silent", "1.2.3", "--dry-run"), 3)):
+            with self.subTest(args=args):
+                code, out, err = self.check_args(*args)
+                self.assertEqual((code, out), (1, ""))
+                self.assertIn(f"Argument {position}: unknown option", err)
+
+    def test_a_version_name_starting_with_a_dash_stops_the_release(self) -> None:
+        for args, position in ((("-n", "notes"), 1), (("--no-silent", "-1.2.3"), 2)):
+            with self.subTest(args=args):
+                code, _, err = self.check_args(*args)
+                self.assertEqual(code, 1)
+                self.assertIn(f"Argument {position}: unknown option", err)
+
+
 class RenderTests(unittest.TestCase):
     def test_no_silent_writes_no_silent_key(self) -> None:
         self.assertNotIn("silent", manifest(None))

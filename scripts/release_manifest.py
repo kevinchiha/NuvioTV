@@ -3,11 +3,13 @@
 
 Kept apart from release.sh so each case can run alone, with no ssh and no Gradle:
 
+    python3 scripts/release_manifest.py check-args <release.sh arguments...>
     python3 scripts/release_manifest.py check
     python3 scripts/release_manifest.py render --version-code N --version-name V --url U \
         --sha256 S --notes TEXT --profiles-json '[...]' [--no-silent] [--now-ms MS]
 
-Both commands read SILENT_EARLY_USERS (comma-separated Supabase auth user ids) from the
+check-args refuses a misplaced --no-silent or an unknown option (see check_release_args).
+check and render read SILENT_EARLY_USERS (comma-separated Supabase auth user ids) from the
 environment. Error messages name the bad entry's position, never its value.
 """
 from __future__ import annotations
@@ -37,6 +39,22 @@ def parse_early_users(raw: str | None) -> list[str]:
             raise ValueError(f"SILENT_EARLY_USERS entry {position} is not a UUID")
         users.append(entry)
     return users
+
+
+def check_release_args(args: list[str]) -> None:
+    """Refuse release.sh arguments that would publish something other than what was meant.
+
+    `--no-silent` counts only as the first argument. Anywhere else, any other argument starting
+    with `--`, or a versionName starting with `-` raises ValueError naming the argument's
+    1-based position: silent install is the default, so a misplaced flag would publish a release
+    that installs by itself.
+    """
+    skip = 1 if args[:1] == ["--no-silent"] else 0
+    for position, arg in enumerate(args[skip:], start=skip + 1):
+        if arg == "--no-silent":
+            raise ValueError(f"Argument {position}: --no-silent must come first, before <versionName>")
+        if arg.startswith("--") or (position == skip + 1 and arg.startswith("-")):
+            raise ValueError(f"Argument {position}: unknown option '{arg}'")
 
 
 def silent_block(now_ms: int, early_users: list[str]) -> dict:
@@ -80,6 +98,16 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    # Takes release.sh's own arguments verbatim, flags included, so argparse stays out of it.
+    if argv[:1] == ["check-args"]:
+        try:
+            check_release_args(argv[1:])
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 1
+        return 0
+
     args = _parser().parse_args(argv)
     raw = os.environ.get("SILENT_EARLY_USERS")
 
