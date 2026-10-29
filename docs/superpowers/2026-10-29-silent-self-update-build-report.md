@@ -24,6 +24,8 @@ Gap report: docs/superpowers/2026-10-29-silent-self-update-gap-report.md
 ## Task outcomes
 - Task 1: landed 08c722c84, review clean (gate green: 2309 tests, only the baseline failure). No interface deviation.
 - Task 2: landed b9456143a, review clean (gate green: 2328 tests, only the baseline failure). No interface deviation.
+- Task 3: landed e4ef73235, review clean (gate green: 2355 tests, only the baseline failure). No interface deviation.
 
 ## Rolled-up minors
 - Task 1, app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt:20-21: class doc still says trusted means https + configured host; test builds also trust http on the test host and port.
+- Task 3, app/src/testFull/java/com/nuvio/tv/updater/SilentInstallDecisionTest.kt:151-161: the checksum-not-computed test breaks only checks 6, 8, 9; checks 1-5 and 7 are not pinned.
