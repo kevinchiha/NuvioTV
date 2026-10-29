@@ -125,9 +125,19 @@ prompt.
   - Run 2: with N+1 installed after run 1 (never uninstall: the emulator's debug app holds
     Kevin's sign-in), serve N+2 with `after` 24 hours ahead and
     `earlyUsers: ["00000000-0000-0000-0000-000000000000"]`. 5 minutes after HOME, the package is
-    still at N+1 and logcat shows the not-yet reason. Opening the app shows the prompt with Install.
+    still at N+1 and logcat shows the not-yet reason. Opening the app shows no update prompt
+    (AC-15); About → check for updates shows the prompt with Install.
   - Afterwards the normal debug build goes back on with `adb install -r -d` (allowed because the
     test build is debuggable), with no uninstall, and the emulator account stays signed in.
+
+- **AC-15** On Android 12+ (`SDK_INT >= 31`) the automatic update prompt at app open (the
+  `force = false` check in `UpdateViewModel`) stays hidden for a version while the silent path still
+  owns it: install permission granted, the live manifest carries a valid silent block, the version
+  is not marked "silent refused", it has fewer than 3 silent attempts, and the box clock is before
+  `after + 259 200 000` ms (72 hours after `after`). Once any of those stops holding, the prompt
+  shows as today. Below API 31 the prompt shows as today. The manual check in About
+  (`force = true`) always shows the prompt as today. A pure function decides, with one unit test
+  per condition, and `UpdateResolutionTest` passes unchanged.
 
 ## Non-goals
 - Installing on a real TV box. Those are 32-bit armeabi-v7a; the TCL test needs Kevin's yes and
@@ -144,6 +154,11 @@ prompt.
 - Notifications or toasts about a silent install: the point is that nobody notices.
 
 ## Decisions
+- Kevin's ruling, 2026-10-29: match KevBox Live, no app-open prompt on Android 12+ unless the
+  silent install was refused (AC-15). Orchestrator's addition on the same ruling: the prompt also
+  comes back once silent install can no longer happen for that version (3 attempts used, no
+  silent block, no install permission) and 72 hours after `after` as a safety net, so a box whose
+  silent install never runs (metered network, never out of sight) still gets the prompt.
 - Grill: skipped (unattended run on Kevin's word, 2026-10-29)
 - Install only while the app is out of sight for 2 minutes, over a fixed overnight window, because
   boxes have wrong clocks and time zones, and "not on screen" is the condition that matters: the

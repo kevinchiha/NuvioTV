@@ -498,14 +498,17 @@ Expected: BUILD SUCCESSFUL.
 
 Wires the two callers. Leaving the app queues a one-time job 2 minutes out. The daily `UpdateCheckWorker` tries a silent install at the end of a run that left a valid pre-download.
 
-**Delivers:** AC-4, AC-5, AC-13 (queued line)
+**Delivers:** AC-4, AC-5, AC-13 (queued line), AC-15
 
 **Files:**
 - Create: `app/src/full/java/com/nuvio/tv/updater/SilentInstallWorker.kt`
 - Create: `app/src/full/java/com/nuvio/tv/updater/SilentInstallScheduler.kt`
 - Modify: `app/src/full/java/com/nuvio/tv/updater/AppVisibilityTracker.kt` (call the scheduler)
 - Modify: `app/src/full/java/com/nuvio/tv/updater/UpdateCheckWorker.kt`
+- Create: `app/src/full/java/com/nuvio/tv/updater/SilentPromptHold.kt`
+- Modify: `app/src/full/java/com/nuvio/tv/updater/UpdateViewModel.kt` (`checkForUpdates`, the `force = false` path only)
 - Test: `app/src/testFull/java/com/nuvio/tv/updater/SilentInstallSchedulerTest.kt`
+- Test: `app/src/testFull/java/com/nuvio/tv/updater/SilentPromptHoldTest.kt`
 
 **Interfaces:**
 - Consumes: `SilentInstall.attempt`, `SilentTrigger` (Task 7); `AppVisibilityTracker` (Task 4); `AppUpdate.silentBlock()` (Task 2); `UpdaterBuild.enabled` (Task 1).
@@ -525,6 +528,18 @@ object SilentInstallScheduler {
     /** Pure: whether leaving the screen should queue the job. */
     fun shouldQueue(cached: AppUpdate?, currentVersionCode: Int, updaterEnabled: Boolean, sdkInt: Int): Boolean
 }
+
+object SilentPromptHold {
+    const val SAFETY_NET_MS = 259_200_000L   // 72 h after `after`
+    /** Pure (AC-15): true while the silent path still owns [update], so the app-open prompt stays hidden. */
+    fun holdsPrompt(
+        sdkInt: Int,
+        canRequestInstalls: Boolean,
+        update: AppUpdate,
+        silentState: SilentInstallState?,
+        nowMs: Long,
+    ): Boolean
+}
 ```
 
 **Behaviour:**
@@ -534,6 +549,8 @@ object SilentInstallScheduler {
 4. `SilentInstallWorker.doWork`: when `!UpdaterBuild.enabled`, return success. Otherwise fetch with `updateRepository().getLatestUpdate()`, call `SilentInstall.attempt(applicationContext, result, SilentTrigger.JOB)`, and return `Result.success()` on every path, a failed fetch included.
 5. `UpdateCheckWorker.runCheck`: on the success path only (never before a `Result.retry()`), after the final `pruneStale`, when the run kept a valid pre-download for the fetched `update` (`keepName != null`, which covers both "downloaded now" and "already cached" for an upgrade), call `SilentInstall.attempt(applicationContext, kotlin.Result.success(update), SilentTrigger.DAILY_CHECK)` (inside the worker a bare `Result` is `ListenableWorker.Result`).
 6. A failure inside `onAppLeftScreen` (WorkManager or DataStore) is caught and logged; it never reaches the lifecycle callback.
+7. `holdsPrompt` is true only when all hold: `sdkInt >= 31`; `canRequestInstalls`; `update.silentBlock() != null`; the state for `update.versionCode` (state stored for another versionCode counts as 0 attempts, not refused) is not refused and has `attempts < 3`; and `nowMs < afterMs + SAFETY_NET_MS`. Otherwise false.
+8. `UpdateViewModel.checkForUpdates`: when `force` is false and `decision.update` is not null, it reads `silentInstallState.first()` and, when `SilentPromptHold.holdsPrompt(Build.VERSION.SDK_INT, ApkInstaller.canRequestPackageInstalls(context), decision.update, state, System.currentTimeMillis())` is true, sets `showDialog = false` (everything else in the UI state stays as `UpdateResolution` decided, so About still shows the version and an instant Install). It logs one line under `SILENT_LOG_TAG`: `App-open prompt held for versionCode <n> (silent install owns it)`. The `force = true` path is untouched.
 
 **Constraints:**
 - `REPLACE`, not `KEEP`: leaving again restarts the 2-minute clock from the latest leave.
@@ -541,12 +558,14 @@ object SilentInstallScheduler {
 - The job never returns `retry()`. A retry would keep re-trying a box that is in use; the next leave event is the retry.
 - Store the stop time before queuing. The job's `quiet` check measures 120 000 ms from that stop time, and WorkManager never runs a delayed job early.
 - The daily worker runs the attempt inside its own `runMutex`. That is fine: the attempt has its own lock, and the daily worker does not wait on it.
+- `UpdateResolution` and its test stay unchanged (AC-9); the hold is applied in `UpdateViewModel` after `resolve`.
 
 **Test intents:**
 - `queues for a cached upgrade with a silent block`
 - `does not queue without a silent block, for a non-upgrade, below API 31, or with the updater off`: one assertion per case.
+- `holdsPrompt is true while silent owns the version and false for each condition that ends it`: below API 31, no permission, no silent block, refused, 3 attempts, at `after + 72 h` (boundary: one ms before is true), plus state for another versionCode ignored.
 
-**Verify:** `set -o pipefail; ./gradlew :app:testFullDebugUnitTest --tests 'com.nuvio.tv.updater.SilentInstallSchedulerTest' --tests 'com.nuvio.tv.updater.UpdateDownloadDecisionTest' 2>&1 | tail -20`
+**Verify:** `set -o pipefail; ./gradlew :app:testFullDebugUnitTest --tests 'com.nuvio.tv.updater.SilentInstallSchedulerTest' --tests 'com.nuvio.tv.updater.SilentPromptHoldTest' --tests 'com.nuvio.tv.updater.UpdateResolutionTest' --tests 'com.nuvio.tv.updater.UpdateDownloadDecisionTest' 2>&1 | tail -20`
 Expected: BUILD SUCCESSFUL.
 
 **Commit:** `feat(updater): try a silent install after leaving the app and after the daily check`
@@ -697,7 +716,9 @@ Run 2 (not yet, one early user that is not this box; 2002 is installed after run
   Open the app as in run 1, wait for the pre-download line, press HOME, wait 5 minutes.
   adb -s $E shell dumpsys package tv.kevbox.debug | grep versionCode        -> versionCode=2002
   adb -s $E logcat -d -s KevboxSilentUpdate  -> "Silent check [job] versionCode=2003: NOT_YET early=false"
-  Open the app again: the update prompt offers Install.
+  Open the app again: no update prompt appears (AC-15), and logcat -s KevboxSilentUpdate shows
+  "App-open prompt held for versionCode 2003". Settings > About > check for updates shows the
+  prompt with Install.
   Stop the server as in run 1.
 
 Restore the normal debug build (keeps Kevin's sign-in; works because 2002 is debuggable):
