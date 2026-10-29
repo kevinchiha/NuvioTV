@@ -90,6 +90,8 @@ import kotlinx.coroutines.flow.filterNotNull
 import com.nuvio.tv.updater.ApkInstaller
 import com.nuvio.tv.updater.PendingInstall
 import com.nuvio.tv.updater.PendingInstallScreen
+import com.nuvio.tv.updater.SilentInstallGuard
+import android.os.SystemClock
 import java.io.File
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -598,7 +600,17 @@ internal fun showInstallWarning(state: UpdateUiState): Boolean =
 private const val INSTALL_SCREEN_OPEN_DELAY_MS = 500L
 private const val INSTALL_SCREEN_CHECK_MS = 1_500L
 
-private fun openInstallScreen(context: android.content.Context, waiting: PendingInstall) {
+/**
+ * Opens the waiting install screen. Taking it from [PendingInstallScreen] emptied the slot, so
+ * the member-install time is recorded first: no silent install runs for 10 minutes while the
+ * member may be looking at Android's install screen (AC-10).
+ */
+internal fun openInstallScreen(
+    context: android.content.Context,
+    waiting: PendingInstall,
+    nowElapsedMs: Long = SystemClock.elapsedRealtime(),
+) {
+    SilentInstallGuard.memberSessionCommitted(nowElapsedMs)
     val opened = runCatching { context.startActivity(waiting.screen) }
         .onFailure { Log.w("UpdatePromptDialog", "Could not open the install screen", it) }
         .isSuccess

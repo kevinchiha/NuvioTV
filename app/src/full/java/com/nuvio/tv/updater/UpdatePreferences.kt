@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler // KevBox: KEVBOX-TV-5
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences // KevBox: KEVBOX-TV-5
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -80,5 +81,33 @@ class UpdatePreferences @Inject constructor(
             prefs.remove(predownloadApkPathKey)
             prefs.remove(predownloadUpdateJsonKey)
         }
+    }
+
+    // Silent-install state for one versionCode (AC-8). A new versionCode starts over.
+    private val silentVersionCodeKey = intPreferencesKey("silent_version_code")
+    private val silentAttemptsKey = intPreferencesKey("silent_attempts")
+    private val silentRefusedKey = booleanPreferencesKey("silent_refused")
+
+    /** The stored silent-install state, or null when none was saved. */
+    val silentInstallState: Flow<SilentInstallState?> = dataStore.data.map(::readSilentState)
+
+    /** Counts one silent attempt for [versionCode]. Called before the session is committed. */
+    suspend fun recordSilentAttempt(versionCode: Int) = updateSilentState(versionCode, SilentStateEvent.ATTEMPT)
+
+    /** Marks [versionCode] "silent refused": Android wanted the member to confirm it (AC-7). */
+    suspend fun markSilentRefused(versionCode: Int) = updateSilentState(versionCode, SilentStateEvent.REFUSED)
+
+    private suspend fun updateSilentState(versionCode: Int, event: SilentStateEvent) {
+        dataStore.edit { prefs ->
+            val next = nextSilentState(readSilentState(prefs), versionCode, event)
+            prefs[silentVersionCodeKey] = next.versionCode
+            prefs[silentAttemptsKey] = next.attempts
+            prefs[silentRefusedKey] = next.refused
+        }
+    }
+
+    private fun readSilentState(prefs: Preferences): SilentInstallState? {
+        val versionCode = prefs[silentVersionCodeKey] ?: return null
+        return SilentInstallState(versionCode, prefs[silentAttemptsKey] ?: 0, prefs[silentRefusedKey] ?: false)
     }
 }

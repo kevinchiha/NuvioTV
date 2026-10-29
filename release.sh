@@ -2,22 +2,30 @@
 # KevBox TV release pipeline (self-hosted auto-update, persovps).
 # Adapted from kevbox-support/server/scripts/release.sh.
 #
-# Usage: ./release.sh <versionName> [release notes...]
-#   e.g. ./release.sh 0.7.5-beta "Fix login on TV; faster startup"
+# Usage: ./release.sh [--no-silent] <versionName> [release notes...]
+#   --no-silent  publish without a "silent" block: boxes show the prompt and never install by themselves.
+# Silent install: by default version.json carries "silent": {"after": <publish time + 24 h>, "earlyUsers": [...]}.
+#   Boxes signed in as an early user may install silently right away; every other box waits 24 h.
+#   Early users come from this line in ~/secrets/kevbox-keys/release.env (Supabase auth user ids, never emails):
+#     SILENT_EARLY_USERS=<uuid>,<uuid>
+#   A blank or missing line means no early users. Any entry that is not a UUID stops the release before the bump.
+#
+# Example: ./release.sh 0.7.5-beta "Fix login on TV; faster startup"
 #
 # What it does:
 #   1. Bumps versionCode (+1) and versionName in app/build.gradle.kts.
 #   2. Builds the SIGNED, flavored release: ./gradlew assembleFullRelease
 #      (reads NUVIO_RELEASE_* signing creds from ~/secrets/kevbox-keys/release.env).
-#   3. Publishes the selected ABI's apk (default arm64-v8a; set KEVBOX_TV_APK_ABI):
+#   3. Publishes the selected ABI's apk (default armeabi-v7a; set KEVBOX_TV_APK_ABI):
 #         app/build/outputs/apk/full/release/app-full-<abi>-release.apk
 #      scp'd to persovps, installed under /var/www/kevbox-tv/, and pointed to by the
 #      stable /download symlink (kevbox-tv-latest.apk) for first-install sideloads.
 #      The install-time compile profiles (.dm, one per Android API range) go up with it.
 #   4. Computes sha256 ON THE HOST and writes /var/www/kevbox-tv/version.json
-#      ({ versionCode, versionName, url, sha256, notes, profiles }) — the manifest the
+#      ({ versionCode, versionName, url, sha256, notes, profiles, silent }) — the manifest the
 #      in-app updater (UpdateRepository) fetches from ${UPDATE_BASE_URL}/version.json.
-#   5. Optionally commits the version bump (set KEVBOX_COMMIT=1).
+#      scripts/release_manifest.py renders it.
+#   5. Commits the version bump and pushes the current branch to origin (always).
 #
 # ⚠️ Same-key invariant: every release MUST be signed with the SAME keystore
 #    (~/secrets/kevbox-keys/kevboxtv.jks) or installs fail with "signatures don't match".
@@ -32,14 +40,36 @@ set -euo pipefail
 note() { printf '\033[36m→ %s\033[0m\n' "$*"; }
 err()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
+# Silent install is the default, so a misplaced --no-silent (or a typo such as --no-silnet taken
+# as the versionName) would publish a release that installs by itself. Stop before anything changes.
+python3 "$REPO/scripts/release_manifest.py" check-args "$@" \
+  || err "Usage: $0 [--no-silent] <versionName> [notes...]   (--no-silent goes first; no other options)"
+
+NO_SILENT=0
+if [[ "${1:-}" == "--no-silent" ]]; then
+  NO_SILENT=1
+  shift
+fi
 VER="${1:-}"
-[[ -z "$VER" ]] && err "Usage: $0 <versionName> [notes...]   e.g.  $0 0.7.5-beta \"What's new\""
+[[ -z "$VER" ]] && err "Usage: $0 [--no-silent] <versionName> [notes...]   e.g.  $0 0.7.5-beta \"What's new\""
 shift || true
 NOTES="${*:-Bug fixes and improvements.}"
 
-REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 GRADLE="$REPO/app/build.gradle.kts"
 KEYENV="$HOME/secrets/kevbox-keys/release.env"
+
+# Signing creds and SILENT_EARLY_USERS. Loaded before the bump so a bad early-user list stops
+# the release before anything changes.
+[[ -f "$KEYENV" ]] || err "Keystore env not found at $KEYENV (needed to sign the release)"
+# shellcheck source=/dev/null
+source "$KEYENV"
+# `source` sets a shell variable, not an exported one, so pass it to Python explicitly.
+if [[ "$NO_SILENT" != 1 ]]; then
+  SILENT_EARLY_USERS="${SILENT_EARLY_USERS:-}" python3 "$REPO/scripts/release_manifest.py" check \
+    || err "Fix SILENT_EARLY_USERS in $KEYENV"
+fi
 
 # persovps connection + deploy target (mirror the kevbox-support deploy).
 SSH_ALIAS="${KEVBOX_SSH_ALIAS:-persovps}"
@@ -64,14 +94,11 @@ sed -i -E "s/(versionName\s*=\s*\")[^\"]*(\")/\1$VER\2/" "$GRADLE"
 
 # --- 2. Build SIGNED, flavored release APK --------------------------------------
 note "Building signed assembleFullRelease…"
-[[ -f "$KEYENV" ]] || err "Keystore env not found at $KEYENV (needed to sign the release)"
-# shellcheck source=/dev/null
-source "$KEYENV"
 # Never fall back to debug signing for a family release.
 (cd "$REPO" && CI_USE_DEBUG_SIGNING=false ./gradlew assembleFullRelease --quiet)
 
 # Publish the selected ABI's apk from the flavored release path (build.gradle.kts splits{}
-# produces per-ABI APKs + a universal one). Default arm64-v8a (see APK_ABI above).
+# produces per-ABI APKs). Default armeabi-v7a (see APK_ABI above).
 APK="$REPO/app/build/outputs/apk/full/release/app-full-${APK_ABI}-release.apk"
 [[ -f "$APK" ]] || err "APK not found at $APK — build may have failed, or KEVBOX_TV_APK_ABI=$APK_ABI is wrong"
 note "APK built: $APK ($(du -h "$APK" | cut -f1))"
@@ -118,24 +145,19 @@ for R in "${PROFILE_RANGES[@]}"; do
   [[ -n "$PSHA" ]] || err "Failed to compute sha256 for $NAME on host"
   PROFILES_JSON+="${PROFILES_JSON:+, }{\"minApi\": $MIN, \"maxApi\": $MAX, \"url\": \"$BASE_URL/$NAME\", \"sha256\": \"$PSHA\"}"
 done
-# Write version.json on the host (kevbox-support style: one inline `sudo tee` heredoc).
-# Escape notes for JSON embedding (backslashes, double-quotes, newlines); keep notes concise.
-NOTES_ESC=${NOTES//\\/\\\\}; NOTES_ESC=${NOTES_ESC//\"/\\\"}; NOTES_ESC=${NOTES_ESC//$'\n'/ }
-# Any other control character (tab, CR, ...) is invalid inside a JSON string; make it a space.
-NOTES_ESC=${NOTES_ESC//[[:cntrl:]]/ }
-# The delimiter is quoted so the REMOTE shell leaves the body alone: every value is already
-# filled in here, and an unquoted heredoc would expand $ and backticks in the notes and turn
-# their escaped \\ back into \, writing invalid JSON that breaks every member's update check.
-ssh "$SSH_ALIAS" -p "$SSH_PORT" "sudo tee $WEB_ROOT/version.json > /dev/null <<'EOF'
-{
-  \"versionCode\": $NEW_CODE,
-  \"versionName\": \"$VER\",
-  \"url\": \"$BASE_URL/$REMOTE_APK\",
-  \"sha256\": \"$SHA\",
-  \"notes\": \"$NOTES_ESC\",
-  \"profiles\": [$PROFILES_JSON]
-}
-EOF"
+# Render the whole manifest in Python (json.dumps does the escaping; control characters in the
+# notes become spaces). Without --no-silent it adds "silent": {"after": now + 24 h, "earlyUsers"},
+# with "now" taken here, when the manifest is written.
+SILENT_ARGS=()
+if [[ "$NO_SILENT" == 1 ]]; then
+  SILENT_ARGS=(--no-silent)
+fi
+MANIFEST=$(SILENT_EARLY_USERS="${SILENT_EARLY_USERS:-}" python3 "$REPO/scripts/release_manifest.py" render \
+  --version-code "$NEW_CODE" --version-name "$VER" --url "$BASE_URL/$REMOTE_APK" --sha256 "$SHA" \
+  --notes="$NOTES" --profiles-json "[$PROFILES_JSON]" "${SILENT_ARGS[@]}") \
+  || err "Could not render version.json"
+# `$(...)` dropped the renderer's final newline; '%s\n' puts it back.
+printf '%s\n' "$MANIFEST" | ssh "$SSH_ALIAS" -p "$SSH_PORT" "sudo tee $WEB_ROOT/version.json > /dev/null"
 note "version.json updated (versionCode=$NEW_CODE sha256=${SHA:0:16}…, ${#PROFILE_RANGES[@]} compile profile(s))"
 
 # --- 5. Commit + push the version bump (like kevbox-support) ----------------------

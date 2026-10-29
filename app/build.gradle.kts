@@ -11,6 +11,7 @@ plugins {
 
 import com.android.build.gradle.internal.tasks.L8DexDesugarLibTask
 import java.io.File
+import java.net.URI
 import java.util.Properties
 
 fun parseBooleanProperty(value: String?): Boolean {
@@ -103,6 +104,33 @@ val releaseKeyPasswordValue = env("NUVIO_RELEASE_KEY_PASSWORD")
     ?: localProperties.getProperty("NUVIO_RELEASE_KEY_PASSWORD", "815787")
 val releaseStorePasswordValue = env("NUVIO_RELEASE_STORE_PASSWORD")
     ?: localProperties.getProperty("NUVIO_RELEASE_STORE_PASSWORD", "815787")
+
+// KevBox: debug-only switch to test the updater against a server on the host machine.
+// -PupdaterTestBaseUrl=http://10.0.2.2:<port> turns the updater on in debug builds and points it at
+// that server; -PupdaterTestVersionCode=<n> gives every debug output that versionCode. Release and
+// benchmark ignore both. A blank or missing property counts as unset.
+val updaterTestBaseUrl: String = providers.gradleProperty("updaterTestBaseUrl").orNull
+    ?.trim()
+    ?.takeIf { it.isNotBlank() }
+    ?.let { raw ->
+        val uri = runCatching { URI(raw) }.getOrNull()
+        val scheme = uri?.scheme?.lowercase()
+        if (uri == null || (scheme != "http" && scheme != "https") || uri.host.isNullOrBlank()) {
+            throw GradleException(
+                "updaterTestBaseUrl must be an http or https URL with a host, " +
+                    "for example http://10.0.2.2:8765 (got \"$raw\")"
+            )
+        }
+        raw.trimEnd('/')
+    }
+    ?: ""
+val updaterTestVersionCode: Int? = providers.gradleProperty("updaterTestVersionCode").orNull
+    ?.trim()
+    ?.takeIf { it.isNotBlank() }
+    ?.let { raw ->
+        raw.toIntOrNull()?.takeIf { it > 0 }
+            ?: throw GradleException("updaterTestVersionCode must be a positive integer (got \"$raw\")")
+    }
 
 android {
     namespace = "com.nuvio.tv"
@@ -238,7 +266,14 @@ android {
             // KevBox: SUPABASE_URL/ANON stay bound to OUR family Supabase (the SUPABASE_* props), NOT
             // upstream's rebind to NUVIO_SUPABASE_* (0.7.16 restructure). NUVIO_* remain blank below.
             buildConfigField("String", "SUPABASE_URL", "\"${resolveProperty(devProperties, localProperties, "SUPABASE_URL")}\"")
-            buildConfigField("String", "UPDATE_BASE_URL", "\"${devProperties.getProperty("UPDATE_BASE_URL", localProperties.getProperty("UPDATE_BASE_URL", "https://tv.kevbox.dev"))}\"")
+            // KevBox: -PupdaterTestBaseUrl replaces the update server and is the only way to turn the
+            // updater on in a debug build (see updaterTestBaseUrl above).
+            val debugUpdateBaseUrl = updaterTestBaseUrl.ifEmpty {
+                devProperties.getProperty("UPDATE_BASE_URL", localProperties.getProperty("UPDATE_BASE_URL", "https://tv.kevbox.dev"))
+            }
+            buildConfigField("String", "UPDATE_BASE_URL", buildConfigString(debugUpdateBaseUrl))
+            buildConfigField("String", "UPDATER_TEST_BASE_URL", buildConfigString(updaterTestBaseUrl))
+            buildConfigField("boolean", "UPDATER_ENABLED", updaterTestBaseUrl.isNotEmpty().toString())
             buildConfigField("String", "SUPABASE_ANON_KEY", "\"${resolveProperty(devProperties, localProperties, "SUPABASE_ANON_KEY")}\"")
             // KevBox: fallback Supabase kept blank (own family Supabase only). Field must exist —
             // AuthManager reads BuildConfig.SUPABASE_FALLBACK_URL (0.7.16). Blank = no fallback.
@@ -288,6 +323,10 @@ android {
             // upstream's rebind to NUVIO_SUPABASE_* (0.7.16 restructure). NUVIO_* remain blank below.
             buildConfigField("String", "SUPABASE_URL", "\"${resolveLocalProperty(localProperties, "SUPABASE_URL")}\"")
             buildConfigField("String", "UPDATE_BASE_URL", "\"${localProperties.getProperty("UPDATE_BASE_URL", "https://tv.kevbox.dev")}\"")
+            // KevBox: hardcoded, whatever -PupdaterTest* properties are passed. Release never trusts
+            // a test server and always runs the updater.
+            buildConfigField("String", "UPDATER_TEST_BASE_URL", "\"\"")
+            buildConfigField("boolean", "UPDATER_ENABLED", "true")
             buildConfigField("String", "SUPABASE_ANON_KEY", "\"${resolveLocalProperty(localProperties, "SUPABASE_ANON_KEY")}\"")
             // KevBox: fallback Supabase kept blank (own family Supabase only). Field must exist for AuthManager.
             buildConfigField("String", "SUPABASE_FALLBACK_URL", "\"${localProperties.getProperty("SUPABASE_FALLBACK_URL", "")}\"")
@@ -323,6 +362,8 @@ android {
                 "proguard-rules.pro"
             )
             buildConfigField("boolean", "IS_DEBUG_BUILD", "true")
+            // KevBox: initWith(release) would turn the updater on; benchmark keeps it off as before.
+            buildConfigField("boolean", "UPDATER_ENABLED", "false")
             buildConfigField("String", "SENTRY_ENVIRONMENT", buildConfigString("benchmark"))
             applicationIdSuffix = ".debug"
             matchingFallbacks += "release"
@@ -396,6 +437,12 @@ androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         val isPlaystore = variant.productFlavors.any { it.second == "playstore" }
         variant.applicationId.set(if (isPlaystore) "com.nuvio.appdebug" else "tv.kevbox.debug")
+        // KevBox: -PupdaterTestVersionCode sets the debug versionCode here, per output, so
+        // BuildConfig.VERSION_CODE (which the updater compares against) follows it too.
+        // defaultConfig stays untouched, so release and benchmark keep their own code.
+        updaterTestVersionCode?.let { code ->
+            variant.outputs.forEach { output -> output.versionCode.set(code) }
+        }
     }
 }
 

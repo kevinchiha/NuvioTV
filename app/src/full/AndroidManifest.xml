@@ -2,6 +2,9 @@
 <!-- KevBox full flavour only: the self-hosted updater lives in src/full. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Lets the updater install a KevBox TV update without the confirm screen (Android 12+). -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
     <application>
         <!-- Result of the updater's PackageInstaller session (APK + compile profile).
              Not exported: only the app's own PendingIntent reaches it. -->

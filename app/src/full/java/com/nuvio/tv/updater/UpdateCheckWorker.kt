@@ -17,11 +17,14 @@ import kotlinx.serialization.encodeToString
 import java.io.File
 
 /**
- * Once-a-day background check. If a newer, non-ignored build exists on a trusted (https +
- * configured-host) URL and the device is on an unmetered network, downloads + SHA-256-verifies
+ * Once-a-day background check. If a newer, non-ignored build exists on a trusted URL (see
+ * [UpdaterBuild.isTrusted]: https on the configured host; a debug build made with
+ * `-PupdaterTestBaseUrl` trusts only that test URL's scheme, host and port) and the device is on
+ * an unmetered network, downloads + SHA-256-verifies
  * the APK and caches its path + metadata so [UpdateViewModel] can offer an instant Install on
  * next app open. No notifications. Pruning runs on every invocation, keeping at most the one
- * APK still worth installing. Logs at decision points so a release smoke test can follow it.
+ * APK still worth installing. A run that ends with a valid pre-download then tries a silent
+ * install. Logs at decision points so a release smoke test can follow it.
  */
 class UpdateCheckWorker(
     appContext: Context,
@@ -29,9 +32,9 @@ class UpdateCheckWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        // Mirror the launch-time gate: never auto-act in debug/benchmark builds. The worker only
-        // does real work in a release build (BuildConfig.IS_DEBUG_BUILD == false).
-        if (BuildConfig.IS_DEBUG_BUILD) return Result.success()
+        // Mirror the launch-time gate: the worker does real work only in a release build, or a
+        // debug build made with -PupdaterTestBaseUrl. Benchmark and plain debug builds stay off.
+        if (!UpdaterBuild.enabled) return Result.success()
 
         // The daily periodic job and the one-time startup kick can fire concurrently in the same
         // process; serialize so two runs never race on the shared cacheDir/updates files (the
@@ -68,7 +71,7 @@ class UpdateCheckWorker(
         var keepName: String? =
             if (targetIsUpgrade && alreadyCached && cachedPath != null) File(cachedPath).name else null
 
-        val trusted = UpdateDownloadDecision.isTrustedAssetUrl(update.assetUrl, BuildConfig.UPDATE_BASE_URL)
+        val trusted = UpdaterBuild.isTrusted(update.assetUrl)
         if (!trusted) Log.w(TAG, "Untrusted asset URL, skipping download: ${update.assetUrl}")
 
         val shouldDownload = trusted && UpdateDownloadDecision.shouldDownload(
@@ -100,7 +103,7 @@ class UpdateCheckWorker(
             // The compile profile is optional; without it the install still works, just slower
             // on first launch. Install time fetches it again if this attempt fails.
             val profile = ProfileFetcher.fetch(downloader, update, file) { url ->
-                UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+                UpdaterBuild.isTrusted(url)
             }
 
             prefs.setPredownload(file.absolutePath, UpdateJson.json.encodeToString(update))
@@ -119,13 +122,13 @@ class UpdateCheckWorker(
         }
 
         pruneStale(dir, keepName)
-        return Result.success()
-    }
 
-    private fun isUnmetered(context: Context): Boolean {
-        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        // A valid pre-download for this manifest, downloaded now or already cached (AC-5). The
+        // attempt checks everything again and takes its own lock, so it never waits on this one.
+        if (keepName != null) {
+            SilentInstall.attempt(applicationContext, kotlin.Result.success(update), SilentTrigger.DAILY_CHECK)
+        }
+        return Result.success()
     }
 
     /**
@@ -148,5 +151,15 @@ class UpdateCheckWorker(
         // Process-wide lock so the periodic job and the one-time kick can't run the check
         // concurrently and race on the shared cache files.
         private val runMutex = Mutex()
+
+        /**
+         * Whether the active network is unmetered, the only kind the worker downloads on. Also
+         * read by the app-open prompt hold (AC-15).
+         */
+        internal fun isUnmetered(context: Context): Boolean {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
     }
 }

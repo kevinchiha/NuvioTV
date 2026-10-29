@@ -1,6 +1,8 @@
 package com.nuvio.tv.updater
 
 import android.content.Context
+import android.os.Build
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nuvio.tv.BuildConfig
@@ -104,6 +106,33 @@ class UpdateViewModel @Inject constructor(
                 return@launch
             }
 
+            // On Android 12+ the app-open prompt stays hidden while a silent install still owns
+            // the version (AC-15). Only the dialog changes: About still shows the version and an
+            // instant Install. The About check (force = true) always shows the prompt. The hold
+            // reads the live manifest only: when the fetch failed, decision.update is the cached
+            // one, and no silent attempt can run without the live manifest.
+            var showDialog = decision.showDialog
+            if (!force && showDialog) {
+                val silentState = updatePreferences.silentInstallState.first()
+                val held = SilentPromptHold.holdsPrompt(
+                    sdkInt = Build.VERSION.SDK_INT,
+                    canRequestInstalls = ApkInstaller.canRequestPackageInstalls(context),
+                    liveUpdate = live.getOrNull(),
+                    silentState = silentState,
+                    nowMs = System.currentTimeMillis(),
+                    // installableApkPath is set only for a cached file of decision.update's versionCode.
+                    predownloadReady = decision.installableApkPath != null,
+                    unmeteredNetwork = UpdateCheckWorker.isUnmetered(context),
+                )
+                if (held) {
+                    showDialog = false
+                    Log.i(
+                        SILENT_LOG_TAG,
+                        "App-open prompt held for versionCode ${decision.update.versionCode} (silent install owns it)",
+                    )
+                }
+            }
+
             _uiState.update {
                 it.copy(
                     isChecking = false,
@@ -111,7 +140,7 @@ class UpdateViewModel @Inject constructor(
                     isUpdateAvailable = decision.isUpdateAvailable,
                     downloadedApkPath = decision.installableApkPath,
                     downloadProgress = if (decision.installableApkPath != null) 1f else null,
-                    showDialog = decision.showDialog,
+                    showDialog = showDialog,
                     showNoUpdateToastHint = showNoUpdateFeedback && !decision.isUpdateAvailable,
                     errorMessage = null,
                 )
@@ -201,7 +230,7 @@ class UpdateViewModel @Inject constructor(
                     // Install step finds it ready. Optional: on failure Install tries once more.
                     withContext(Dispatchers.IO) {
                         ProfileFetcher.fetch(apkDownloader, update, file) { url ->
-                            UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
+                            UpdaterBuild.isTrusted(url)
                         }
                     }
 
@@ -252,18 +281,24 @@ class UpdateViewModel @Inject constructor(
         if (installJob?.isActive == true) return
         val update = _uiState.value.update
         installJob = viewModelScope.launch(Dispatchers.IO) {
-            // The compile profile is optional: any failure here installs without it.
-            val profile = update?.let {
-                ProfileFetcher.fetch(apkDownloader, it, apkFile) { url ->
-                    UpdateDownloadDecision.isTrustedAssetUrl(url, BuildConfig.UPDATE_BASE_URL)
-                }
-            }
-            runCatching { ApkInstaller.launchInstall(context, apkFile, profile) }
-                .onFailure { e ->
-                    _uiState.update {
-                        it.copy(errorMessage = e.message ?: context.getString(R.string.update_error_apk_missing))
+            // No silent install may start while this job copies its session (AC-10).
+            SilentInstallGuard.memberInstallStarted()
+            try {
+                // The compile profile is optional: any failure here installs without it.
+                val profile = update?.let {
+                    ProfileFetcher.fetch(apkDownloader, it, apkFile) { url ->
+                        UpdaterBuild.isTrusted(url)
                     }
                 }
+                runCatching { ApkInstaller.launchInstall(context, apkFile, profile) }
+                    .onFailure { e ->
+                        _uiState.update {
+                            it.copy(errorMessage = e.message ?: context.getString(R.string.update_error_apk_missing))
+                        }
+                    }
+            } finally {
+                SilentInstallGuard.memberInstallFinished()
+            }
         }
     }
 

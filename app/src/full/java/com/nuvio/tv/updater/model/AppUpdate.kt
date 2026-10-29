@@ -3,6 +3,7 @@ package com.nuvio.tv.updater.model
 import androidx.annotation.Keep
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * Self-hosted update manifest published to `${UPDATE_BASE_URL}/version.json`.
@@ -32,7 +33,10 @@ data class UpdateManifest(
     @SerialName("notes") val notes: String = "",
     // Install-time compile profiles (.dm files), one per Android API range. Absent from
     // manifests written before 1.2.0-beta.7.1, hence the default.
-    @SerialName("profiles") val profiles: List<ProfileAsset> = emptyList()
+    @SerialName("profiles") val profiles: List<ProfileAsset> = emptyList(),
+    // Optional silent-install block, {"after": <epoch ms>, "earlyUsers": [...]}. Kept as a raw
+    // element so a malformed block cannot fail the whole manifest; SilentBlock.parse reads it.
+    @SerialName("silent") val silent: JsonElement? = null
 )
 
 /**
@@ -72,5 +76,9 @@ data class AppUpdate(
     // The profile picked for this device's Android version, or null. Defaults keep cached
     // JSON saved by older builds decodable.
     val profileUrl: String? = null,
-    val profileSha256: String? = null
+    val profileSha256: String? = null,
+    // The manifest's silent-install block, flattened. Null / empty when the manifest has no
+    // valid block; the defaults also keep cached JSON from older builds decodable.
+    val silentAfterMs: Long? = null,
+    val silentEarlyUsers: List<String> = emptyList()
 )

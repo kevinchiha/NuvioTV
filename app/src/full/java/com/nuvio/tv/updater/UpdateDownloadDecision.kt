@@ -39,12 +39,34 @@ object UpdateDownloadDecision {
         return allNames.filter { it != keepName && it != keepProfile }
     }
 
-    /** Only download an asset served over https from the same host as [baseUrl]. */
-    fun isTrustedAssetUrl(assetUrl: String, baseUrl: String): Boolean {
+    /**
+     * Only download an asset served over https from the same host as [baseUrl]. When
+     * [testBaseUrl] is set (a debug build made with `-PupdaterTestBaseUrl`, whose [baseUrl] is
+     * that same URL), only an asset with exactly the test URL's scheme, host and port is trusted:
+     * an https test URL never makes plain http trusted.
+     */
+    fun isTrustedAssetUrl(assetUrl: String, baseUrl: String, testBaseUrl: String = ""): Boolean {
         val asset = runCatching { URI(assetUrl) }.getOrNull() ?: return false
-        if (!"https".equals(asset.scheme, ignoreCase = true)) return false
         val assetHost = asset.host ?: return false
-        val baseHost = runCatching { URI(baseUrl) }.getOrNull()?.host ?: return false
-        return assetHost.equals(baseHost, ignoreCase = true)
+        if (testBaseUrl.isBlank()) {
+            if (!"https".equals(asset.scheme, ignoreCase = true)) return false
+            val baseHost = runCatching { URI(baseUrl) }.getOrNull()?.host ?: return false
+            return assetHost.equals(baseHost, ignoreCase = true)
+        }
+        val test = runCatching { URI(testBaseUrl.trim()) }.getOrNull() ?: return false
+        val testHost = test.host ?: return false
+        val testPort = effectivePort(test) ?: return false
+        return asset.scheme != null &&
+            asset.scheme.equals(test.scheme, ignoreCase = true) &&
+            assetHost.equals(testHost, ignoreCase = true) &&
+            effectivePort(asset) == testPort
+    }
+
+    /** The URI's port, with `-1` read as the scheme default (80 for http, 443 for https). */
+    private fun effectivePort(uri: URI): Int? = when {
+        uri.port != -1 -> uri.port
+        "http".equals(uri.scheme, ignoreCase = true) -> 80
+        "https".equals(uri.scheme, ignoreCase = true) -> 443
+        else -> null
     }
 }
