@@ -426,6 +426,7 @@ open class MainActivity : ComponentActivity() {
         val launchSeason = intent?.getIntExtra("season", -1)?.takeIf { it >= 0 }
         val launchEpisode = intent?.getIntExtra("episode", -1)?.takeIf { it >= 0 }
         val launchEpisodeTitle = intent?.getStringExtra("episodeTitle")
+        val launchAddonBaseUrl = intent?.getStringExtra("addonBaseUrl")
         captureDeepLinkIntent(intent)
 
         setContent {
@@ -1072,7 +1073,8 @@ open class MainActivity : ComponentActivity() {
                                 navController.navigate(
                                     Screen.Detail.createRoute(
                                         itemId = launchContentId,
-                                        itemType = launchContentType
+                                        itemType = launchContentType,
+                                        addonBaseUrl = launchAddonBaseUrl
                                     )
                                 )
                             }
@@ -1113,7 +1115,8 @@ open class MainActivity : ComponentActivity() {
                             navController.navigate(
                                 Screen.Detail.createRoute(
                                     itemId = contentId,
-                                    itemType = contentType
+                                    itemType = contentType,
+                                    addonBaseUrl = intent.getStringExtra("addonBaseUrl")
                                 )
                             )
                         }
@@ -1474,7 +1477,8 @@ open class MainActivity : ComponentActivity() {
     private fun captureLaunchIntent(intent: Intent?) {
         val contentId = intent?.getStringExtra("contentId") ?: return
         val launchMode = intent.getStringExtra("launchMode") ?: return
-        if (launchMode != "stream") return
+        // "detail" comes from the Library launcher row.
+        if (launchMode != "stream" && launchMode != "detail") return
         pendingLaunchIntent.value = intent
     }
 

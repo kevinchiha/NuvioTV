@@ -11,7 +11,9 @@ import com.nuvio.tv.data.local.CachedNextUpItem
 import com.nuvio.tv.data.local.ContinueWatchingEnrichmentCache
 import com.nuvio.tv.data.local.LayoutPreferenceDataStore
 import com.nuvio.tv.data.local.TraktSettingsDataStore
+import com.nuvio.tv.domain.model.LibraryEntry
 import com.nuvio.tv.domain.model.WatchProgress
+import com.nuvio.tv.domain.repository.LibraryRepository
 import com.nuvio.tv.ui.screens.home.ContinueWatchingItem
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -20,18 +22,22 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "TvChannelSync"
 private const val DEBOUNCE_MS = 2_000L
+private const val LIBRARY_CHANNEL_MAX_ITEMS = 30
 
 /**
- * Keeps the Android TV "Continue Watching" preview channel in sync with the app's
- * CW enrichment cache. Uses the same enriched data that the in-app Continue Watching
+ * Keeps the Android TV "Continue Watching" and "Library" preview channels in sync.
+ * Continue Watching follows the app's CW enrichment cache; Library follows
+ * [LibraryRepository.libraryItems]. Continue Watching uses the same enriched data that the in-app Continue Watching
  * section displays, respecting user settings (days cap, show unaired, etc.).
  *
  * Items are sourced from [ContinueWatchingEnrichmentCache] which is populated by the
@@ -48,7 +54,8 @@ class AndroidTvChannelSyncService @Inject constructor(
     private val cwEnrichmentCache: ContinueWatchingEnrichmentCache,
     private val layoutPreferenceDataStore: LayoutPreferenceDataStore,
     private val traktSettingsDataStore: TraktSettingsDataStore,
-    private val tvRecommendationManager: TvRecommendationManager
+    private val tvRecommendationManager: TvRecommendationManager,
+    private val libraryRepository: LibraryRepository
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -100,7 +107,27 @@ class AndroidTvChannelSyncService @Inject constructor(
                     reconcileFromCache(settings)
                 }
         }
+
+        // The Library row follows the library directly. It changes only on user actions, so
+        // unlike Continue Watching there is no churn to hold back while the app is in front.
+        scope.launch {
+            libraryRepository.libraryItems
+                .map(::buildLibraryChannelItems)
+                .distinctUntilChanged()
+                .debounce(DEBOUNCE_MS)
+                .collect { items ->
+                    Log.d(TAG, "Reconciling library channel: ${items.size} items")
+                    manager.reconcileLibrary(items)
+                }
+        }
     }
+
+    /** Newest saved first (the Library screen's default order), one card per title. */
+    private fun buildLibraryChannelItems(items: List<LibraryEntry>): List<LibraryEntry> =
+        items
+            .distinctBy { it.type to it.id }
+            .sortedByDescending { it.listedAt }
+            .take(LIBRARY_CHANNEL_MAX_ITEMS)
 
     /**
      * Reads the CW enrichment cache and reconciles the launcher channel.

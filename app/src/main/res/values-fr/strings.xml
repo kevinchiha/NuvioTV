@@ -2115,6 +2115,7 @@
     <string name="settings_experience">Expérience</string>
     <string name="profile_custom_avatar_web_panel_note">Les URL d’avatar personnalisé peuvent être configurées depuis le panneau web Nuvio.</string>
     <string name="tv_channel_continue_watching">Continuer à regarder</string>
+    <string name="tv_channel_library">Bibliothèque</string>
 
     <!-- Repli titre catalogue voir tout -->
     <string name="catalog_see_all_title_fallback">Catalogue</string>

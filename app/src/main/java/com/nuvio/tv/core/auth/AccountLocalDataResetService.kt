@@ -28,6 +28,8 @@ class AccountLocalDataResetService @Inject constructor(
     suspend fun clearAfterSignOut() = withContext(Dispatchers.IO) {
         runCatching { androidTvChannelManager.clearAll() }
             .onFailure { Log.w(ACCOUNT_RESET_TAG, "Failed to clear Android TV channel data", it) }
+        runCatching { androidTvChannelManager.clearLibrary() }
+            .onFailure { Log.w(ACCOUNT_RESET_TAG, "Failed to clear Android TV library channel", it) }
         runCatching { profileDataStoreFactory.clearProfileScopedData() }
             .onFailure { Log.w(ACCOUNT_RESET_TAG, "Failed to clear profile-scoped data", it) }
         runCatching { profileDataStore.clearAll() }

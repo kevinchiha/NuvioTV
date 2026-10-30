@@ -8,16 +8,22 @@ import android.database.Cursor
 import android.net.Uri
 import android.media.tv.TvContract
 import androidx.tvprovider.media.tv.TvContractCompat
+import com.nuvio.tv.domain.model.LibraryEntry
 import com.nuvio.tv.domain.model.WatchProgress
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import android.util.Log
 import io.mockk.mockkStatic
 import io.mockk.unmockkAll
 import io.mockk.verify
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 
@@ -174,6 +180,88 @@ class AndroidTvChannelManagerTest {
         verify(exactly = 1) { contentResolver.delete(any(), null, null) }
     }
 
+    @Test
+    fun `channel recovery matches each row's provider id exactly`() = runTest {
+        setupLeanback()
+        coEvery { prefs.getChannelId() } returns null
+        coEvery { prefs.getLibraryChannelId() } returns null
+        // Library channel listed first: a prefix match on the package name would take it
+        // for Continue Watching.
+        stubChannelList(listOf("com.nuvio.tv.library" to 7L, "com.nuvio.tv" to 8L))
+
+        assertEquals(8L, manager.ensureChannel())
+        assertEquals(7L, manager.ensureLibraryChannel())
+        coVerify { prefs.setChannelId(8L) }
+        coVerify { prefs.setLibraryChannelId(7L) }
+        verify(exactly = 0) { contentResolver.insert(any(), any()) }
+    }
+
+    @Test
+    fun `library reconcile inserts new items and removes ones no longer saved`() = runTest {
+        setupLeanback()
+        setupLibraryChannelExists()
+        stubProgramQuery(existingRows = mapOf("movie:tt002" to 77L))
+
+        manager.reconcileLibrary(listOf(fakeEntry("tt001", "movie")))
+
+        verify(exactly = 1) { contentResolver.delete(any(), null, null) }
+        verify(exactly = 1) { contentResolver.insert(any(), any()) }
+        coVerify(exactly = 0) { prefs.getChannelId() }
+    }
+
+    @Test
+    fun `library reconcile skips the write when nothing changed`() = runTest {
+        setupLeanback()
+        setupLibraryChannelExists()
+        stubProgramQuery(existingRows = emptyMap())
+        val items = listOf(fakeEntry("tt001", "movie"))
+        manager.reconcileLibrary(items)
+
+        stubProgramQuery(existingRows = mapOf("movie:tt001" to 99L))
+        manager.reconcileLibrary(items)
+
+        verify(exactly = 1) { contentResolver.insert(any(), any()) }
+        verify(exactly = 0) { contentResolver.update(any(), any(), null, null) }
+    }
+
+    @Test
+    fun `clearLibrary empties only the library channel`() = runTest {
+        setupLeanback()
+        coEvery { prefs.getLibraryChannelId() } returns channelId
+        stubProgramQuery(existingRows = mapOf("movie:tt001" to 99L, "series:tt002" to 100L))
+
+        manager.clearLibrary()
+
+        verify(exactly = 2) { contentResolver.delete(any(), null, null) }
+        coVerify(exactly = 0) { prefs.getChannelId() }
+    }
+
+    @Test
+    fun `concurrent ensureChannel calls create a single channel`() = runTest {
+        setupLeanback()
+        var storedId: Long? = null
+        coEvery { prefs.getChannelId() } answers { storedId }
+        coEvery { prefs.setChannelId(any()) } answers { storedId = firstArg() }
+        stubChannelList(emptyList())
+        val channelExists = mockk<Cursor>(relaxed = true) { every { moveToFirst() } returns true }
+        every { contentResolver.query(any(), match { it.size == 1 }, null, null, null) } returns channelExists
+        every { ContentUris.parseId(any()) } returns 5L
+        every { contentResolver.insert(any(), any()) } answers {
+            Thread.sleep(50) // widen the window two unlocked callers would both slip through
+            mockk(relaxed = true)
+        }
+        mockkStatic(TvContractCompat::class)
+        every { TvContractCompat.requestChannelBrowsable(any(), any()) } returns Unit
+
+        val results = listOf(
+            async(Dispatchers.Default) { manager.ensureChannel() },
+            async(Dispatchers.Default) { manager.ensureChannel() }
+        ).awaitAll()
+
+        assertEquals(listOf(5L, 5L), results)
+        verify(exactly = 1) { contentResolver.insert(any(), any()) }
+    }
+
     // --- helpers ---
 
     private fun setupLeanback() {
@@ -207,6 +295,45 @@ class AndroidTvChannelManagerTest {
             contentResolver.query(any(), match { it.size > 1 }, null, null, null)
         } returns cursor
     }
+
+    private fun setupLibraryChannelExists() {
+        coEvery { prefs.getLibraryChannelId() } returns channelId
+        val channelCursor = mockk<Cursor>(relaxed = true) {
+            every { moveToFirst() } returns true
+        }
+        every {
+            contentResolver.query(any(), match { it.size == 1 }, null, null, null)
+        } returns channelCursor
+    }
+
+    private fun stubChannelList(channels: List<Pair<String, Long>>) {
+        every {
+            contentResolver.query(any(), match { it.size == 2 }, null, null, null)
+        } answers {
+            mockk<Cursor>(relaxed = true) {
+                var idx = -1
+                every { moveToNext() } answers { idx++; idx < channels.size }
+                every { getColumnIndex(TvContractCompat.Channels._ID) } returns 0
+                every { getColumnIndex(TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID) } returns 1
+                every { getLong(0) } answers { channels[idx].second }
+                every { getString(1) } answers { channels[idx].first }
+            }
+        }
+    }
+
+    private fun fakeEntry(id: String, type: String) = LibraryEntry(
+        id = id,
+        type = type,
+        name = "Saved Title",
+        poster = "https://example.com/poster.jpg",
+        background = null,
+        logo = null,
+        description = null,
+        releaseInfo = null,
+        imdbRating = null,
+        genres = emptyList(),
+        addonBaseUrl = null
+    )
 
     private fun fakeProgress(contentId: String, contentType: String) = WatchProgress(
         contentId = contentId,

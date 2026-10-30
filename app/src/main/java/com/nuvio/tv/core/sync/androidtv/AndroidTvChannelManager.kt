@@ -13,9 +13,13 @@ import androidx.tvprovider.media.tv.PreviewProgram
 import androidx.tvprovider.media.tv.TvContractCompat
 import com.nuvio.tv.MainActivity
 import com.nuvio.tv.R
+import com.nuvio.tv.domain.model.LibraryEntry
+import com.nuvio.tv.domain.model.PosterShape
 import com.nuvio.tv.domain.model.WatchProgress
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,6 +35,7 @@ class AndroidTvChannelManager @Inject constructor(
     private val prefs: TvChannelPreferences,
 ) {
     private val syncedProgramFingerprints = ConcurrentHashMap<String, ChannelProgramFingerprint>()
+    private val syncedLibraryFingerprints = ConcurrentHashMap<String, LibraryProgramFingerprint>()
 
     private data class ChannelProgramFingerprint(
         val title: String?,
@@ -44,20 +49,77 @@ class AndroidTvChannelManager @Inject constructor(
         val lastEngagementTime: Long
     )
 
+    private data class LibraryProgramFingerprint(
+        val title: String,
+        val poster: String?,
+        val posterShape: PosterShape,
+        val background: String?,
+        val logo: String?,
+        val description: String?,
+        val releaseInfo: String?,
+        val addonBaseUrl: String?,
+        val sortOrder: Int
+    ) {
+        constructor(entry: LibraryEntry, sortOrder: Int) : this(
+            entry.name, entry.poster, entry.posterShape, entry.background, entry.logo,
+            entry.description, entry.releaseInfo, entry.addonBaseUrl, sortOrder
+        )
+    }
+
     fun isSupported(): Boolean = try {
         context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
     } catch (_: Exception) {
         false
     }
 
+    /** One launcher row: where its id is stored and how the provider tells it apart. */
+    private class ChannelSpec(
+        val internalProviderId: String,
+        val displayNameRes: Int,
+        val getStoredId: suspend () -> Long?,
+        val setStoredId: suspend (Long) -> Unit,
+        val clearStoredId: suspend () -> Unit,
+    )
+
+    // The Continue Watching channel keeps the bare package name it has always used, so
+    // existing installs recover their channel. Every other channel gets its own suffix.
+    private val continueWatchingSpec = ChannelSpec(
+        internalProviderId = context.packageName,
+        displayNameRes = R.string.tv_channel_continue_watching,
+        getStoredId = prefs::getChannelId,
+        setStoredId = prefs::setChannelId,
+        clearStoredId = prefs::clearChannelId,
+    )
+
+    private val librarySpec = ChannelSpec(
+        internalProviderId = "${context.packageName}.library",
+        displayNameRes = R.string.tv_channel_library,
+        getStoredId = prefs::getLibraryChannelId,
+        setStoredId = prefs::setLibraryChannelId,
+        clearStoredId = prefs::clearLibraryChannelId,
+    )
+
     /**
-     * Returns the channel id, creating or reusing the channel as needed.
+     * Returns the Continue Watching channel id, creating or reusing the channel as needed.
      * Returns null on non-leanback devices or on failure.
      */
-    suspend fun ensureChannel(): Long? = withContext(Dispatchers.IO) {
+    suspend fun ensureChannel(): Long? = ensureChannel(continueWatchingSpec)
+
+    /** Same as [ensureChannel] for the Library channel. */
+    suspend fun ensureLibraryChannel(): Long? = ensureChannel(librarySpec)
+
+    // Several callers (live observer, background job, app-to-background) can reach
+    // ensureChannel at once; without the lock each may create its own copy of the channel.
+    private val ensureChannelLock = Mutex()
+
+    private suspend fun ensureChannel(spec: ChannelSpec): Long? = withContext(Dispatchers.IO) {
         if (!isSupported()) return@withContext null
-        runCatching {
-            val stored = prefs.getChannelId()
+        ensureChannelLock.withLock { ensureChannelLocked(spec) }
+    }
+
+    private suspend fun ensureChannelLocked(spec: ChannelSpec): Long? {
+        return runCatching {
+            val stored = spec.getStoredId()
             if (stored != null) {
                 val cursor = context.contentResolver.query(
                     TvContractCompat.buildChannelUri(stored),
@@ -66,9 +128,10 @@ class AndroidTvChannelManager @Inject constructor(
                 )
                 cursor?.use { if (it.moveToFirst()) return@runCatching stored }
                 Log.d(TAG, "Stored channel $stored gone; recreating")
-                prefs.clearChannelId()
+                spec.clearStoredId()
             }
 
+            // Exact match: with more than one channel, a prefix match would grab another row.
             val orphan = context.contentResolver.query(
                 TvContractCompat.Channels.CONTENT_URI,
                 arrayOf(
@@ -81,16 +144,15 @@ class AndroidTvChannelManager @Inject constructor(
                 val providerIdx = c.getColumnIndex(TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID)
                 if (idIdx < 0 || providerIdx < 0) return@use null
                 while (c.moveToNext()) {
-                    val providerId = c.getString(providerIdx)
-                    if (providerId != null && providerId.startsWith(context.packageName)) {
+                    if (c.getString(providerIdx) == spec.internalProviderId) {
                         return@use c.getLong(idIdx)
                     }
                 }
                 null
             }
             if (orphan != null) {
-                Log.d(TAG, "Reusing orphaned channel $orphan")
-                prefs.setChannelId(orphan)
+                Log.d(TAG, "Reusing orphaned channel $orphan (${spec.internalProviderId})")
+                spec.setStoredId(orphan)
                 writeChannelLogo(orphan)
                 return@runCatching orphan
             }
@@ -102,9 +164,9 @@ class AndroidTvChannelManager @Inject constructor(
             )
             val channel = Channel.Builder()
                 .setType(TvContractCompat.Channels.TYPE_PREVIEW)
-                .setDisplayName(context.getString(R.string.tv_channel_continue_watching))
+                .setDisplayName(context.getString(spec.displayNameRes))
                 .setAppLinkIntentUri(appLinkUri)
-                .setInternalProviderId(context.packageName)
+                .setInternalProviderId(spec.internalProviderId)
                 .build()
 
             val inserted = context.contentResolver.insert(
@@ -113,10 +175,10 @@ class AndroidTvChannelManager @Inject constructor(
             ) ?: return@runCatching null
 
             val id = ContentUris.parseId(inserted)
-            prefs.setChannelId(id)
+            spec.setStoredId(id)
             writeChannelLogo(id)
             TvContractCompat.requestChannelBrowsable(context, id)
-            Log.d(TAG, "Created channel id=$id")
+            Log.d(TAG, "Created channel id=$id (${spec.internalProviderId})")
             id
         }.onFailure { Log.w(TAG, "ensureChannel failed", it) }.getOrNull()
     }
@@ -229,6 +291,74 @@ class AndroidTvChannelManager @Inject constructor(
             syncedProgramFingerprints.clear()
             Log.d(TAG, "Cleared $deletedCount programs for channel $channelId")
         }.onFailure { Log.w(TAG, "clearAll failed", it) }
+    }
+
+    /**
+     * Syncs [items] to the Library channel, in the order given: upserts present items and
+     * removes rows for items no longer in the library. An empty list leaves an empty row.
+     */
+    suspend fun reconcileLibrary(items: List<LibraryEntry>) = withContext(Dispatchers.IO) {
+        if (!isSupported()) return@withContext
+        runCatching {
+            val channelId = ensureLibraryChannel() ?: return@runCatching
+            val existing = queryExistingPrograms(channelId)
+            val desiredKeys = items.map { libraryKey(it) }.toSet()
+
+            for ((key, rowIds) in existing) {
+                if (key !in desiredKeys) {
+                    rowIds.forEach { rowId ->
+                        context.contentResolver.delete(
+                            TvContractCompat.buildPreviewProgramUri(rowId), null, null
+                        )
+                    }
+                    syncedLibraryFingerprints.remove(key)
+                    Log.d(TAG, "Removed library program key=$key")
+                }
+            }
+
+            items.forEachIndexed { index, entry ->
+                val key = libraryKey(entry)
+                val rowIds = existing[key]
+                // Rewrite only when something visible changed, to avoid waking the launcher.
+                val fingerprint = LibraryProgramFingerprint(entry, index)
+                if (!rowIds.isNullOrEmpty() && syncedLibraryFingerprints[key] == fingerprint) {
+                    return@forEachIndexed
+                }
+                val values = buildLibraryProgramValues(entry, channelId, index, key)
+                if (!rowIds.isNullOrEmpty()) {
+                    context.contentResolver.update(
+                        TvContractCompat.buildPreviewProgramUri(rowIds.first()), values, null, null
+                    )
+                    rowIds.drop(1).forEach { extraRowId ->
+                        context.contentResolver.delete(
+                            TvContractCompat.buildPreviewProgramUri(extraRowId), null, null
+                        )
+                    }
+                } else {
+                    context.contentResolver.insert(
+                        TvContractCompat.PreviewPrograms.CONTENT_URI, values
+                    )
+                }
+                syncedLibraryFingerprints[key] = fingerprint
+                Log.d(TAG, "${if (!rowIds.isNullOrEmpty()) "Updated" else "Inserted"} library program key=$key")
+            }
+        }.onFailure { Log.w(TAG, "reconcileLibrary failed", it) }
+    }
+
+    /** Removes all preview programs from the Library channel (used on sign-out). */
+    suspend fun clearLibrary() = withContext(Dispatchers.IO) {
+        if (!isSupported()) return@withContext
+        runCatching {
+            val channelId = prefs.getLibraryChannelId() ?: return@runCatching
+            val rowIds = queryExistingPrograms(channelId).values.flatten()
+            rowIds.forEach { rowId ->
+                context.contentResolver.delete(
+                    TvContractCompat.buildPreviewProgramUri(rowId), null, null
+                )
+            }
+            syncedLibraryFingerprints.clear()
+            Log.d(TAG, "Cleared ${rowIds.size} programs for library channel $channelId")
+        }.onFailure { Log.w(TAG, "clearLibrary failed", it) }
     }
 
     // ---
@@ -352,6 +482,63 @@ class AndroidTvChannelManager @Inject constructor(
         }
     }
 
+    private fun buildLibraryProgramValues(
+        entry: LibraryEntry,
+        channelId: Long,
+        sortOrder: Int,
+        key: String
+    ): ContentValues {
+        // No videoId/name extras: MainActivity opens the details page instead of the stream picker.
+        val intentUri = Uri.parse(
+            Intent(context, MainActivity::class.java).apply {
+                action = Intent.ACTION_VIEW
+                putExtra("contentId", entry.id)
+                putExtra("contentType", entry.type)
+                entry.addonBaseUrl?.let { putExtra("addonBaseUrl", it) }
+                putExtra("launchMode", "detail")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }.toUri(Intent.URI_INTENT_SCHEME)
+        )
+
+        val type = if (entry.type.equals("movie", ignoreCase = true))
+            TvContractCompat.PreviewPrograms.TYPE_MOVIE
+        else
+            TvContractCompat.PreviewPrograms.TYPE_TV_SERIES
+
+        val builder = PreviewProgram.Builder()
+            .setChannelId(channelId)
+            .setType(type)
+            .setTitle(entry.name)
+            .setIntentUri(intentUri)
+            .setInternalProviderId(key)
+            .setWeight(Int.MAX_VALUE - sortOrder)
+
+        val (imageUri, aspectRatio) = when {
+            !entry.poster.isNullOrBlank() -> entry.poster to when (entry.posterShape) {
+                PosterShape.LANDSCAPE -> TvContractCompat.PreviewPrograms.ASPECT_RATIO_16_9
+                PosterShape.SQUARE -> TvContractCompat.PreviewPrograms.ASPECT_RATIO_1_1
+                PosterShape.POSTER -> TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3
+            }
+            !entry.background.isNullOrBlank() ->
+                entry.background to TvContractCompat.PreviewPrograms.ASPECT_RATIO_16_9
+            else -> null to null
+        }
+        imageUri?.let { builder.setPosterArtUri(Uri.parse(it)).setPosterArtAspectRatio(aspectRatio!!) }
+        entry.background?.takeIf { it.isNotBlank() }?.let { builder.setThumbnailUri(Uri.parse(it)) }
+        entry.logo?.takeIf { it.isNotBlank() }?.let { builder.setLogoUri(Uri.parse(it)) }
+        entry.description?.takeIf { it.isNotBlank() }?.let { builder.setDescription(it) }
+        entry.releaseInfo?.takeIf { it.isNotBlank() }?.let { builder.setReleaseDate(it) }
+
+        return builder.build().toContentValues().also {
+            // Clear optional columns so an UPDATE doesn't keep values from an older version.
+            if (imageUri == null) it.putNull(TvContractCompat.PreviewPrograms.COLUMN_POSTER_ART_URI)
+            if (entry.background.isNullOrBlank()) it.putNull(TvContractCompat.PreviewPrograms.COLUMN_THUMBNAIL_URI)
+            if (entry.logo.isNullOrBlank()) it.putNull(TvContractCompat.PreviewPrograms.COLUMN_LOGO_URI)
+            if (entry.description.isNullOrBlank()) it.putNull(TvContractCompat.PreviewPrograms.COLUMN_SHORT_DESCRIPTION)
+            if (entry.releaseInfo.isNullOrBlank()) it.putNull(TvContractCompat.PreviewPrograms.COLUMN_RELEASE_DATE)
+        }
+    }
+
     private fun writeChannelLogo(channelId: Long) {
         runCatching {
             val bitmap = BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher)
@@ -371,3 +558,5 @@ class AndroidTvChannelManager @Inject constructor(
         else
             progress.contentId
 }
+
+private fun libraryKey(entry: LibraryEntry): String = "${entry.type}:${entry.id}"
