@@ -166,7 +166,7 @@ class AndroidTvChannelManagerTest {
             every { getString(1) } answers { rows[idx].first }
         }
         every {
-            contentResolver.query(any(), match { it.size > 1 }, null, null, null)
+            contentResolver.query(any(), match { TvContractCompat.PreviewPrograms.COLUMN_CHANNEL_ID in it }, null, null, null)
         } returns cursor
         every { contentResolver.update(any(), any(), null, null) } returns 1
         every { contentResolver.delete(any(), null, null) } returns 1
@@ -187,7 +187,7 @@ class AndroidTvChannelManagerTest {
         coEvery { prefs.getLibraryChannelId() } returns null
         // Library channel listed first: a prefix match on the package name would take it
         // for Continue Watching.
-        stubChannelList(listOf("com.nuvio.tv.library" to 7L, "com.nuvio.tv" to 8L))
+        stubChannelList(listOf(FakeChannel(7L, "com.nuvio.tv.library"), FakeChannel(8L, "com.nuvio.tv")))
 
         assertEquals(8L, manager.ensureChannel())
         assertEquals(7L, manager.ensureLibraryChannel())
@@ -206,7 +206,7 @@ class AndroidTvChannelManagerTest {
 
         verify(exactly = 1) { contentResolver.delete(any(), null, null) }
         verify(exactly = 1) { contentResolver.insert(any(), any()) }
-        coVerify(exactly = 0) { prefs.getChannelId() }
+        coVerify(exactly = 0) { prefs.setChannelId(any()) }
     }
 
     @Test
@@ -242,12 +242,12 @@ class AndroidTvChannelManagerTest {
         var storedId: Long? = null
         coEvery { prefs.getChannelId() } answers { storedId }
         coEvery { prefs.setChannelId(any()) } answers { storedId = firstArg() }
-        stubChannelList(emptyList())
-        val channelExists = mockk<Cursor>(relaxed = true) { every { moveToFirst() } returns true }
-        every { contentResolver.query(any(), match { it.size == 1 }, null, null, null) } returns channelExists
+        val channels = mutableListOf<FakeChannel>()
+        stubChannelList { channels.toList() }
         every { ContentUris.parseId(any()) } returns 5L
         every { contentResolver.insert(any(), any()) } answers {
             Thread.sleep(50) // widen the window two unlocked callers would both slip through
+            channels += FakeChannel(5L, "com.nuvio.tv")
             mockk(relaxed = true)
         }
         mockkStatic(TvContractCompat::class)
@@ -262,7 +262,100 @@ class AndroidTvChannelManagerTest {
         verify(exactly = 1) { contentResolver.insert(any(), any()) }
     }
 
+    @Test
+    fun `ensuring a channel deletes every other preview channel the app owns`() = runTest {
+        setupLeanback()
+        coEvery { prefs.getChannelId() } returns 8L
+        coEvery { prefs.getLibraryChannelId() } returns 7L
+        stubChannelList(
+            listOf(
+                FakeChannel(14L, null),                          // created before channels were tagged
+                FakeChannel(8L, "com.nuvio.tv"),                 // Continue Watching in use
+                FakeChannel(15L, "com.nuvio.tv"),                // left behind by a creation race
+                FakeChannel(7L, "com.nuvio.tv.library"),         // Library in use
+                FakeChannel(16L, "old.provider.id"),
+                FakeChannel(20L, "com.other.app", packageName = "com.other.app"),
+                FakeChannel(21L, null, type = TvContractCompat.Channels.TYPE_OTHER),
+            )
+        )
+
+        val uri14 = channelUri(14L)
+        val uri15 = channelUri(15L)
+        val uri16 = channelUri(16L)
+
+        assertEquals(8L, manager.ensureChannel())
+
+        verify(exactly = 1) { contentResolver.delete(uri14, null, null) }
+        verify(exactly = 1) { contentResolver.delete(uri15, null, null) }
+        verify(exactly = 1) { contentResolver.delete(uri16, null, null) }
+        verify(exactly = 3) { contentResolver.delete(any(), null, null) }
+        verify(exactly = 0) { contentResolver.insert(any(), any()) }
+    }
+
+    @Test
+    fun `ensuring Continue Watching keeps a Library channel it has not adopted yet`() = runTest {
+        setupLeanback()
+        coEvery { prefs.getChannelId() } returns 8L
+        coEvery { prefs.getLibraryChannelId() } returns null
+        stubChannelList(listOf(FakeChannel(8L, "com.nuvio.tv"), FakeChannel(7L, "com.nuvio.tv.library")))
+
+        assertEquals(8L, manager.ensureChannel())
+
+        verify(exactly = 0) { contentResolver.delete(any(), null, null) }
+    }
+
+    @Test
+    fun `lost stored id adopts an untagged channel and tags it`() = runTest {
+        setupLeanback()
+        coEvery { prefs.getChannelId() } returns null
+        coEvery { prefs.getLibraryChannelId() } returns null
+        stubChannelList(listOf(FakeChannel(14L, null)))
+
+        val uri14 = channelUri(14L)
+
+        assertEquals(14L, manager.ensureChannel())
+
+        coVerify { prefs.setChannelId(14L) }
+        verify(exactly = 1) { contentResolver.update(uri14, any(), null, null) }
+        verify(exactly = 0) { contentResolver.insert(any(), any()) }
+        verify(exactly = 0) { contentResolver.delete(any(), null, null) }
+    }
+
+    @Test
+    fun `lost stored id prefers the tagged channel and deletes the untagged one`() = runTest {
+        setupLeanback()
+        coEvery { prefs.getChannelId() } returns null
+        coEvery { prefs.getLibraryChannelId() } returns null
+        stubChannelList(listOf(FakeChannel(14L, null), FakeChannel(15L, "com.nuvio.tv")))
+
+        val uri14 = channelUri(14L)
+
+        assertEquals(15L, manager.ensureChannel())
+
+        coVerify { prefs.setChannelId(15L) }
+        verify(exactly = 1) { contentResolver.delete(uri14, null, null) }
+        verify(exactly = 0) { contentResolver.update(any(), any(), null, null) }
+    }
+
+    @Test
+    fun `without a channel list the stored id is kept and nothing is deleted`() = runTest {
+        setupLeanback()
+        coEvery { prefs.getChannelId() } returns 8L
+        every {
+            contentResolver.query(any(), match { TvContractCompat.Channels.COLUMN_PACKAGE_NAME in it }, null, null, null)
+        } returns null
+
+        assertEquals(8L, manager.ensureChannel())
+
+        coVerify(exactly = 0) { prefs.clearChannelId() }
+        verify(exactly = 0) { contentResolver.insert(any(), any()) }
+        verify(exactly = 0) { contentResolver.delete(any(), null, null) }
+    }
+
     // --- helpers ---
+
+    // Built outside verify {}: a call made inside it is recorded as a matcher.
+    private fun channelUri(id: Long): Uri = TvContractCompat.buildChannelUri(id)
 
     private fun setupLeanback() {
         every { packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) } returns true
@@ -270,13 +363,7 @@ class AndroidTvChannelManagerTest {
 
     private fun setupChannelExists() {
         coEvery { prefs.getChannelId() } returns channelId
-        val channelCursor = mockk<Cursor>(relaxed = true) {
-            every { moveToFirst() } returns true
-            every { getLong(0) } returns channelId
-        }
-        every {
-            contentResolver.query(any(), match { it.size == 1 }, null, null, null)
-        } returns channelCursor
+        stubChannelList(listOf(FakeChannel(channelId, "com.nuvio.tv")))
     }
 
     private fun stubProgramQuery(existingRows: Map<String, Long>) {
@@ -292,31 +379,40 @@ class AndroidTvChannelManagerTest {
             every { getString(1) } answers { rows[idx].key }
         }
         every {
-            contentResolver.query(any(), match { it.size > 1 }, null, null, null)
+            contentResolver.query(any(), match { TvContractCompat.PreviewPrograms.COLUMN_CHANNEL_ID in it }, null, null, null)
         } returns cursor
     }
 
     private fun setupLibraryChannelExists() {
         coEvery { prefs.getLibraryChannelId() } returns channelId
-        val channelCursor = mockk<Cursor>(relaxed = true) {
-            every { moveToFirst() } returns true
-        }
-        every {
-            contentResolver.query(any(), match { it.size == 1 }, null, null, null)
-        } returns channelCursor
+        stubChannelList(listOf(FakeChannel(channelId, "com.nuvio.tv.library")))
     }
 
-    private fun stubChannelList(channels: List<Pair<String, Long>>) {
+    private data class FakeChannel(
+        val id: Long,
+        val internalProviderId: String?,
+        val packageName: String = "com.nuvio.tv",
+        val type: String = TvContractCompat.Channels.TYPE_PREVIEW,
+    )
+
+    private fun stubChannelList(channels: List<FakeChannel>) = stubChannelList { channels }
+
+    private fun stubChannelList(channels: () -> List<FakeChannel>) {
         every {
-            contentResolver.query(any(), match { it.size == 2 }, null, null, null)
+            contentResolver.query(any(), match { TvContractCompat.Channels.COLUMN_PACKAGE_NAME in it }, null, null, null)
         } answers {
+            val rows = channels()
             mockk<Cursor>(relaxed = true) {
                 var idx = -1
-                every { moveToNext() } answers { idx++; idx < channels.size }
+                every { moveToNext() } answers { idx++; idx < rows.size }
                 every { getColumnIndex(TvContractCompat.Channels._ID) } returns 0
                 every { getColumnIndex(TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID) } returns 1
-                every { getLong(0) } answers { channels[idx].second }
-                every { getString(1) } answers { channels[idx].first }
+                every { getColumnIndex(TvContractCompat.Channels.COLUMN_PACKAGE_NAME) } returns 2
+                every { getColumnIndex(TvContractCompat.Channels.COLUMN_TYPE) } returns 3
+                every { getLong(0) } answers { rows[idx].id }
+                every { getString(1) } answers { rows[idx].internalProviderId }
+                every { getString(2) } answers { rows[idx].packageName }
+                every { getString(3) } answers { rows[idx].type }
             }
         }
     }

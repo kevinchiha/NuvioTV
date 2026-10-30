@@ -120,67 +120,144 @@ class AndroidTvChannelManager @Inject constructor(
     private suspend fun ensureChannelLocked(spec: ChannelSpec): Long? {
         return runCatching {
             val stored = spec.getStoredId()
-            if (stored != null) {
-                val cursor = context.contentResolver.query(
-                    TvContractCompat.buildChannelUri(stored),
-                    arrayOf(TvContractCompat.Channels._ID),
-                    null, null, null
-                )
-                cursor?.use { if (it.moveToFirst()) return@runCatching stored }
+            // Without a channel list, trust the stored id and leave cleanup for a later run.
+            val channels = queryOwnChannels()
+                ?: return@runCatching stored ?: createChannel(spec)
+            val claims = claimChannels(channels)
+            val claimed = claims[spec]
+            if (stored != null && stored != claimed) {
                 Log.d(TAG, "Stored channel $stored gone; recreating")
                 spec.clearStoredId()
             }
 
-            // Exact match: with more than one channel, a prefix match would grab another row.
-            val orphan = context.contentResolver.query(
-                TvContractCompat.Channels.CONTENT_URI,
-                arrayOf(
-                    TvContractCompat.Channels._ID,
-                    TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID
-                ),
-                null, null, null
-            )?.use { c ->
-                val idIdx = c.getColumnIndex(TvContractCompat.Channels._ID)
-                val providerIdx = c.getColumnIndex(TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID)
-                if (idIdx < 0 || providerIdx < 0) return@use null
-                while (c.moveToNext()) {
-                    if (c.getString(providerIdx) == spec.internalProviderId) {
-                        return@use c.getLong(idIdx)
-                    }
+            val id = if (claimed != null) {
+                if (claimed != stored) {
+                    Log.d(TAG, "Reusing orphaned channel $claimed (${spec.internalProviderId})")
+                    spec.setStoredId(claimed)
+                    writeChannelLogo(claimed)
                 }
-                null
+                // Channels from older builds have no provider id; tag them so a lost stored
+                // id can still find them.
+                if (channels.first { it.id == claimed }.internalProviderId != spec.internalProviderId) {
+                    tagChannel(claimed, spec.internalProviderId)
+                }
+                claimed
+            } else {
+                createChannel(spec) ?: return@runCatching null
             }
-            if (orphan != null) {
-                Log.d(TAG, "Reusing orphaned channel $orphan (${spec.internalProviderId})")
-                spec.setStoredId(orphan)
-                writeChannelLogo(orphan)
-                return@runCatching orphan
-            }
 
-            val appLinkUri = Uri.parse(
-                Intent(context, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }.toUri(Intent.URI_INTENT_SCHEME)
-            )
-            val channel = Channel.Builder()
-                .setType(TvContractCompat.Channels.TYPE_PREVIEW)
-                .setDisplayName(context.getString(spec.displayNameRes))
-                .setAppLinkIntentUri(appLinkUri)
-                .setInternalProviderId(spec.internalProviderId)
-                .build()
-
-            val inserted = context.contentResolver.insert(
-                TvContractCompat.Channels.CONTENT_URI,
-                channel.toContentValues()
-            ) ?: return@runCatching null
-
-            val id = ContentUris.parseId(inserted)
-            spec.setStoredId(id)
-            writeChannelLogo(id)
-            TvContractCompat.requestChannelBrowsable(context, id)
-            Log.d(TAG, "Created channel id=$id (${spec.internalProviderId})")
+            deleteStrayChannels(channels, keep = claims.values.toSet() + id)
             id
         }.onFailure { Log.w(TAG, "ensureChannel failed", it) }.getOrNull()
+    }
+
+    /** A channel row as the TV provider lists it; the provider only lists our own. */
+    private class ProviderChannel(
+        val id: Long,
+        val internalProviderId: String?,
+        val packageName: String?,
+        val type: String?,
+    )
+
+    /** Null when the provider gives no usable list. */
+    private fun queryOwnChannels(): List<ProviderChannel>? {
+        val projection = arrayOf(
+            TvContractCompat.Channels._ID,
+            TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID,
+            TvContractCompat.Channels.COLUMN_PACKAGE_NAME,
+            TvContractCompat.Channels.COLUMN_TYPE
+        )
+        return context.contentResolver.query(
+            TvContractCompat.Channels.CONTENT_URI, projection, null, null, null
+        )?.use { c ->
+            val idIdx = c.getColumnIndex(TvContractCompat.Channels._ID)
+            val providerIdx = c.getColumnIndex(TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID)
+            val packageIdx = c.getColumnIndex(TvContractCompat.Channels.COLUMN_PACKAGE_NAME)
+            val typeIdx = c.getColumnIndex(TvContractCompat.Channels.COLUMN_TYPE)
+            if (idIdx < 0 || providerIdx < 0) return@use null
+            val result = mutableListOf<ProviderChannel>()
+            while (c.moveToNext()) {
+                result += ProviderChannel(
+                    id = c.getLong(idIdx),
+                    internalProviderId = c.getString(providerIdx),
+                    packageName = if (packageIdx >= 0) c.getString(packageIdx) else null,
+                    type = if (typeIdx >= 0) c.getString(typeIdx) else null,
+                )
+            }
+            result
+        }
+    }
+
+    /**
+     * Picks the channel each row should use, without creating anything: the stored id while
+     * it exists, else a channel with the row's provider id (exact match: a prefix match would
+     * grab another row). Continue Watching also takes an untagged channel, which older builds
+     * created. Every row is claimed, not just the one being ensured, so a cleanup run for one
+     * row never deletes the other.
+     */
+    private suspend fun claimChannels(channels: List<ProviderChannel>): Map<ChannelSpec, Long> {
+        val claims = mutableMapOf<ChannelSpec, Long>()
+        val free = { channel: ProviderChannel -> channel.id !in claims.values }
+        for (spec in listOf(continueWatchingSpec, librarySpec)) {
+            val stored = spec.getStoredId()
+            val pick = channels.firstOrNull { it.id == stored && free(it) }
+                ?: channels.firstOrNull { it.internalProviderId == spec.internalProviderId && free(it) }
+            if (pick != null) claims[spec] = pick.id
+        }
+        if (continueWatchingSpec !in claims) {
+            channels.firstOrNull { it.internalProviderId.isNullOrBlank() && free(it) }
+                ?.let { claims[continueWatchingSpec] = it.id }
+        }
+        return claims
+    }
+
+    private suspend fun createChannel(spec: ChannelSpec): Long? {
+        val appLinkUri = Uri.parse(
+            Intent(context, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }.toUri(Intent.URI_INTENT_SCHEME)
+        )
+        val channel = Channel.Builder()
+            .setType(TvContractCompat.Channels.TYPE_PREVIEW)
+            .setDisplayName(context.getString(spec.displayNameRes))
+            .setAppLinkIntentUri(appLinkUri)
+            .setInternalProviderId(spec.internalProviderId)
+            .build()
+
+        val inserted = context.contentResolver.insert(
+            TvContractCompat.Channels.CONTENT_URI,
+            channel.toContentValues()
+        ) ?: return null
+
+        val id = ContentUris.parseId(inserted)
+        spec.setStoredId(id)
+        writeChannelLogo(id)
+        TvContractCompat.requestChannelBrowsable(context, id)
+        Log.d(TAG, "Created channel id=$id (${spec.internalProviderId})")
+        return id
+    }
+
+    private fun tagChannel(channelId: Long, internalProviderId: String) {
+        val values = ContentValues().apply {
+            put(TvContractCompat.Channels.COLUMN_INTERNAL_PROVIDER_ID, internalProviderId)
+        }
+        context.contentResolver.update(TvContractCompat.buildChannelUri(channelId), values, null, null)
+        Log.d(TAG, "Tagged channel $channelId as $internalProviderId")
+    }
+
+    /**
+     * Deletes our preview channels that no row uses: copies left by a creation race, or by an
+     * older build after the stored id was lost. They would otherwise sit on the home screen
+     * with stale items. The provider deletes their programs with them.
+     */
+    private fun deleteStrayChannels(channels: List<ProviderChannel>, keep: Set<Long>) {
+        channels
+            .filter { it.id !in keep }
+            .filter { it.packageName == context.packageName && it.type == TvContractCompat.Channels.TYPE_PREVIEW }
+            .forEach { channel ->
+                context.contentResolver.delete(TvContractCompat.buildChannelUri(channel.id), null, null)
+                Log.d(TAG, "Deleted stray channel ${channel.id} (${channel.internalProviderId})")
+            }
     }
 
     /**
