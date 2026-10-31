@@ -27,9 +27,9 @@ import com.nuvio.tv.core.sync.androidtv.AndroidTvChannelSyncService
 import com.nuvio.tv.data.local.AddonPreferences
 import com.nuvio.tv.core.network.IPv4FirstDns
 import com.nuvio.tv.core.network.NoDelaySocketFactory
+import com.nuvio.tv.core.network.imageNetworkFetcherFactory
 import com.nuvio.tv.data.local.ImagePerformancePreferences
 import com.nuvio.tv.data.local.SentrySettingsDataStore
-import com.nuvio.tv.data.mediaserver.ServerMatcher
 import com.nuvio.tv.data.mediaserver.ServerUserStateProjection
 import com.nuvio.tv.data.simkl.SimklAnimeIdPreferenceHolder
 import dagger.hilt.android.HiltAndroidApp
@@ -55,7 +55,6 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var imagePerformancePreferences: ImagePerformancePreferences
     @Inject lateinit var simklAnimeIdPreferenceHolder: SimklAnimeIdPreferenceHolder
     @Inject lateinit var serverUserStateProjection: ServerUserStateProjection
-    @Inject lateinit var serverMatcher: ServerMatcher
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -107,7 +106,6 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
             }
         }
         serverUserStateProjection.start()
-        serverMatcher.start()
         // Load locale synchronously so it's available before Activity.attachBaseContext.
         // SharedPreferences reads are fast (cached in memory after first access).
         val tag = getSharedPreferences("app_locale", Context.MODE_PRIVATE)
@@ -154,7 +152,7 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
                 }
                 add(SvgDecoder.Factory())
                 add(
-                    coil3.network.okhttp.OkHttpNetworkFetcherFactory(
+                    imageNetworkFetcherFactory(
                         callFactory = { imageOkHttpClient },
                         cacheStrategy = {
                             StaleWhileRevalidateCacheStrategy(

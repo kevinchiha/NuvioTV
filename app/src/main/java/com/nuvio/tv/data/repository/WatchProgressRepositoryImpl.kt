@@ -145,6 +145,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
 ) : WatchProgressRepository {
     companion object {
         private const val TAG = "WatchProgressRepo"
+        private const val METADATA_MAX_ATTEMPTS = 3
     }
 
     private data class EpisodeMetadata(
@@ -169,6 +170,11 @@ class WatchProgressRepositoryImpl @Inject constructor(
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val hydratedProgressKeys = mutableSetOf<ProfileContentKey>()
+    private data class MetadataAttempt(val count: Int, val lastAttemptEpochMs: Long)
+    private val metadataAttempts = mutableMapOf<ProfileContentKey, MetadataAttempt>()
+    internal var metadataRetryWindowMs = 2_000L
+    internal var metadataClock: () -> Long = System::currentTimeMillis
+    private var lastHydratedProfileId: Int? = null
     private val syncJobs = mutableMapOf<Int, Job>()
     private val syncJobsLock = Any()
     private val remoteProgressWriteDeduplicator = RemoteProgressWriteDeduplicator()
@@ -181,8 +187,9 @@ class WatchProgressRepositoryImpl @Inject constructor(
         replay = 1,
         extraBufferCapacity = 16
     )
-    private val optimisticWatchedMovieAdditions = MutableStateFlow<Set<String>>(emptySet())
-    private val optimisticWatchedMovieRemovals = MutableStateFlow<Set<String>>(emptySet())
+    // Optimistic watched-movie toggles, keyed by the profile that made them.
+    private val optimisticWatchedMovieAdditions = MutableStateFlow<Map<Int, Set<String>>>(emptyMap())
+    private val optimisticWatchedMovieRemovals = MutableStateFlow<Map<Int, Set<String>>>(emptyMap())
     private val metadataMutex = Mutex()
     private val inFlightMetadataKeys = mutableSetOf<ProfileContentKey>()
     private val metadataHydrationLimit = 30
@@ -221,6 +228,21 @@ class WatchProgressRepositoryImpl @Inject constructor(
         }
     }
 
+    private fun canAttemptMetadata(key: ProfileContentKey, now: Long = metadataClock()): Boolean =
+        synchronized(metadataAttempts) {
+            val attempt = metadataAttempts[key] ?: return true
+            if (attempt.count >= METADATA_MAX_ATTEMPTS) return false
+            now - attempt.lastAttemptEpochMs >= (metadataRetryWindowMs * attempt.count)
+        }
+
+    private fun recordMetadataAttempt(key: ProfileContentKey, now: Long = metadataClock()) {
+        synchronized(metadataAttempts) {
+            val current = metadataAttempts[key]
+            val nextCount = (current?.count ?: 0) + 1
+            metadataAttempts[key] = MetadataAttempt(count = nextCount, lastAttemptEpochMs = now)
+        }
+    }
+
     private fun hydrateMetadata(progressList: List<WatchProgress>, profileId: Int) {
         val sorted = progressList.sortedByDescending { it.lastWatched }
         val uniqueByContent = linkedMapOf<String, WatchProgress>()
@@ -235,13 +257,17 @@ class WatchProgressRepositoryImpl @Inject constructor(
             if (contentId.isBlank()) return@forEach
             val key = ProfileContentKey(profileId, contentId)
             if (metadataState.value.containsKey(contentId)) return@forEach
+            if (!canAttemptMetadata(key)) return@forEach
 
             syncScope.launch {
                 val shouldFetch = metadataMutex.withLock {
                     if (profileManager.activeProfileId.value != profileId) return@withLock false
                     if (metadataState.value.containsKey(contentId)) return@withLock false
                     if (inFlightMetadataKeys.contains(key)) return@withLock false
+                    if (synchronized(hydratedProgressKeys) { key in hydratedProgressKeys }) return@withLock false
+                    if (!canAttemptMetadata(key)) return@withLock false
                     inFlightMetadataKeys.add(key)
+                    recordMetadataAttempt(key)
                     true
                 }
                 if (!shouldFetch) return@launch
@@ -252,6 +278,12 @@ class WatchProgressRepositoryImpl @Inject constructor(
                         contentType = progress.contentType
                     ) ?: return@launch
                     if (profileManager.activeProfileId.value != profileId) return@launch
+                    synchronized(hydratedProgressKeys) {
+                        hydratedProgressKeys.add(key)
+                    }
+                    synchronized(metadataAttempts) {
+                        metadataAttempts.remove(key)
+                    }
                     metadataState.update { current ->
                         current + (contentId to metadata)
                     }
@@ -398,9 +430,15 @@ class WatchProgressRepositoryImpl @Inject constructor(
 
     override val allProgress: Flow<List<WatchProgress>>
         get() = profileManager.activeProfileId.flatMapLatest { profileId ->
-            metadataState.value = emptyMap()
-            synchronized(hydratedProgressKeys) {
-                hydratedProgressKeys.removeAll { it.profileId == profileId }
+            if (lastHydratedProfileId != profileId) {
+                lastHydratedProfileId = profileId
+                metadataState.value = emptyMap()
+                synchronized(hydratedProgressKeys) {
+                    hydratedProgressKeys.removeAll { it.profileId == profileId }
+                }
+                synchronized(metadataAttempts) {
+                    metadataAttempts.keys.removeAll { it.profileId == profileId }
+                }
             }
             activeProgressProviderFlow().flatMapLatest { provider ->
                 if (provider != null) {
@@ -420,7 +458,8 @@ class WatchProgressRepositoryImpl @Inject constructor(
                             val key = ProfileContentKey(profileId, progress.contentId)
                             (progress.poster == null || progress.backdrop == null ||
                                 progress.episodeTitle == null) &&
-                                synchronized(hydratedProgressKeys) { key !in hydratedProgressKeys }
+                                synchronized(hydratedProgressKeys) { key !in hydratedProgressKeys } &&
+                                canAttemptMetadata(key)
                         }
                         if (needsMetadata.isNotEmpty()) hydrateMetadata(needsMetadata, profileId)
                     }
@@ -430,7 +469,8 @@ class WatchProgressRepositoryImpl @Inject constructor(
                             val needsArtwork = items.filter { progress ->
                                 val key = ProfileContentKey(profileId, progress.contentId)
                                 progress.poster == null && progress.backdrop == null &&
-                                    synchronized(hydratedProgressKeys) { key !in hydratedProgressKeys }
+                                    synchronized(hydratedProgressKeys) { key !in hydratedProgressKeys } &&
+                                    canAttemptMetadata(key)
                             }
                             if (needsArtwork.isNotEmpty()) {
                                 syncScope.launch { hydrateProgressArtwork(needsArtwork, profileId) }
@@ -655,29 +695,37 @@ class WatchProgressRepositoryImpl @Inject constructor(
             }
         return combine(
             baseFlow,
+            profileManager.activeProfileId,
             optimisticWatchedMovieAdditions,
             optimisticWatchedMovieRemovals
-        ) { base, additions, removals ->
-            (base + additions) - removals
+        ) { base, profileId, additions, removals ->
+            (base + additions[profileId].orEmpty()) - removals[profileId].orEmpty()
         }.distinctUntilChanged()
     }
 
     override fun applyOptimisticWatchedMovie(ids: Set<String>, add: Boolean) {
+        val profileId = profileManager.activeProfileId.value
         if (add) {
-            optimisticWatchedMovieAdditions.update { it + ids }
-            optimisticWatchedMovieRemovals.update { it - ids }
+            optimisticWatchedMovieAdditions.update { it.plusIds(profileId, ids) }
+            optimisticWatchedMovieRemovals.update { it.minusIds(profileId, ids) }
         } else {
-            optimisticWatchedMovieRemovals.update { it + ids }
-            optimisticWatchedMovieAdditions.update { it - ids }
+            optimisticWatchedMovieRemovals.update { it.plusIds(profileId, ids) }
+            optimisticWatchedMovieAdditions.update { it.minusIds(profileId, ids) }
         }
     }
 
     override fun revertOptimisticWatchedMovie(ids: Set<String>, add: Boolean) {
-        if (add) {
-            optimisticWatchedMovieAdditions.update { it - ids }
-        } else {
-            optimisticWatchedMovieRemovals.update { it - ids }
-        }
+        // The active profile may have changed since the toggle, so revert it wherever it is.
+        val target = if (add) optimisticWatchedMovieAdditions else optimisticWatchedMovieRemovals
+        target.update { byProfile -> byProfile.keys.fold(byProfile) { acc, profileId -> acc.minusIds(profileId, ids) } }
+    }
+
+    private fun Map<Int, Set<String>>.plusIds(profileId: Int, ids: Set<String>): Map<Int, Set<String>> =
+        this + (profileId to (this[profileId].orEmpty() + ids))
+
+    private fun Map<Int, Set<String>>.minusIds(profileId: Int, ids: Set<String>): Map<Int, Set<String>> {
+        val remaining = this[profileId].orEmpty() - ids
+        return if (remaining.isEmpty()) this - profileId else this + (profileId to remaining)
     }
 
     override suspend fun getWatchedShowEpisodes(): Map<String, Set<Pair<Int, Int>>> {
@@ -1183,15 +1231,23 @@ class WatchProgressRepositoryImpl @Inject constructor(
         items.take(10).forEach { progress ->
             if (profileManager.activeProfileId.value != profileId) return
             val key = ProfileContentKey(profileId, progress.contentId)
-            synchronized(hydratedProgressKeys) {
-                hydratedProgressKeys.add(key)
+            if (!canAttemptMetadata(key)) return@forEach
+            val shouldFetch = metadataMutex.withLock {
+                if (profileManager.activeProfileId.value != profileId) return@withLock false
+                if (inFlightMetadataKeys.contains(key)) return@withLock false
+                if (synchronized(hydratedProgressKeys) { key in hydratedProgressKeys }) return@withLock false
+                if (!canAttemptMetadata(key)) return@withLock false
+                inFlightMetadataKeys.add(key)
+                recordMetadataAttempt(key)
+                true
             }
-            runCatching {
+            if (!shouldFetch) return@forEach
+            try {
                 val metadata = fetchContentMetadata(
                     contentId = progress.contentId,
                     contentType = progress.contentType
-                ) ?: return@runCatching
-                if (profileManager.activeProfileId.value != profileId) return@runCatching
+                ) ?: return@forEach
+                if (profileManager.activeProfileId.value != profileId) return@forEach
                 val episodeRuntimeMs = if (progress.season != null && progress.episode != null)
                     metadata.episodes[progress.season to progress.episode]?.runtimeMs ?: 0L
                 else 0L
@@ -1204,7 +1260,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
                 var posterToSave = progress.poster ?: metadata.poster
                 if (backdropToSave == null && posterToSave == null) {
                     val tmdbImages = tmdbService.fetchImdbImages(progress.contentId, progress.contentType)
-                    if (profileManager.activeProfileId.value != profileId) return@runCatching
+                    if (profileManager.activeProfileId.value != profileId) return@forEach
                     backdropToSave = tmdbImages?.backdropUrl
                     posterToSave = tmdbImages?.posterUrl
                 }
@@ -1224,7 +1280,19 @@ class WatchProgressRepositoryImpl @Inject constructor(
                         profileId = profileId
                     )
                 }
-            }.onFailure { Log.w(TAG, "Progress artwork hydration failed for ${progress.contentId}", it) }
+                synchronized(hydratedProgressKeys) {
+                    hydratedProgressKeys.add(key)
+                }
+                synchronized(metadataAttempts) {
+                    metadataAttempts.remove(key)
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "Progress artwork hydration failed for ${progress.contentId}", e)
+            } finally {
+                metadataMutex.withLock {
+                    inFlightMetadataKeys.remove(key)
+                }
+            }
         }
     }
 

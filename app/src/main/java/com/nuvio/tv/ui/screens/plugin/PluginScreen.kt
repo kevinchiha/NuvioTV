@@ -2,6 +2,7 @@
 
 package com.nuvio.tv.ui.screens.plugin
 
+import com.nuvio.tv.ui.theme.NuvioPrimitives
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 import android.graphics.Bitmap
@@ -56,7 +57,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -66,6 +69,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
@@ -77,8 +81,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -116,7 +118,7 @@ fun PluginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = NuvioTheme.spacing.xxxl, vertical = NuvioTheme.spacing.xl)
+            .background(NuvioTheme.colors.Background)
     ) {
         PluginScreenContent(
             uiState = uiState,
@@ -152,12 +154,21 @@ fun PluginScreenContent(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            contentPadding = PaddingValues(bottom = NuvioTheme.spacing.xxl),
-            verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.lg),
-            modifier = Modifier.fillMaxSize()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(NuvioTheme.colors.Background)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = NuvioTheme.spacing.xxxl, vertical = NuvioTheme.spacing.xl)
         ) {
+            LazyColumn(
+                contentPadding = PaddingValues(bottom = NuvioTheme.spacing.xxl),
+                verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.lg),
+                modifier = Modifier.fillMaxSize()
+            ) {
             if (viewModel.isReadOnly) {
                 item {
                     androidx.compose.material3.Card(
@@ -274,6 +285,7 @@ fun PluginScreenContent(
                     )
                 }
             }
+            }
         }
 
     // Success/Error Messages
@@ -282,9 +294,8 @@ fun PluginScreenContent(
         errorMessage = uiState.errorMessage
     )
 
-    // QR Code overlay — Popup renders above the entire screen
-    if (uiState.isQrModeActive) {
-        Popup(properties = PopupProperties(focusable = true)) {
+    if (uiState.isQrModeActive || uiState.pendingRepoChange != null || uiState.pendingScraperEnable != null) {
+        if (uiState.isQrModeActive) {
             QrCodeOverlay(
                 qrBitmap = uiState.qrCodeBitmap,
                 serverUrl = uiState.serverUrl,
@@ -292,30 +303,21 @@ fun PluginScreenContent(
                 hasPendingChange = uiState.pendingRepoChange != null
             )
         }
-    }
 
-    // Confirmation dialog overlay
-    if (uiState.pendingRepoChange != null) {
-        Popup(properties = PopupProperties(focusable = true)) {
-            uiState.pendingRepoChange?.let { pending ->
-                ConfirmRepoChangesDialog(
-                    pendingChange = pending,
-                    onConfirm = { viewModel.onEvent(PluginUiEvent.ConfirmPendingRepoChange) },
-                    onReject = { viewModel.onEvent(PluginUiEvent.RejectPendingRepoChange) }
-                )
-            }
+        uiState.pendingRepoChange?.let { pending ->
+            ConfirmRepoChangesDialog(
+                pendingChange = pending,
+                onConfirm = { viewModel.onEvent(PluginUiEvent.ConfirmPendingRepoChange) },
+                onReject = { viewModel.onEvent(PluginUiEvent.RejectPendingRepoChange) }
+            )
         }
-    }
 
-    if (uiState.pendingScraperEnable != null) {
-        Popup(properties = PopupProperties(focusable = true)) {
-            uiState.pendingScraperEnable?.let { pending ->
-                ConfirmScraperEnableDialog(
-                    scraperName = pending.scraperName,
-                    onConfirm = { viewModel.onEvent(PluginUiEvent.ConfirmPendingScraperEnable) },
-                    onDismiss = { viewModel.onEvent(PluginUiEvent.DismissPendingScraperEnable) }
-                )
-            }
+        uiState.pendingScraperEnable?.let { pending ->
+            ConfirmScraperEnableDialog(
+                scraperName = pending.scraperName,
+                onConfirm = { viewModel.onEvent(PluginUiEvent.ConfirmPendingScraperEnable) },
+                onDismiss = { viewModel.onEvent(PluginUiEvent.DismissPendingScraperEnable) }
+            )
         }
     }
     }
@@ -565,7 +567,9 @@ private fun AddRepositoryInline(
                         focusManager.clearFocus(force = true)
                     },
                     enabled = !isLoading && url.isNotBlank(),
-                    modifier = Modifier.semantics { role = Role.Button },
+                    modifier = Modifier
+                        .focusProperties { right = FocusRequester.Cancel }
+                        .semantics { role = Role.Button },
                     colors = ButtonDefaults.colors(
                         containerColor = NuvioTheme.colors.Secondary,
                         focusedContainerColor = NuvioTheme.colors.SecondaryVariant,
@@ -1325,6 +1329,7 @@ private fun ScraperCard(
                         onClick = onTest,
                         enabled = !isTesting && scraper.enabled,
                         modifier = Modifier
+                            .focusProperties { left = FocusRequester.Cancel }
                             .onFocusChanged { isTestFocused = it.isFocused }
                             .semantics { role = Role.Button },
                         colors = ButtonDefaults.colors(
@@ -1350,12 +1355,16 @@ private fun ScraperCard(
 
                     // Enable toggle
                     if (!isReadOnly) {
+                        // The card carries the name as visible text, but the toggle is its own
+                        // node, so without this a screen reader hears only "switch, on".
+                        val toggleLabel = stringResource(R.string.cd_enable_scraper, scraper.name)
                         Surface(
                             onClick = { onToggle(!scraper.enabled) },
                             modifier = Modifier
                                 .onFocusChanged { isToggleFocused = it.isFocused }
                                 .semantics {
                                     role = Role.Switch
+                                    contentDescription = toggleLabel
                                     toggleableState = if (scraper.enabled) ToggleableState.On else ToggleableState.Off
                                 },
                             colors = ClickableSurfaceDefaults.colors(
@@ -1521,7 +1530,7 @@ private fun TestResultItem(result: LocalScraperResult) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = null,
-                tint = Color(0xFF4CAF50),
+                tint = NuvioPrimitives.success,
                 modifier = Modifier.size(NuvioTheme.spacing.lg)
             )
         }
@@ -1570,9 +1579,9 @@ private fun MessageOverlay(
                 onClick = { },
                 colors = ClickableSurfaceDefaults.colors(
                     containerColor = if (isSuccess)
-                        Color(0xFF2E7D32).copy(alpha = 0.9f)
+                        NuvioPrimitives.green700.copy(alpha = 0.9f)
                     else
-                        Color(0xFFC62828).copy(alpha = 0.9f)
+                        NuvioPrimitives.red600.copy(alpha = 0.9f)
                 ),
                 shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(NuvioTheme.radii.md))
             ) {
