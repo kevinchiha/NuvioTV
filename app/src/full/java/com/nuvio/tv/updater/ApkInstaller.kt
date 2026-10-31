@@ -3,6 +3,7 @@ package com.nuvio.tv.updater
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
@@ -78,6 +79,11 @@ object ApkInstaller {
             .apply {
                 setAppPackageName(context.packageName)
                 setSize(apkFile.length() + profileFile.length())
+                // A session installs to internal storage by default. If the member moved the app
+                // to adopted storage (an SD card set up as internal), createSession() throws
+                // "Cannot automatically move ... to internal storage". AUTO keeps the update on
+                // the volume the app is already on. Same fix as upstream's cbde1403a.
+                setInstallLocation(PackageInfo.INSTALL_LOCATION_AUTO)
             }
         val sessionId = installer.createSession(params)
         try {
@@ -120,6 +126,7 @@ object ApkInstaller {
             .apply {
                 setAppPackageName(context.packageName)
                 setSize(apkFile.length() + (profileFile?.length() ?: 0L))
+                setInstallLocation(PackageInfo.INSTALL_LOCATION_AUTO) // see installWithSession
                 setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
             }
         val sessionId = installer.createSession(params)
