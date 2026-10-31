@@ -302,6 +302,9 @@ internal fun PlayerRuntimeController.resumeForLifecycle() {
             _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
         }
         if (currentStreamUrl.isNotEmpty()) {
+            // Telemetry: upstream (1.1.0-beta.9) now releases ExoPlayer every time the app is
+            // backgrounded, so Home-and-back lands here. Same viewing: keep its session_start.
+            telemetryKeepSessionOnRebuild = true
             initializePlayer(currentStreamUrl, currentHeaders, startPaused = true)
         }
         return

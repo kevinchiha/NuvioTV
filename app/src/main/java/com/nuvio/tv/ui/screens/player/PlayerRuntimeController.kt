@@ -430,6 +430,8 @@ class PlayerRuntimeController(
     @Volatile internal var telemetryDeviceId: String? = null
     /** True once session_start has been emitted for the CURRENT playback. Reset in resetLoadingOverlayForNewStream() (mirrors hasRenderedFirstFrame). */
     @Volatile internal var telemetrySessionStarted = false
+    /** Set by resumeForLifecycle() right before it rebuilds a player released in the background; the next resetLoadingOverlayForNewStream() keeps telemetrySessionStarted, so the same viewing does not emit a second session_start. */
+    @Volatile internal var telemetryKeepSessionOnRebuild = false
 
     internal var progressJob: Job? = null
     internal var vodTelemetryJob: Job? = null

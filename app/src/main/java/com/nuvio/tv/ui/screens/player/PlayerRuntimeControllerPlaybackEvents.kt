@@ -1799,10 +1799,14 @@ fun PlayerRuntimeController.onEvent(
             selectEpisodesSeason(event.season)
         }
         is PlayerEvent.OnEpisodeSelected -> {
+            // KevBox FORK DIVERGENCE: an episode picked in the player's Episodes panel always opens
+            // the stream list. Upstream (4b8d0f41e, 1.1.0-beta.9) auto-plays a source here when the
+            // member's Stream Selection mode is not Manual, which skips the forced picker. Upstream
+            // passes event.manualSelection; keep true on every merge.
             loadStreamsForEpisode(
                 video = event.video,
                 forceRefresh = false,
-                manualSelection = event.manualSelection
+                manualSelection = true
             )
         }
         PlayerEvent.OnReloadEpisodeStreams -> {

@@ -2139,7 +2139,12 @@ internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
     hasRenderedFirstFrame = false
     // Telemetry (H2): a NEW playback emits exactly one session_start. Reset here (mirrors
     // hasRenderedFirstFrame) so pause→resume / retry / engine-failover do NOT re-emit it.
-    telemetrySessionStarted = false
+    // A rebuild after a background release keeps it (see telemetryKeepSessionOnRebuild).
+    if (telemetryKeepSessionOnRebuild) {
+        telemetryKeepSessionOnRebuild = false
+    } else {
+        telemetrySessionStarted = false
+    }
     endDetectionArmed = false
     mpvEofSeenClear = false
     hasMarkedCurrentEpisodeCompleted = false
