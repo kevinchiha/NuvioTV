@@ -143,6 +143,11 @@ blocks, reset lines), the answer is almost always **keep both**.
 | Media servers (Jellyfin/Emby/Plex, 1.1.0-beta.7) | **hidden by the existing `CONTENT_DISCOVERY` filter** (the servers page lives inside that category). The Library "Servers" tab only shows when a server exists, and none can be added. Not patched: `MediaServerSyncService` still calls `sync_pull_media_servers` at sign-in, profile switch and foreground (at most once a minute), which 404s on our Supabase and is logged and dropped. Upstream's `MediaServerSyncServiceTest` drives those triggers, so stopping them means patching upstream tests too; not worth it for ~1-3 calls per TV per day. To ship the feature: add `sync_pull_media_servers(p_profile_id)` / `sync_push_media_servers(p_profile_id, p_servers, p_origin_client_id)` to the kevbox repo and drop the category from the hidden set | the whole feature |
 | `StreamRepositoryImpl` constructor (1.1.0-beta.7) | `authManager` stays last; upstream's new `serverStreams` goes before it. Our `StreamRepositoryNoStreamAddonMessageTest` builds the class by hand and needs the same `serverStreams` stub as upstream's tests, or the test source set stops compiling | the param |
 | `NuvioNavHost.kt` settings block (1.1.0-beta.7) | upstream removed `onNavigateToTracking` from `SettingsScreen`; drop our `onNavigateToTracking = { }` line or it won't compile. Tracking stays hidden through the `TRACKING` category filter (it renders inline; `Screen.Tracking` has no `navigate` call) | n/a |
+| Upstream's background updater (1.1.0-beta.8) | **delete on merge**: `full/.../updater/{UpdateJobService,UpdateDownloadStore,UpdateDexMetadata,UpdateInstallResultReceiver}.kt`, `app/src/testFull/.../updater/UpdateDexMetadataTest.kt` (a **separate test folder**: `testFull`, not `test`, so a grep of `app/src/test` misses it and the test build breaks), and in `app/build.gradle.kts` the `EmbedUpdateDexMetadataTask` class, its `onVariants` block and the `CompileArtProfileTask` import (KevBox comments mark the spots). Keep our `full/AndroidManifest.xml` whole: theirs registers `UpdateJobService` and `UpdateInstallResultReceiver` | nothing. The `about_update_auto_install_*` strings may stay (unused) |
+| Logo drawables (1.1.0-beta.9) | **ours live in `app/src/full/res/drawable-nodpi/`**, the same folder as upstream's since `1ef08231a`. A flavor file only replaces a main file with the same name in the same folder type. When the folders differ, the APK carries both and Android picks Nuvio's `nodpi` copy on 320 dpi and up (most TVs), with no conflict and no compile error. If upstream moves a branded drawable again, move ours to match | n/a |
+| `PlayerRuntimeControllerPlaybackEvents.kt` `OnEpisodeSelected` (1.1.0-beta.9) | `manualSelection = true`, not upstream's `event.manualSelection`. Since `4b8d0f41e`, an episode picked in the player's Episodes panel auto-plays a source when the member's Stream Selection mode is not Manual | the rest of the handler |
+| Telemetry after a background release (1.1.0-beta.9) | `telemetryKeepSessionOnRebuild` in `PlayerRuntimeController`, set in `resumeForLifecycle()` right before its `initializePlayer(...)` and consumed in `resetLoadingOverlayForNewStream()`. Upstream now releases ExoPlayer every time the app is backgrounded, and the rebuild would log a second `session_start` per Home-and-back | upstream's `releaseForBackground()` itself |
+| `ApkInstaller.kt` sessions (2026-10-31) | `setInstallLocation(PackageInfo.INSTALL_LOCATION_AUTO)` in both `installWithSession` and `openSilentSession`. Without it, `createSession()` throws on a TV whose app sits on adopted storage. Our updater file, so it never conflicts | n/a |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -357,7 +362,12 @@ grep -rn "manualSelection = true" app/src/.../NuvioNavHost.kt                   
 grep -c "manualSelection = true" app/src/.../ui/navigation/DetailChildHost.kt             # want: 3 (nested details incl. start-from-beginning)
 grep -rn "Screen.Stream.createRoute\|::navigateToDetailStream" app/src/main --include=*.kt # review any NEW call site
 grep -rn "allowUnverifiedPlayback = true" app/src --include=*.kt                        # want: 1 (PlaybackAvailabilityProvider)
-ls app/src/full/res/drawable/app_logo_wordmark_*.xml | wc -l                              # want: 5 (themed wordmark aliases)
+ls app/src/full/res/drawable-nodpi/app_logo_wordmark_*.xml | wc -l                        # want: 5 (themed wordmark aliases; moved from drawable/ in 1.1.0-beta.9)
+comm -23 <(ls app/src/main/res/drawable-nodpi | sed 's/\.[^.]*$//' | sort) \
+         <(ls app/src/full/res/drawable-nodpi | sed 's/\.[^.]*$//' | sort)                 # want: empty (every branded nodpi image overridden in the SAME folder)
+grep -A10 "is PlayerEvent.OnEpisodeSelected" app/src/.../player/PlayerRuntimeControllerPlaybackEvents.kt | grep -c "manualSelection = true" # want: 1
+grep -c "telemetryKeepSessionOnRebuild" app/src/.../player/PlayerRuntimeControllerMpv.kt  # want: 1
+grep -rln "UpdateJobService\|UpdateDownloadStore\|UpdateDexMetadata\|UpdateInstallResultReceiver" app/src app/build.gradle.kts # want: build.gradle.kts only (our "not taken" comment)
 ls app/src/main/java/com/nuvio/tv/updater/ 2>/dev/null                                    # want: no such directory
 grep -rn "UpdateChannelSettings(" app/src --include=*.kt                                  # want: empty
 grep -c "unionWhenNeverSynced" app/src/.../core/sync/WatchedItemsSyncService.kt          # want: >= 1
@@ -1186,6 +1196,57 @@ Two fork features that touch upstream files. Re-check each after every upstream 
   `SilentInstallDecisionTest`, `SilentInstallTest`, `SilentPromptHoldTest`, `SilentInstallGuardTest`;
   Python tests in `scripts/tests/`. Baseline after the merge: 2446 tests, still 1 failure (the Trakt one).
 
+### 1.1.0-beta.7 → 1.1.0-beta.9 — upstream's own silent updater, a logo folder move, a picker bypass (2026-10-31)
+
+421 commits (about 280 non-merge) covering `1.1.0-beta.8` and `1.1.0-beta.9`; `upstream/dev` = the beta.9 tag
+`fa194b008`. Branch `sync1.1.0-beta.9` off `kevbox` at `1.2.0-beta.7.6`. Merge `003d89b5d`, fork fixes `8fd1d2970`,
+adopted-storage fix `42a4f6529`. 356 files, +19.3k/-4.7k. **Not released yet.**
+
+**Fourteen conflicts.** Eight are the updater (upstream reworked it again, see below), resolved as whole-file ours
+plus deletions. The rest: version hunk; `PlayerSettingsDataStore` (our auto-switch default next to upstream's new
+`useLibass ?: true`); three player files (keep both: our telemetry lines, upstream's audio-delay observer and
+`releaseMediaSession()` helper); `values-fr/strings.xml` (upstream rewrote it, we re-add `tv_channel_library`).
+**No server migration**: zero `rpc()` changes, no new table reads, no new sync arguments, no new URL fields, no
+manifest change, no Sentry change.
+
+- **🛑 Upstream built its own silent self-update** (`6f8a415a2` and follow-ups, beta.8): a `JobService` that checks
+  their GitHub releases on a schedule, downloads in the background, installs without a prompt on Android 12+, and
+  shows an "updated" banner. Same idea as ours, pointed at their repo. Nothing outside the updater package
+  referenced it, so the deletions in the table row above are enough. The trap was the test: upstream put
+  `UpdateDexMetadataTest` in `app/src/testFull/`, which none of our greps looked in, and the test build failed.
+- **🛑 The Nuvio logo came back with no conflict.** `1ef08231a` moved seven logo PNGs to `drawable-nodpi` to save
+  decode memory; our overrides stayed in `drawable`. The compile, the tests and every standing grep passed. The
+  policy reviewer caught it by reading `merged_res`: both copies sat in the APK. Fixed by moving ours (table row).
+  The new standing check compares the two `drawable-nodpi` folders by name.
+- **🛑 Episodes panel skipped the forced picker** (`4b8d0f41e`). Only for members whose Stream Selection mode is not
+  Manual, which members can change. Fixed in the event handler (table row). No test covers it; the old standing
+  `manualSelection = true` counts all stayed green.
+- **⚠️ Upstream now releases ExoPlayer on every background** (`releaseForBackground`, frees the hardware decoder for
+  the next app). Heartbeats stop correctly; only the `session_start` count went up by one per Home-and-back. Fixed
+  with a one-shot flag (table row). Separately, the mpv engine has never started the heartbeat, so playback that
+  falls back to mpv goes uncounted. That predates this sync.
+- **Libass is now on by default** for everyone who never touched the setting (`99a41515f`). The new
+  `nuvio-libass-release.aar` ships `armeabi-v7a` (2.7 MB `.so`), default render mode is the overlay one. Nothing
+  catches a failed native load, so a box where it can't load would crash on every play. **Play one video on a real
+  32-bit TV before releasing**; the x86_64 emulator can't prove it.
+- **Adopted storage** (`cbde1403a`, upstream's own installer): our two session installs had the same gap. Fixed
+  in `42a4f6529` (table row).
+- **Inert or harmless:** upstream's `files-path updates/` entry in `file_paths.xml` (unused), the
+  `about_update_auto_install_*` strings (unused), player badges (off by default), MKV chapter reads (2-3 small
+  range requests to the stream's own host per MKV play; skip-intro uses them), plugin sync now queued after addons
+  and watch progress (still one failing `plugins` read per startup pull, as before).
+- **Emulator note:** the emulator install was signed out (from the 2026-10-29 login-file testing), so it opened on
+  the Essential/Advanced chooser and the layout picker. That came from its own wiped profile data, not from the
+  merge: the gate in `MainActivity` and the stores behind it are unchanged upstream. Both choices sync once signed
+  in, so pick Advanced (what existing installs resolve to) and leave the layout preselected.
+- **Tests: 2721 run, 0 failures, 1 skipped.** The Trakt failure is fixed upstream, so **the baseline is now 0**.
+  Also green: `compilePlaystoreDebugKotlin`, `assembleFullRelease --dry-run`.
+- **Gradle needs `ANDROID_HOME`.** A shell that doesn't load `~/.bashrc` fails at configuration with "SDK location
+  not found" (`local.properties` has no `sdk.dir`). Use `export ANDROID_HOME=$HOME/Android/Sdk`.
+- **Review pass:** three read-only reviewers (updater and build files; player; policy and privacy across all
+  upstream commits) ran in parallel with the build. The policy one found the logo and picker bugs that every
+  mechanical check missed. Worth repeating on any cycle over ~100 commits.
+
 ## Verify before shipping
 
 > **Run these with `set -o pipefail`.** Piping gradle into `tail`/`grep` reports the *pipe's* exit
@@ -1193,6 +1254,7 @@ Two fork features that touch upstream files. Re-check each after every upstream 
 > output for `BUILD FAILED` before believing it.
 
 ```bash
+export ANDROID_HOME=$HOME/Android/Sdk   # local.properties has no sdk.dir; a shell without ~/.bashrc fails without this
 ./gradlew :app:compileFullDebugKotlin   # quick compile check — REQUIRED, catches most "invisible breakage"
 ./gradlew :app:testFullDebugUnitTest    # unit tests — REQUIRED, catches test-source-set breaks the app
                                         # compile can't see (see "invisible breakage #4" + its
