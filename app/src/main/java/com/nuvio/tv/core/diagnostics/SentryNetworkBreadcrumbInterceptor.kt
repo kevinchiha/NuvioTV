@@ -52,21 +52,34 @@ class SentryNetworkBreadcrumbInterceptor : Interceptor {
         elapsedMs: Long,
         error: Throwable?
     ) {
+        Sentry.addBreadcrumb(buildBreadcrumb(url, method, statusCode, elapsedMs, error))
+    }
+
+    // KevBox upstream-sync note: upstream sends the URL path and a separate "path" field. Addon
+    // URLs carry members' debrid API keys in the path, so keep scheme and host only.
+    internal fun buildBreadcrumb(
+        url: HttpUrl,
+        method: String,
+        statusCode: Int?,
+        elapsedMs: Long,
+        error: Throwable?
+    ): Breadcrumb {
         val breadcrumb = if (statusCode == null) {
-            Breadcrumb.http(scrubbedUrl(url), method)
+            Breadcrumb.http(SentryUrlScrubber.origin(url), method)
         } else {
-            Breadcrumb.http(scrubbedUrl(url), method, statusCode)
+            Breadcrumb.http(SentryUrlScrubber.origin(url), method, statusCode)
         }
         breadcrumb.setCategory("http.client")
         breadcrumb.setLevel(levelFor(statusCode, error))
         breadcrumb.setData("host", url.host)
-        breadcrumb.setData("path", url.encodedPath)
         breadcrumb.setData("elapsed_ms", elapsedMs)
         if (error != null) {
             breadcrumb.setData("error_type", error.javaClass.name)
-            error.message?.let { breadcrumb.setData("error_message", it.take(240)) }
+            error.message?.let {
+                breadcrumb.setData("error_message", SentryUrlScrubber.scrubText(it).take(240))
+            }
         }
-        Sentry.addBreadcrumb(breadcrumb)
+        return breadcrumb
     }
 
     private fun levelFor(statusCode: Int?, error: Throwable?): SentryLevel {
@@ -77,14 +90,6 @@ class SentryNetworkBreadcrumbInterceptor : Interceptor {
             code >= 400 -> SentryLevel.WARNING
             else -> SentryLevel.INFO
         }
-    }
-
-    private fun scrubbedUrl(url: HttpUrl): String {
-        return url.newBuilder()
-            .query(null)
-            .fragment(null)
-            .build()
-            .toString()
     }
 
     private fun elapsedMs(startedAtNs: Long): Long {

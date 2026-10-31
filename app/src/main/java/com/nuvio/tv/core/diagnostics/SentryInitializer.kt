@@ -70,10 +70,16 @@ object SentryInitializer {
             options.setEnableNetworkEventBreadcrumbs(false)
             options.setReportHistoricalAnrs(false)
             options.setAttachAnrThreadDump(false)
+            // KevBox upstream-sync note: the two SentryUrlScrubber calls are KevBox-only. They cut
+            // any URL in breadcrumb or error text to scheme and host, since addon URL paths
+            // carry members' debrid API keys.
+            options.beforeBreadcrumb = SentryOptions.BeforeBreadcrumbCallback { breadcrumb, _ ->
+                SentryUrlScrubber.scrub(breadcrumb)
+            }
             options.beforeSend = SentryOptions.BeforeSendCallback { event, _ ->
                 event.request = null
                 event.user = null
-                if (shouldDrop(event)) null else event
+                if (shouldDrop(event)) null else SentryUrlScrubber.scrub(event)
             }
         }
 
