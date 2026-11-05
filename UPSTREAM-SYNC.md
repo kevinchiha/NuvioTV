@@ -1251,7 +1251,7 @@ manifest change, no Sentry change.
 ### 1.1.0-beta.9 → 1.1.0-beta.11 — light cycle; a conflict script cut our stream-screen fix (2026-11-05)
 
 144 commits (90 non-merge) covering `1.1.0-beta.10` and `1.1.0-beta.11`; `upstream/dev` = the beta.11 tag `1206736fd`.
-Branch `sync1.1.0-beta.11` off `kevbox` (beta.9 merge, never released). Merge `6e66db47d`, player row change `5faeb232f`.
+Branch `sync1.1.0-beta.11` off `kevbox` (beta.9 merge, never released). Merge `6e66db47d`, player row change `5faeb232f`. **Released as KevBox `1.2.0-beta.11` / versionCode 1066** (bump `6317f6c48`, sha256 `c38ec0dc…`, 52 MB armeabi-v7a; Kevin tested on his TCL first).
 
 **Four conflicts:** version hunk (ours); the generated baseline profile (theirs); `PlayerRuntimeControllerMpv.kt`
 (keep `telemetryKeepSessionOnRebuild = true`, then upstream's new `reinitializeCurrentStream(startPaused = true)`,
