@@ -148,6 +148,7 @@ blocks, reset lines), the answer is almost always **keep both**.
 | `PlayerRuntimeControllerPlaybackEvents.kt` `OnEpisodeSelected` (1.1.0-beta.9) | `manualSelection = true`, not upstream's `event.manualSelection`. Since `4b8d0f41e`, an episode picked in the player's Episodes panel auto-plays a source when the member's Stream Selection mode is not Manual | the rest of the handler |
 | Telemetry after a background release (1.1.0-beta.9) | `telemetryKeepSessionOnRebuild` in `PlayerRuntimeController`, set in `resumeForLifecycle()` right before its `initializePlayer(...)` and consumed in `resetLoadingOverlayForNewStream()`. Upstream now releases ExoPlayer every time the app is backgrounded, and the rebuild would log a second `session_start` per Home-and-back | upstream's `releaseForBackground()` itself |
 | `ApkInstaller.kt` sessions (2026-10-31) | `setInstallLocation(PackageInfo.INSTALL_LOCATION_AUTO)` in both `installWithSession` and `openSilentSession`. Without it, `createSession()` throws on a TV whose app sits on adopted storage. Our updater file, so it never conflicts | n/a |
+| `PlayerScreen.kt` control row (1.1.0-beta.11) | **no more-actions arrow.** Every button shows all the time, in this order: play, next episode, subtitles, audio, **switch player**, chapters, sources, episodes, party, speed, aspect, external player, info, report. The `onToggleMoreActions` param is gone, and closing Stream Info only sets `restoreStreamInfoFocus` (no `OnShowMoreDialog`). If upstream brings back the `AnimatedVisibility(visible = uiState.showMoreDialog)` wrapper or the `KeyboardArrowLeft/Right` button, drop them again | new buttons upstream adds to the row |
 
 After resolving, `git add` the files and `git commit` to complete the merge.
 
@@ -1246,6 +1247,26 @@ manifest change, no Sentry change.
 - **Review pass:** three read-only reviewers (updater and build files; player; policy and privacy across all
   upstream commits) ran in parallel with the build. The policy one found the logo and picker bugs that every
   mechanical check missed. Worth repeating on any cycle over ~100 commits.
+
+### 1.1.0-beta.9 → 1.1.0-beta.11 — light cycle; a conflict script cut our stream-screen fix (2026-11-05)
+
+144 commits (90 non-merge) covering `1.1.0-beta.10` and `1.1.0-beta.11`; `upstream/dev` = the beta.11 tag `1206736fd`.
+Branch `sync1.1.0-beta.11` off `kevbox` (beta.9 merge, never released). Merge `6e66db47d`, player row change `5faeb232f`.
+
+**Four conflicts:** version hunk (ours); the generated baseline profile (theirs); `PlayerRuntimeControllerMpv.kt`
+(keep `telemetryKeepSessionOnRebuild = true`, then upstream's new `reinitializeCurrentStream(startPaused = true)`,
+which wraps the same `initializePlayer` call); `StreamScreen.kt` (ours, `consumeExternalStreamClick`).
+**No server migration:** no new `rpc()` calls, URLs, permissions or schemes. `AppLogo.kt` (new) reads
+`app_logo_wordmark`, which our flavor overrides.
+
+- **🛑 Don't resolve conflicts with a regex on `=======`.** Our `StreamScreen.kt` divergence comment is a banner
+  of `=` signs. A non-greedy `<<<<<<< HEAD(.*?)=======` match stopped inside that banner and silently cut the
+  whole `consumeExternalStreamClick` function. The compile caught it (unresolved reference). Match the marker as a
+  whole line (`^=======$`) or resolve by hand.
+- **Player controls:** Kevin asked for every button always visible and the switch-player button after audio
+  (table row). Upstream's background-decoder release is now opt-in (`3412e2803`); our telemetry flag still applies
+  when it is on.
+- **Tests: 2827 run, 0 failures, 1 skipped.** Baseline stays 0.
 
 ## Verify before shipping
 
