@@ -66,7 +66,7 @@ internal fun PlayerRuntimeController.attemptStartupRecovery(
         delay(RETRY_DELAY_MS)
 
         releasePlayer(flushPlaybackState = false)
-        initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+        reinitializeCurrentStream(startPaused = paused)
     }
     return true
 }
@@ -312,7 +312,7 @@ internal fun PlayerRuntimeController.attemptAutoRetry(
                 if (savedPosition > 0L) {
                     _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
                 }
-                initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+                reinitializeCurrentStream(startPaused = paused)
             }
         } else {
             // Full teardown — clears any corrupt decoder/internal state.
@@ -320,7 +320,7 @@ internal fun PlayerRuntimeController.attemptAutoRetry(
             if (savedPosition > 0L) {
                 _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
             }
-            initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+            reinitializeCurrentStream(startPaused = paused)
         }
     }
     return true
@@ -406,7 +406,7 @@ internal fun PlayerRuntimeController.tryAudioTrackPcmFallback(
         if (savedPosition > 0L) {
             _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
         }
-        initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+        reinitializeCurrentStream(startPaused = paused)
     }
 
     return true
@@ -484,7 +484,7 @@ internal fun PlayerRuntimeController.tryDv7HevcFallback(
         if (savedPosition > 0L) {
             _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
         }
-        initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+        reinitializeCurrentStream(startPaused = paused)
     }
     return true
 }
@@ -540,7 +540,7 @@ internal fun PlayerRuntimeController.tryParsingErrorProbeFallback(
             if (savedPosition > 0L) {
                 _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
             }
-            initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+            reinitializeCurrentStream(startPaused = paused)
         } else if (previousMimeType == androidx.media3.common.MimeTypes.APPLICATION_M3U8) {
             currentStreamMimeType = null
             currentStreamResponseHeaders = emptyMap()
@@ -548,7 +548,7 @@ internal fun PlayerRuntimeController.tryParsingErrorProbeFallback(
             if (savedPosition > 0L) {
                 _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
             }
-            initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+            reinitializeCurrentStream(startPaused = paused)
         } else {
             if (maybeAutoSwitchInternalPlayerOnStartupError(detailedError = detailedError, allowEngineFailover = allowEngineFailover)) {
                 return@launch
