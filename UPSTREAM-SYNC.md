@@ -1268,6 +1268,23 @@ which wraps the same `initializePlayer` call); `StreamScreen.kt` (ours, `consume
   when it is on.
 - **Tests: 2827 run, 0 failures, 1 skipped.** Baseline stays 0.
 
+### 1.1.0-beta.11 → 1.1.0-beta.12 — the light cycle (2026-11-07)
+
+26 commits (16 non-merge); `upstream/dev` = the beta.12 tag `fe5c314bd`. Branch `sync1.1.0-beta.12` off `kevbox`
+at `1.2.0-beta.11`. Merge `6f2174a45`. **Not released yet.**
+
+**One conflict:** the version hunk (kept ours; upstream's versionCode is now 1075, which doesn't matter because our
+updater only compares our own codes). **No server migration:** no new `rpc()` calls, URLs, `buildConfigField`s,
+navigation or manifest changes. `PlayerSettingsDataStore` untouched, so both subtitle defaults stand.
+
+- Player: Exo playback now ends when the video renderer never reports end of stream; a restored subtitle
+  preference is no longer wiped; AutoSync searches a wider offset range.
+- Skip intro: Anime-Skip fixes (open-ended segments dropped, AniSkip preferred, Kitsu/MAL lookups without an
+  IntroDB mapping). Only reaches the Anime-Skip host, which skip-intro already used.
+- Home: long hero descriptions auto-scroll (new toggle in Layout, which members can already see); carousel
+  hold and trailer-pause jump fixed.
+- **Tests: 2838 run, 0 failures, 1 skipped.** Baseline stays 0. `assembleFullRelease --dry-run` green.
+
 ## Verify before shipping
 
 > **Run these with `set -o pipefail`.** Piping gradle into `tail`/`grep` reports the *pipe's* exit
