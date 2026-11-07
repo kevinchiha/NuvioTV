@@ -1433,6 +1433,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                                 }
                             }
                         }
+                        // KevBox: catch a frozen clock from a passthrough AudioTrack the TV refused to start.
+                        if (isPlaying) kevboxArmAudioClockStallWatchdog() else kevboxCancelAudioClockStallWatchdog()
                         if (isPlaying) {
                             userPausedManually = false
                             cancelPauseOverlay()
@@ -2149,6 +2151,7 @@ internal fun PlayerRuntimeController.buildStartupSubtitleConfigurations(startupS
 internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
     cancelFirstFrameWatchdog()
     cancelStallWatchdog()
+    kevboxCancelAudioClockStallWatchdog() // KevBox
     val preparingMessage = context.getString(R.string.player_loading_preparing)
     resetLoadingDiagnostics(
         phase = "preparing",
