@@ -46,6 +46,7 @@ internal fun PlayerRuntimeController.attachMpvView(view: NuvioMpvSurfaceView?) {
         hasRenderedFirstFrame = false
         endDetectionArmed = false
         mpvEofSeenClear = false
+        exoEndOverrunHandled = false
         _uiState.update {
             it.copy(
                 isBuffering = true,
@@ -162,6 +163,7 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         hasRenderedFirstFrame = false
         endDetectionArmed = false
         mpvEofSeenClear = false
+        exoEndOverrunHandled = false
         _uiState.update {
             it.copy(
                 isBuffering = true,
