@@ -1271,7 +1271,7 @@ which wraps the same `initializePlayer` call); `StreamScreen.kt` (ours, `consume
 ### 1.1.0-beta.11 → 1.1.0-beta.12 — the light cycle (2026-11-07)
 
 26 commits (16 non-merge); `upstream/dev` = the beta.12 tag `fe5c314bd`. Branch `sync1.1.0-beta.12` off `kevbox`
-at `1.2.0-beta.11`. Merge `6f2174a45`. **Not released yet.**
+at `1.2.0-beta.11`. Merge `6f2174a45`, audio fix `fe22392f9`. **Released as KevBox `1.2.0-beta.12`** (Kevin tested on his TCL first).
 
 **One conflict:** the version hunk (kept ours; upstream's versionCode is now 1075, which doesn't matter because our
 updater only compares our own codes). **No server migration:** no new `rpc()` calls, URLs, `buildConfigField`s,
@@ -1283,7 +1283,18 @@ navigation or manifest changes. `PlayerSettingsDataStore` untouched, so both sub
   IntroDB mapping). Only reaches the Anime-Skip host, which skip-intro already used.
 - Home: long hero descriptions auto-scroll (new toggle in Layout, which members can already see); carousel
   hold and trailer-pause jump fixed.
-- **Tests: 2838 run, 0 failures, 1 skipped.** Baseline stays 0. `assembleFullRelease --dry-run` green.
+- **🛑 KevBox fix found during testing: ExoPlayer frozen at 00:00.** Kevin's TCL had kept 12 E-AC-3 offload
+  tracks from a `tv.kevbox` process that died on 2026-11-05 (most likely during the update), so every new passthrough
+  `AudioTrack.start()` failed with status -1. Media3 raises no error for that, so the clock sat at 0 with 53 s buffered
+  and the 5001 PCM fallback never ran; switching to libmpv (which decodes the audio itself) worked. Diagnosis:
+  `E/AudioTrack: start(...): status -1` in logcat, `audio_hw_primary: utils_out_write_data: timeout` about 200 a
+  second, and `dumpsys media.audio_flinger` showing OFFLOAD threads full of active tracks owned by a dead pid. A full
+  TV restart clears it. Fix `fe22392f9`: `KevboxAudioClockStallWatchdog.kt`, armed on `onIsPlayingChanged(true)`;
+  on AC-3/E-AC-3/DTS/TrueHD audio with the clock still for 5 s and at least 2 s buffered, it rebuilds once with forced
+  PCM (the FORCE_PCM ladder step). Three marked `// KevBox` lines in `PlayerRuntimeController.kt` and
+  `PlayerRuntimeControllerInitialization.kt`; re-check after upstream player merges. Not yet seen firing on a
+  device: the restart cleared the fault before the build went on.
+- **Tests: 2846 run, 0 failures, 1 skipped.** Baseline stays 0. `assembleFullRelease --dry-run` green.
 
 ## Verify before shipping
 
