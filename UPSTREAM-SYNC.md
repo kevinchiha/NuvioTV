@@ -1296,6 +1296,29 @@ navigation or manifest changes. `PlayerSettingsDataStore` untouched, so both sub
   device: the restart cleared the fault before the build went on.
 - **Tests: 2846 run, 0 failures, 1 skipped.** Baseline stays 0. `assembleFullRelease --dry-run` green.
 
+### 1.1.0-beta.12 → 1.1.0-beta.13 — light cycle; upstream's updater fixes mostly redundant (2026-11-08)
+
+22 non-merge commits; `upstream/dev` = the beta.13 tag `3eeb8b3d0`. Branch `sync1.1.0-beta.13` off `kevbox`
+at `1.2.0-beta.12`. Merge `ed9c50f62`.
+
+**Five conflicts, all version or updater:** version hunk (ours; upstream is now 1076). `UpdateInstallResultReceiver.kt`
+and `UpdateJobService.kt` came back modified; we deleted them, so `git rm` again. `UpdatePreferences.kt`: upstream
+added the same `update_settings` corruption handler we added for KEVBOX-TV-5, so keep ours and drop the duplicate
+`emptyPreferences` import their side adds outside the markers. `UpdateViewModel.kt`: keep our install job; take
+upstream's `openUnknownSourcesSettings` (falls back to Security settings, so a TV without the unknown-sources screen
+no longer crashes). Upstream's "confirm screen missing → system installer" fix is already in our
+`InstallResultReceiver` + `UpdatePromptDialog` fallback, so nothing to port.
+**No server migration:** no new `rpc()` calls, URLs, `buildConfigField`s or manifest changes. ProGuard gains a keep
+rule for `androidx.appcompat.app` (CloudStream extensions).
+
+- Player: a stored playback speed of any number type reads back; no crash measuring subtitle width when cues
+  empty; parallel range reads end at a short chunk instead of recursing.
+- Trakt keeps episode numbers on writes; job-scheduler rejections no longer crash; AutoSync stops retrying a
+  cancelled timeline load.
+- **🛑 `--dry-run` covers every task on the command line.** `./gradlew compile… test… assembleFullRelease --dry-run`
+  skips the compile and the tests too and still exits 0. Run the dry run as its own command.
+- **Tests: 2849 run, 0 failures, 1 skipped.** Baseline stays 0. `assembleFullRelease --dry-run` green.
+
 ## Verify before shipping
 
 > **Run these with `set -o pipefail`.** Piping gradle into `tail`/`grep` reports the *pipe's* exit
