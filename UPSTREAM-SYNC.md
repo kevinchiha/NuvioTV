@@ -1299,7 +1299,7 @@ navigation or manifest changes. `PlayerSettingsDataStore` untouched, so both sub
 ### 1.1.0-beta.12 → 1.1.0-beta.13 — light cycle; upstream's updater fixes mostly redundant (2026-11-08)
 
 22 non-merge commits; `upstream/dev` = the beta.13 tag `3eeb8b3d0`. Branch `sync1.1.0-beta.13` off `kevbox`
-at `1.2.0-beta.12`. Merge `ed9c50f62`.
+at `1.2.0-beta.12`. Merge `ed9c50f62`. **Released as KevBox `1.2.0-beta.13` / versionCode 1068** (bump `659080c90`, sha256 `0827ba2c…`, 52 MB armeabi-v7a; Kevin tested the debug build on his TCL first).
 
 **Five conflicts, all version or updater:** version hunk (ours; upstream is now 1076). `UpdateInstallResultReceiver.kt`
 and `UpdateJobService.kt` came back modified; we deleted them, so `git rm` again. `UpdatePreferences.kt`: upstream
