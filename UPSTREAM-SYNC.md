@@ -1322,7 +1322,7 @@ rule for `androidx.appcompat.app` (CloudStream extensions).
 ### 1.1.0-beta.13 → 1.1.0 — the first stable 1.1.0; forced subs kept off, AutoSync on but silent (2026-11-09)
 
 8 non-merge commits; `upstream/dev` = the `1.1.0` tag `12d96bced`. Branch `sync1.1.0` off `kevbox` at
-`1.2.0-beta.13`. Merge `6e31b3937`, fork fix `bb2f8adac`. Released as KevBox **1.2.0** (one minor ahead, no `-beta`).
+`1.2.0-beta.13`. Merge `6e31b3937`, fork fix `bb2f8adac`. **Released as KevBox `1.2.0` / versionCode 1069** (bump `dff878f64`, sha256 `c187974c…`, 52 MB armeabi-v7a; one minor ahead, no `-beta`).
 
 **Two conflicts.** Version hunk (ours). `PlayerSettingsDataStore.kt`: upstream flipped the forced-subtitles default
 `?: false` → `?: true`, on the line right after our French secondary-subtitle hunk. Keep ours (`?: false`); the
