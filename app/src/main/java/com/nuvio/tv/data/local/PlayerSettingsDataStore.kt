@@ -1167,6 +1167,8 @@ class PlayerSettingsDataStore @Inject constructor(
                         secondaryPreferredLanguage = (prefs[subtitleSecondaryLanguageKey] ?: "fr")
                             .let(::normalizeSelectableLanguageCode)
                             .takeUnless { it == SUBTITLE_LANGUAGE_FORCED },
+                        // KevBox FORK DIVERGENCE: forced subtitles default OFF so the preferred-language track
+                        // turns on by itself. Upstream flipped this to `?: true` in 1.1.0. Keep `?: false`.
                         useForcedSubtitles = (prefs[subtitleUseForcedSubtitlesKey] ?: false) ||
                             prefs[subtitlePreferredLanguageKey]?.let(::normalizeSelectableLanguageCode) == SUBTITLE_LANGUAGE_FORCED ||
                             prefs[subtitleSecondaryLanguageKey]?.let(::normalizeSelectableLanguageCode) == SUBTITLE_LANGUAGE_FORCED,
