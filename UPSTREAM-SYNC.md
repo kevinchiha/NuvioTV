@@ -1319,6 +1319,27 @@ rule for `androidx.appcompat.app` (CloudStream extensions).
   skips the compile and the tests too and still exits 0. Run the dry run as its own command.
 - **Tests: 2849 run, 0 failures, 1 skipped.** Baseline stays 0. `assembleFullRelease --dry-run` green.
 
+### 1.1.0-beta.13 → 1.1.0 — the first stable 1.1.0; forced subs kept off, AutoSync on but silent (2026-11-09)
+
+8 non-merge commits; `upstream/dev` = the `1.1.0` tag `12d96bced`. Branch `sync1.1.0` off `kevbox` at
+`1.2.0-beta.13`. Merge `6e31b3937`, fork fix `bb2f8adac`. Released as KevBox **1.2.0** (one minor ahead, no `-beta`).
+
+**Two conflicts.** Version hunk (ours). `PlayerSettingsDataStore.kt`: upstream flipped the forced-subtitles default
+`?: false` → `?: true`, on the line right after our French secondary-subtitle hunk. Keep ours (`?: false`); the
+line now carries a `KevBox FORK DIVERGENCE` comment, so the next flip conflicts here again instead of slipping in.
+**No server migration:** no `rpc()`, URL, `buildConfigField` or manifest changes. Rest is Hungarian strings.
+
+- **AutoSync now defaults ON** (`AutoSyncPreferences`: `_enabled`, `_enabledState` and the prefs read all `true`).
+  Taken as-is at Kevin's word; an explicit earlier choice is kept. Reverses the 1.2.0-beta.4 "left OFF" call.
+- **🛑 AutoSync failure toast silenced (fork fix `bb2f8adac`).** The automatic path's only viewer-facing message
+  is `buildAutoSyncFailureToast` in `PlayerRuntimeControllerAutomaticSubtitleSync.kt`: `NO_FIT` →
+  "Sync failed: these subtitles don't match this version of the video." KevBox returns `null` for every outcome.
+  The "Auto synced" success label (`AutoSyncSyncedLabel.kt`) stays. The manual subtitle-timing dialog's
+  `subtitleAutoSyncError` is user-opened, so it stays too. Standing check after each sync:
+  `grep -c "getString(R.string.autosync_toast_no_fit)" app/src/main/java/com/nuvio/tv/ui/screens/player/PlayerRuntimeControllerAutomaticSubtitleSync.kt` want 0.
+- **Tests: 2849 run, 0 failures, 1 skipped.** Baseline stays 0. `assembleFullRelease --dry-run` green.
+  Kevin tested the armeabi-v7a debug build on the TCL TV before release.
+
 ## Verify before shipping
 
 > **Run these with `set -o pipefail`.** Piping gradle into `tail`/`grep` reports the *pipe's* exit
