@@ -695,7 +695,9 @@ private fun Subtitle.toAutoSyncCandidate() = AutoSyncSubtitleCandidate(
  */
 private fun Context.buildAutoSyncFailureToast(analysisOutcome: AutoSyncAnalysisOutcome?): String? =
     when (analysisOutcome) {
-        AutoSyncAnalysisOutcome.NO_FIT -> getString(R.string.autosync_toast_no_fit)
+        // KevBox FORK DIVERGENCE (2026-11-09): AutoSync never shows a failure toast. Upstream shows
+        // R.string.autosync_toast_no_fit for NO_FIT. Keep this branch returning null after syncs.
+        AutoSyncAnalysisOutcome.NO_FIT,
         AutoSyncAnalysisOutcome.SUBTITLE_UNAVAILABLE,
         AutoSyncAnalysisOutcome.NO_SUBTITLE_TRACKS,
         AutoSyncAnalysisOutcome.NO_USABLE_REFERENCE,
